@@ -1,0 +1,58 @@
+{
+  "name": "artone-video-editor",
+  "version": "1.0.0",
+  "description": "Professional browser-based video editor with multi-track timeline and real-time preview",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve . -s -l 8000",
+    "dev": "npx serve . -s -l 3000",
+    "build": "echo 'No build step required for standalone HTML'",
+    "test": "echo 'Tests will be added in future versions'",
+    "lint": "echo 'Linting will be added in future versions'",
+    "deploy": "gh-pages -d .",
+    "serve": "python -m http.server 8000"
+  },
+  "keywords": [
+    "video-editor",
+    "browser-based",
+    "html5",
+    "canvas",
+    "react",
+    "timeline",
+    "multimedia",
+    "webm",
+    "video-processing",
+    "real-time",
+    "preview",
+    "effects"
+  ],
+  "author": {
+    "name": "Artone Team",
+    "email": "team@artone.example.com",
+    "url": "https://github.com/yourusername"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/artone-video-editor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/artone-video-editor/issues"
+  },
+  "homepage": "https://yourusername.github.io/artone-video-editor",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.1.0",
+    "serve": "^14.2.1"
+  },
+  "dependencies": {},
+  "peerDependencies": {},
+  "browserslist": [
+    "> 1%",
+    "last 2 versions",
+    "not dead",
+    "not ie 11"
+  ]
+}

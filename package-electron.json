@@ -1,0 +1,66 @@
+{
+  "name": "artone-video-editor",
+  "version": "1.0.0",
+  "description": "Professional desktop video editor with multi-track timeline and real-time preview",
+  "main": "electron_main.js",
+  "homepage": "./",
+  "author": {
+    "name": "Artone Team",
+    "email": "team@artone.example.com"
+  },
+  "license": "MIT",
+  "private": false,
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac", 
+    "build:linux": "electron-builder --linux",
+    "dist": "npm run build",
+    "pack": "electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps",
+    "serve": "npx serve renderer -s -l 3000",
+    "lint": "echo 'Linting will be added in future versions'",
+    "test": "echo 'Tests will be added in future versions'"
+  },
+  "keywords": [
+    "video-editor",
+    "desktop-app", 
+    "electron",
+    "video-processing",
+    "timeline",
+    "multimedia",
+    "real-time",
+    "effects",
+    "export"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/artone-video-editor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/artone-video-editor/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.6.4"
+  },
+  "dependencies": {},
+  "build": {
+    "appId": "com.artone.video-editor",
+    "productName": "Artone Video Editor",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron_main.js",
+      "electron_preload.js",
+      "electron_index.html",
+      "package-electron.json"
+    ]
+  }
+}

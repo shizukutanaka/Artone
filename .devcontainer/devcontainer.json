@@ -1,0 +1,71 @@
+{
+  "name": "Artone Video Editor",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:20-bullseye",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.vscode-typescript-next",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-playwright.playwright",
+        "GitHub.Copilot",
+        "eamodio.gitlens",
+        "ms-vscode.makefile-tools",
+        "DavidAnson.vscode-markdownlint",
+        "ms-vscode.remote-explorer",
+        "zxh404.vscode-proto3"
+      ],
+      "settings": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.fixAll.eslint": true,
+          "source.organizeImports": true
+        },
+        "typescript.tsdk": "node_modules/typescript/lib",
+        "typescript.enablePromptUseWorkspaceTsdk": true,
+        "files.exclude": {
+          "**/node_modules": true,
+          "**/.next": true,
+          "**/dist": true
+        },
+        "[typescript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[json]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        }
+      }
+    }
+  },
+  "remoteUser": "node",
+  "postCreateCommand": "npm install && npm run typecheck",
+  "mounts": [
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/node/.ssh,readonly",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gitconfig,target=/home/node/.gitconfig,readonly"
+  ],
+  "forwardPorts": [3000, 3001, 9229],
+  "portsAttributes": {
+    "3000": {
+      "label": "Application",
+      "onAutoForward": "notify"
+    },
+    "3001": {
+      "label": "API Server",
+      "onAutoForward": "notify"
+    },
+    "9229": {
+      "label": "Node Debugger",
+      "onAutoForward": "silent"
+    }
+  },
+  "containerEnv": {
+    "NODE_ENV": "development"
+  },
+  "userEnvProbe": "loginInteractiveShell"
+}

@@ -1,0 +1,224 @@
+{
+  "app": {
+    "title": "Artone Video Editor",
+    "subtitle": "Professional AI-powered video editing with government-grade security",
+    "description": "Browser-based video editor with multi-track timeline, real-time AI effects, and collaborative editing"
+  },
+  "nav": {
+    "home": "Home",
+    "projects": "Projects",
+    "timeline": "Timeline",
+    "effects": "AI Effects",
+    "export": "Export",
+    "settings": "Settings",
+    "ai": "AI Assistant",
+    "collaboration": "Team"
+  },
+  "timeline": {
+    "play": "Play",
+    "pause": "Pause",
+    "stop": "Stop",
+    "rewind": "Rewind",
+    "fastforward": "Fast Forward",
+    "undo": "Undo",
+    "redo": "Redo",
+    "zoom": {
+      "in": "Zoom In",
+      "out": "Zoom Out",
+      "fit": "Fit to Window"
+    },
+    "split": "Split Clip",
+    "trim": "Trim",
+    "delete": "Delete",
+    "copy": "Copy",
+    "paste": "Paste",
+    "select": {
+      "all": "Select All"
+    },
+    "mute": "Mute",
+    "unmute": "Unmute"
+  },
+  "ai": {
+    "title": "AI Video Assistant",
+    "scene": {
+      "detection": "Smart Scene Detection"
+    },
+    "object": {
+      "tracking": "Object Tracking"
+    },
+    "face": {
+      "recognition": "Face Recognition"
+    },
+    "auto": {
+      "caption": "Auto Captions"
+    },
+    "background": {
+      "removal": "Background Removal"
+    },
+    "color": {
+      "correction": "Auto Color Correction"
+    },
+    "style": {
+      "transfer": "Style Transfer"
+    },
+    "super": {
+      "resolution": "Super Resolution"
+    },
+    "emotion": {
+      "analysis": "Emotion Analysis"
+    },
+    "content": {
+      "analysis": "Content Analysis"
+    },
+    "chat": {
+      "command": "Chat with AI",
+      "placeholder": "Describe what you want to do... (e.g., \"make the background blurrier\")",
+      "send": "Send",
+      "clear": "Clear Chat",
+      "examples": "Try: \"remove background\", \"add slow motion\", \"generate thumbnail\"",
+      "thinking": "AI is thinking...",
+      "response": "AI Assistant"
+    },
+    "generate": {
+      "video": "Generate Video"
+    },
+    "edit": {
+      "with": {
+        "text": "Edit with Text"
+      }
+    }
+  },
+  "file": {
+    "new": "New Project",
+    "open": "Open Project",
+    "save": "Save Project",
+    "saveAs": "Save As...",
+    "import": "Import Media",
+    "export": "Export Video",
+    "exportSettings": "Export Settings",
+    "recent": "Recent Projects",
+    "templates": "Project Templates"
+  },
+  "media": {
+    "video": "Video",
+    "audio": "Audio",
+    "image": "Image",
+    "duration": "Duration",
+    "resolution": "Resolution",
+    "framerate": "Frame Rate",
+    "bitrate": "Bitrate",
+    "codec": "Codec",
+    "size": "File Size",
+    "library": "Media Library",
+    "imported": "Media Imported",
+    "dragDrop": "Drag & Drop Media Here"
+  },
+  "effects": {
+    "brightness": "Brightness",
+    "contrast": "Contrast",
+    "saturation": "Saturation",
+    "blur": "Blur",
+    "sharpen": "Sharpen",
+    "colorgrade": "Color Grading",
+    "transition": "Transition",
+    "filter": "Filter",
+    "ai": {
+      "enhance": "AI Enhance"
+    },
+    "stabilize": "Stabilize",
+    "slow": {
+      "motion": "Slow Motion"
+    },
+    "speed": {
+      "ramp": "Speed Ramp"
+    },
+    "reverse": "Reverse",
+    "freeze": {
+      "frame": "Freeze Frame"
+    }
+  },
+  "export": {
+    "format": "Format",
+    "quality": "Quality",
+    "resolution": "Resolution",
+    "start": "Start Export",
+    "progress": "Exporting... {percent}%",
+    "complete": "Export Complete",
+    "estimated": {
+      "time": "Estimated time: {time}"
+    },
+    "output": "Output Settings",
+    "video": "Video Settings",
+    "audio": "Audio Settings",
+    "advanced": "Advanced Settings"
+  },
+  "collab": {
+    "share": "Share Project",
+    "invite": "Invite Team",
+    "comments": "Comments",
+    "version": "Version History",
+    "live": "Live Collaboration",
+    "offline": "Work Offline"
+  },
+  "a11y": {
+    "play": {
+      "description": "Play or pause the video"
+    },
+    "timeline": {
+      "description": "Video timeline with clips and effects"
+    },
+    "clip": {
+      "selected": "Clip {name} selected at {time}"
+    },
+    "effect": {
+      "applied": "{effect} effect applied to clip"
+    },
+    "shortcut": "Press {key} for {action}",
+    "loading": "Loading content...",
+    "error": "Error occurred"
+  },
+  "message": {
+    "loading": "Loading...",
+    "saving": "Saving...",
+    "error": "An error occurred",
+    "success": "Operation completed successfully",
+    "warning": "Warning",
+    "info": "Information",
+    "confirm": "Confirm Action"
+  },
+  "clip": {
+    "count": {
+      "0": "No clips",
+      "1": "1 clip",
+      "other": "{count} clips"
+    }
+  },
+  "frame": {
+    "count": {
+      "0": "No frames",
+      "1": "1 frame",
+      "other": "{count} frames"
+    }
+  },
+  "track": {
+    "count": {
+      "0": "No tracks",
+      "1": "1 track",
+      "other": "{count} tracks"
+    }
+  },
+  "status": {
+    "online": "Online",
+    "offline": "Offline",
+    "processing": "Processing...",
+    "ready": "Ready",
+    "error": "Error"
+  },
+  "quality": {
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "ultra": "Ultra",
+    "auto": "Auto"
+  }
+}

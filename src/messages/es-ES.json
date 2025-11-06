@@ -1,0 +1,224 @@
+{
+  "app": {
+    "title": "Editor de Video Artone",
+    "subtitle": "Edición de video profesional con IA y seguridad de nivel gubernamental",
+    "description": "Editor de video basado en navegador con línea de tiempo multi-pista, efectos IA en tiempo real, y edición colaborativa"
+  },
+  "nav": {
+    "home": "Inicio",
+    "projects": "Proyectos",
+    "timeline": "Línea de Tiempo",
+    "effects": "Efectos IA",
+    "export": "Exportar",
+    "settings": "Configuración",
+    "ai": "Asistente IA",
+    "collaboration": "Equipo"
+  },
+  "timeline": {
+    "play": "Reproducir",
+    "pause": "Pausar",
+    "stop": "Detener",
+    "rewind": "Rebobinar",
+    "fastforward": "Avanzar Rápido",
+    "undo": "Deshacer",
+    "redo": "Rehacer",
+    "zoom": {
+      "in": "Acercar",
+      "out": "Alejar",
+      "fit": "Ajustar a Ventana"
+    },
+    "split": "Dividir Clip",
+    "trim": "Recortar",
+    "delete": "Eliminar",
+    "copy": "Copiar",
+    "paste": "Pegar",
+    "select": {
+      "all": "Seleccionar Todo"
+    },
+    "mute": "Silenciar",
+    "unmute": "Activar Sonido"
+  },
+  "ai": {
+    "title": "Asistente de Video IA",
+    "scene": {
+      "detection": "Detección de Escenas Inteligente"
+    },
+    "object": {
+      "tracking": "Seguimiento de Objetos"
+    },
+    "face": {
+      "recognition": "Reconocimiento Facial"
+    },
+    "auto": {
+      "caption": "Subtítulos Automáticos"
+    },
+    "background": {
+      "removal": "Eliminación de Fondo"
+    },
+    "color": {
+      "correction": "Corrección de Color Automática"
+    },
+    "style": {
+      "transfer": "Transferencia de Estilo"
+    },
+    "super": {
+      "resolution": "Súper Resolución"
+    },
+    "emotion": {
+      "analysis": "Análisis de Emociones"
+    },
+    "content": {
+      "analysis": "Análisis de Contenido"
+    },
+    "chat": {
+      "command": "Chatear con IA",
+      "placeholder": "Describe lo que quieres hacer... (ej. \"desenfoca el fondo\")",
+      "send": "Enviar",
+      "clear": "Limpiar Chat",
+      "examples": "Prueba: \"eliminar fondo\", \"agregar cámara lenta\", \"generar miniatura\"",
+      "thinking": "La IA está pensando...",
+      "response": "Asistente IA"
+    },
+    "generate": {
+      "video": "Generar Video"
+    },
+    "edit": {
+      "with": {
+        "text": "Editar con Texto"
+      }
+    }
+  },
+  "file": {
+    "new": "Nuevo Proyecto",
+    "open": "Abrir Proyecto",
+    "save": "Guardar Proyecto",
+    "saveAs": "Guardar Como...",
+    "import": "Importar Medios",
+    "export": "Exportar Video",
+    "exportSettings": "Configuración de Exportación",
+    "recent": "Proyectos Recientes",
+    "templates": "Plantillas de Proyecto"
+  },
+  "media": {
+    "video": "Video",
+    "audio": "Audio",
+    "image": "Imagen",
+    "duration": "Duración",
+    "resolution": "Resolución",
+    "framerate": "Velocidad de Cuadros",
+    "bitrate": "Tasa de Bits",
+    "codec": "Códec",
+    "size": "Tamaño de Archivo",
+    "library": "Biblioteca de Medios",
+    "imported": "Medios Importados",
+    "dragDrop": "Arrastra y Suelta Medios Aquí"
+  },
+  "effects": {
+    "brightness": "Brillo",
+    "contrast": "Contraste",
+    "saturation": "Saturación",
+    "blur": "Desenfoque",
+    "sharpen": "Enfoque",
+    "colorgrade": "Corrección de Color",
+    "transition": "Transición",
+    "filter": "Filtro",
+    "ai": {
+      "enhance": "Mejora IA"
+    },
+    "stabilize": "Estabilizar",
+    "slow": {
+      "motion": "Cámara Lenta"
+    },
+    "speed": {
+      "ramp": "Rampa de Velocidad"
+    },
+    "reverse": "Reversa",
+    "freeze": {
+      "frame": "Fotograma Congelado"
+    }
+  },
+  "export": {
+    "format": "Formato",
+    "quality": "Calidad",
+    "resolution": "Resolución",
+    "start": "Iniciar Exportación",
+    "progress": "Exportando... {percent}%",
+    "complete": "Exportación Completa",
+    "estimated": {
+      "time": "Tiempo estimado: {time}"
+    },
+    "output": "Configuración de Salida",
+    "video": "Configuración de Video",
+    "audio": "Configuración de Audio",
+    "advanced": "Configuración Avanzada"
+  },
+  "collab": {
+    "share": "Compartir Proyecto",
+    "invite": "Invitar Equipo",
+    "comments": "Comentarios",
+    "version": "Historial de Versiones",
+    "live": "Colaboración en Vivo",
+    "offline": "Trabajar Sin Conexión"
+  },
+  "a11y": {
+    "play": {
+      "description": "Reproducir o pausar el video"
+    },
+    "timeline": {
+      "description": "Línea de tiempo de video con clips y efectos"
+    },
+    "clip": {
+      "selected": "Clip {name} seleccionado en {time}"
+    },
+    "effect": {
+      "applied": "Efecto {effect} aplicado al clip"
+    },
+    "shortcut": "Presiona {key} para {action}",
+    "loading": "Cargando contenido...",
+    "error": "Ocurrió un error"
+  },
+  "message": {
+    "loading": "Cargando...",
+    "saving": "Guardando...",
+    "error": "Ocurrió un error",
+    "success": "Operación completada exitosamente",
+    "warning": "Advertencia",
+    "info": "Información",
+    "confirm": "Confirmar Acción"
+  },
+  "clip": {
+    "count": {
+      "0": "Sin clips",
+      "1": "1 clip",
+      "other": "{count} clips"
+    }
+  },
+  "frame": {
+    "count": {
+      "0": "Sin fotogramas",
+      "1": "1 fotograma",
+      "other": "{count} fotogramas"
+    }
+  },
+  "track": {
+    "count": {
+      "0": "Sin pistas",
+      "1": "1 pista",
+      "other": "{count} pistas"
+    }
+  },
+  "status": {
+    "online": "En línea",
+    "offline": "Sin conexión",
+    "processing": "Procesando...",
+    "ready": "Listo",
+    "error": "Error"
+  },
+  "quality": {
+    "low": "Baja",
+    "medium": "Media",
+    "high": "Alta",
+    "ultra": "Ultra",
+    "auto": "Auto"
+  }
+}

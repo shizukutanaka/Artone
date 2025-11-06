@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm:*)",
+      "Bash(find:*)",
+      "Bash(awk:*)",
+      "Bash(npm install)",
+      "Bash(npm run typecheck:*)",
+      "Bash(node:*)",
+      "Bash(npm:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(wc:*)",
+      "Read(//home/irosa/.npm/_logs/**)",
+      "Bash(cat:*)",
+      "Bash(killall:*)",
+      "Bash(git checkout:*)",
+      "Bash(chmod:*)",
+      "Bash(claude --version)",
+      "Bash(git --version)",
+      "Read(//mnt/c/Users/irosa/.claude/**)",
+      "WebSearch",
+      "Bash(git restore:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(git rm:*)",
+      "Bash(.gitignore)",
+      "Bash(xargs rm:*)",
+      "Bash(echo:*)",
+      "Bash(git reset:*)",
+      "Bash(ls:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

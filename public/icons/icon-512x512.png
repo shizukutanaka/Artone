@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="64" fill="#3b82f6"/>
+  <path d="M128 128h256v256H128z" fill="#ffffff" opacity="0.9"/>
+  <circle cx="192" cy="192" r="32" fill="#3b82f6"/>
+  <path d="M256 160v128l96-64-96-64z" fill="#3b82f6"/>
+  <text x="256" y="384" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="48" font-weight="600">ARTONE</text>
+</svg>

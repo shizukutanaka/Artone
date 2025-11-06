@@ -1,0 +1,223 @@
+{
+  "app": {
+    "title": "Artone ビデオエディタ",
+    "subtitle": "政府レベルのセキュリティを備えたプロフェッショナルAI動画編集",
+    "description": "マルチトラックタイムライン、リアルタイムAIエフェクト、協調編集を備えたブラウザベース動画エディタ"
+  },
+  "nav": {
+    "home": "ホーム",
+    "projects": "プロジェクト",
+    "timeline": "タイムライン",
+    "effects": "AIエフェクト",
+    "export": "エクスポート",
+    "settings": "設定",
+    "ai": "AIアシスタント",
+    "collaboration": "チーム"
+  },
+  "timeline": {
+    "play": "再生",
+    "pause": "一時停止",
+    "stop": "停止",
+    "rewind": "巻き戻し",
+    "fastforward": "早送り",
+    "undo": "元に戻す",
+    "redo": "やり直し",
+    "zoom": {
+      "in": "拡大",
+      "out": "縮小",
+      "fit": "ウィンドウに合わせる"
+    },
+    "split": "クリップを分割",
+    "trim": "トリミング",
+    "delete": "削除",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "select": {
+      "all": "すべて選択"
+    },
+    "mute": "ミュート",
+    "unmute": "ミュート解除"
+  },
+  "ai": {
+    "title": "AI動画アシスタント",
+    "scene": {
+      "detection": "スマートシーン検出"
+    },
+    "object": {
+      "tracking": "オブジェクト追跡"
+    },
+    "face": {
+      "recognition": "顔認識"
+    },
+    "auto": {
+      "caption": "自動キャプション"
+    },
+    "background": {
+      "removal": "背景除去"
+    },
+    "color": {
+      "correction": "自動色補正"
+    },
+    "style": {
+      "transfer": "スタイル転送"
+    },
+    "super": {
+      "resolution": "超解像度"
+    },
+    "emotion": {
+      "analysis": "感情分析"
+    },
+    "content": {
+      "analysis": "コンテンツ分析"
+    },
+    "chat": {
+      "command": "AIとチャット",
+      "placeholder": "実行したい操作を記述してください...（例：「背景をぼかして」）",
+      "send": "送信",
+      "clear": "チャットをクリア",
+      "examples": "試してみて：「背景を除去」「スローモーションを追加」「サムネイルを生成」",
+      "thinking": "AIが考えています...",
+      "response": "AIアシスタント"
+    },
+    "generate": {
+      "video": "動画生成"
+    },
+    "edit": {
+      "with": {
+        "text": "テキストで編集"
+      }
+    }
+  },
+  "file": {
+    "new": "新規プロジェクト",
+    "open": "プロジェクトを開く",
+    "save": "プロジェクトを保存",
+    "saveAs": "名前を付けて保存...",
+    "import": "メディアをインポート",
+    "export": "動画をエクスポート",
+    "exportSettings": "エクスポート設定",
+    "recent": "最近のプロジェクト",
+    "templates": "プロジェクトテンプレート"
+  },
+  "media": {
+    "video": "動画",
+    "audio": "音声",
+    "image": "画像",
+    "duration": "時間",
+    "resolution": "解像度",
+    "framerate": "フレームレート",
+    "bitrate": "ビットレート",
+    "codec": "コーデック",
+    "size": "ファイルサイズ",
+    "library": "メディアライブラリ",
+    "imported": "メディアがインポートされました",
+    "dragDrop": "ここにメディアをドラッグ&ドロップ"
+  },
+  "effects": {
+    "brightness": "明るさ",
+    "contrast": "コントラスト",
+    "saturation": "彩度",
+    "blur": "ぼかし",
+    "sharpen": "シャープ",
+    "colorgrade": "カラーグレーディング",
+    "transition": "トランジション",
+    "filter": "フィルター",
+    "ai": {
+      "enhance": "AI強化"
+    },
+    "stabilize": "手振れ補正",
+    "slow": {
+      "motion": "スローモーション"
+    },
+    "speed": {
+      "ramp": "スピードランプ"
+    },
+    "reverse": "逆再生",
+    "freeze": {
+      "frame": "フリーズフレーム"
+    }
+  },
+  "export": {
+    "format": "フォーマット",
+    "quality": "画質",
+    "resolution": "解像度",
+    "start": "エクスポート開始",
+    "progress": "エクスポート中... {percent}%",
+    "complete": "エクスポート完了",
+    "estimated": {
+      "time": "推定時間: {time}"
+    },
+    "output": "出力設定",
+    "video": "動画設定",
+    "audio": "音声設定",
+    "advanced": "詳細設定"
+  },
+  "collab": {
+    "share": "プロジェクトを共有",
+    "invite": "チームを招待",
+    "comments": "コメント",
+    "version": "バージョン履歴",
+    "live": "ライブ協調",
+    "offline": "オフライン作業"
+  },
+  "a11y": {
+    "play": {
+      "description": "動画を再生または一時停止"
+    },
+    "timeline": {
+      "description": "クリップとエフェクト付きの動画タイムライン"
+    },
+    "clip": {
+      "selected": "クリップ {name} が {time} で選択されました"
+    },
+    "effect": {
+      "applied": "{effect} エフェクトがクリップに適用されました"
+    },
+    "shortcut": "{key} を押して {action}",
+    "loading": "コンテンツを読み込み中...",
+    "error": "エラーが発生しました"
+  },
+  "message": {
+    "loading": "読み込み中...",
+    "saving": "保存中...",
+    "error": "エラーが発生しました",
+    "success": "操作が正常に完了しました",
+    "warning": "警告",
+    "info": "情報",
+    "confirm": "操作の確認"
+  },
+  "clip": {
+    "count": {
+      "0": "クリップなし",
+      "other": "{count}個のクリップ"
+    }
+  },
+  "frame": {
+    "count": {
+      "0": "フレームなし",
+      "1": "1フレーム",
+      "other": "{count}フレーム"
+    }
+  },
+  "track": {
+    "count": {
+      "0": "トラックなし",
+      "1": "1トラック",
+      "other": "{count}トラック"
+    }
+  },
+  "status": {
+    "online": "オンライン",
+    "offline": "オフライン",
+    "processing": "処理中...",
+    "ready": "準備完了",
+    "error": "エラー"
+  },
+  "quality": {
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "ultra": "最高",
+    "auto": "自動"
+  }
+}

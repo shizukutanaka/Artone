@@ -1,0 +1,224 @@
+{
+  "app": {
+    "title": "Artone Video-Editor",
+    "subtitle": "Professionelle KI-Videobearbeitung mit behördlicher Sicherheit",
+    "description": "Browser-basierter Video-Editor mit Multi-Track-Timeline, Echtzeit-KI-Effekten und kollaborativer Bearbeitung"
+  },
+  "nav": {
+    "home": "Startseite",
+    "projects": "Projekte",
+    "timeline": "Timeline",
+    "effects": "KI-Effekte",
+    "export": "Exportieren",
+    "settings": "Einstellungen",
+    "ai": "KI-Assistent",
+    "collaboration": "Team"
+  },
+  "timeline": {
+    "play": "Abspielen",
+    "pause": "Pausieren",
+    "stop": "Stoppen",
+    "rewind": "Zurückspulen",
+    "fastforward": "Schnellvorlauf",
+    "undo": "Rückgängig",
+    "redo": "Wiederherstellen",
+    "zoom": {
+      "in": "Hineinzoomen",
+      "out": "Herauszoomen",
+      "fit": "An Fenster anpassen"
+    },
+    "split": "Clip teilen",
+    "trim": "Zuschneiden",
+    "delete": "Löschen",
+    "copy": "Kopieren",
+    "paste": "Einfügen",
+    "select": {
+      "all": "Alles auswählen"
+    },
+    "mute": "Stummschalten",
+    "unmute": "Stummschaltung aufheben"
+  },
+  "ai": {
+    "title": "KI-Video-Assistent",
+    "scene": {
+      "detection": "Intelligente Szenenerkennung"
+    },
+    "object": {
+      "tracking": "Objektverfolgung"
+    },
+    "face": {
+      "recognition": "Gesichtserkennung"
+    },
+    "auto": {
+      "caption": "Automatische Untertitel"
+    },
+    "background": {
+      "removal": "Hintergrundentfernung"
+    },
+    "color": {
+      "correction": "Automatische Farbkorrektur"
+    },
+    "style": {
+      "transfer": "Stilübertragung"
+    },
+    "super": {
+      "resolution": "Superauflösung"
+    },
+    "emotion": {
+      "analysis": "Emotionsanalyse"
+    },
+    "content": {
+      "analysis": "Inhaltsanalyse"
+    },
+    "chat": {
+      "command": "Mit KI chatten",
+      "placeholder": "Beschreiben Sie, was Sie tun möchten... (z.B. \"Hintergrund unschärfer machen\")",
+      "send": "Senden",
+      "clear": "Chat löschen",
+      "examples": "Versuchen Sie: \"Hintergrund entfernen\", \"Zeitlupe hinzufügen\", \"Thumbnail generieren\"",
+      "thinking": "KI denkt nach...",
+      "response": "KI-Assistent"
+    },
+    "generate": {
+      "video": "Video generieren"
+    },
+    "edit": {
+      "with": {
+        "text": "Mit Text bearbeiten"
+      }
+    }
+  },
+  "file": {
+    "new": "Neues Projekt",
+    "open": "Projekt öffnen",
+    "save": "Projekt speichern",
+    "saveAs": "Speichern unter...",
+    "import": "Medien importieren",
+    "export": "Video exportieren",
+    "exportSettings": "Export-Einstellungen",
+    "recent": "Kürzliche Projekte",
+    "templates": "Projektvorlagen"
+  },
+  "media": {
+    "video": "Video",
+    "audio": "Audio",
+    "image": "Bild",
+    "duration": "Dauer",
+    "resolution": "Auflösung",
+    "framerate": "Bildrate",
+    "bitrate": "Bitrate",
+    "codec": "Codec",
+    "size": "Dateigröße",
+    "library": "Medienbibliothek",
+    "imported": "Medien importiert",
+    "dragDrop": "Medien hier hinziehen und ablegen"
+  },
+  "effects": {
+    "brightness": "Helligkeit",
+    "contrast": "Kontrast",
+    "saturation": "Sättigung",
+    "blur": "Unschärfe",
+    "sharpen": "Schärfen",
+    "colorgrade": "Farbabstufung",
+    "transition": "Übergang",
+    "filter": "Filter",
+    "ai": {
+      "enhance": "KI-Verbesserung"
+    },
+    "stabilize": "Stabilisieren",
+    "slow": {
+      "motion": "Zeitlupe"
+    },
+    "speed": {
+      "ramp": "Geschwindigkeitsrampe"
+    },
+    "reverse": "Umkehren",
+    "freeze": {
+      "frame": "Standbild"
+    }
+  },
+  "export": {
+    "format": "Format",
+    "quality": "Qualität",
+    "resolution": "Auflösung",
+    "start": "Export starten",
+    "progress": "Exportiere... {percent}%",
+    "complete": "Export abgeschlossen",
+    "estimated": {
+      "time": "Geschätzte Zeit: {time}"
+    },
+    "output": "Ausgabeeinstellungen",
+    "video": "Video-Einstellungen",
+    "audio": "Audio-Einstellungen",
+    "advanced": "Erweiterte Einstellungen"
+  },
+  "collab": {
+    "share": "Projekt teilen",
+    "invite": "Team einladen",
+    "comments": "Kommentare",
+    "version": "Versionsverlauf",
+    "live": "Live-Zusammenarbeit",
+    "offline": "Offline arbeiten"
+  },
+  "a11y": {
+    "play": {
+      "description": "Video abspielen oder pausieren"
+    },
+    "timeline": {
+      "description": "Video-Timeline mit Clips und Effekten"
+    },
+    "clip": {
+      "selected": "Clip {name} bei {time} ausgewählt"
+    },
+    "effect": {
+      "applied": "Effekt {effect} auf Clip angewendet"
+    },
+    "shortcut": "Drücken Sie {key} für {action}",
+    "loading": "Inhalt wird geladen...",
+    "error": "Ein Fehler ist aufgetreten"
+  },
+  "message": {
+    "loading": "Laden...",
+    "saving": "Speichern...",
+    "error": "Ein Fehler ist aufgetreten",
+    "success": "Vorgang erfolgreich abgeschlossen",
+    "warning": "Warnung",
+    "info": "Information",
+    "confirm": "Aktion bestätigen"
+  },
+  "clip": {
+    "count": {
+      "0": "Keine Clips",
+      "1": "1 Clip",
+      "other": "{count} Clips"
+    }
+  },
+  "frame": {
+    "count": {
+      "0": "Keine Bilder",
+      "1": "1 Bild",
+      "other": "{count} Bilder"
+    }
+  },
+  "track": {
+    "count": {
+      "0": "Keine Spuren",
+      "1": "1 Spur",
+      "other": "{count} Spuren"
+    }
+  },
+  "status": {
+    "online": "Online",
+    "offline": "Offline",
+    "processing": "Verarbeitung...",
+    "ready": "Bereit",
+    "error": "Fehler"
+  },
+  "quality": {
+    "low": "Niedrig",
+    "medium": "Mittel",
+    "high": "Hoch",
+    "ultra": "Ultra",
+    "auto": "Auto"
+  }
+}

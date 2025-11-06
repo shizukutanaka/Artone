@@ -1,0 +1,223 @@
+{
+  "app": {
+    "title": "Artone 视频编辑器",
+    "subtitle": "配备政府级安全的专业AI视频编辑",
+    "description": "具有多轨时间轴、实时AI效果和协作编辑的浏览器视频编辑器"
+  },
+  "nav": {
+    "home": "首页",
+    "projects": "项目",
+    "timeline": "时间轴",
+    "effects": "AI特效",
+    "export": "导出",
+    "settings": "设置",
+    "ai": "AI助手",
+    "collaboration": "团队"
+  },
+  "timeline": {
+    "play": "播放",
+    "pause": "暂停",
+    "stop": "停止",
+    "rewind": "快退",
+    "fastforward": "快进",
+    "undo": "撤销",
+    "redo": "重做",
+    "zoom": {
+      "in": "放大",
+      "out": "缩小",
+      "fit": "适应窗口"
+    },
+    "split": "分割剪辑",
+    "trim": "剪切",
+    "delete": "删除",
+    "copy": "复制",
+    "paste": "粘贴",
+    "select": {
+      "all": "全选"
+    },
+    "mute": "静音",
+    "unmute": "取消静音"
+  },
+  "ai": {
+    "title": "AI视频助手",
+    "scene": {
+      "detection": "智能场景检测"
+    },
+    "object": {
+      "tracking": "对象跟踪"
+    },
+    "face": {
+      "recognition": "人脸识别"
+    },
+    "auto": {
+      "caption": "自动字幕"
+    },
+    "background": {
+      "removal": "背景移除"
+    },
+    "color": {
+      "correction": "自动色彩校正"
+    },
+    "style": {
+      "transfer": "风格转换"
+    },
+    "super": {
+      "resolution": "超分辨率"
+    },
+    "emotion": {
+      "analysis": "情感分析"
+    },
+    "content": {
+      "analysis": "内容分析"
+    },
+    "chat": {
+      "command": "与AI聊天",
+      "placeholder": "描述您想要做什么...（例如\"让背景模糊\"）",
+      "send": "发送",
+      "clear": "清除聊天",
+      "examples": "试试：\"移除背景\"，\"添加慢动作\"，\"生成缩略图\"",
+      "thinking": "AI正在思考...",
+      "response": "AI助手"
+    },
+    "generate": {
+      "video": "生成视频"
+    },
+    "edit": {
+      "with": {
+        "text": "用文本编辑"
+      }
+    }
+  },
+  "file": {
+    "new": "新项目",
+    "open": "打开项目",
+    "save": "保存项目",
+    "saveAs": "另存为...",
+    "import": "导入媒体",
+    "export": "导出视频",
+    "exportSettings": "导出设置",
+    "recent": "最近项目",
+    "templates": "项目模板"
+  },
+  "media": {
+    "video": "视频",
+    "audio": "音频",
+    "image": "图片",
+    "duration": "时长",
+    "resolution": "分辨率",
+    "framerate": "帧率",
+    "bitrate": "码率",
+    "codec": "编解码器",
+    "size": "文件大小",
+    "library": "媒体库",
+    "imported": "媒体已导入",
+    "dragDrop": "将媒体拖拽到此处"
+  },
+  "effects": {
+    "brightness": "亮度",
+    "contrast": "对比度",
+    "saturation": "饱和度",
+    "blur": "模糊",
+    "sharpen": "锐化",
+    "colorgrade": "调色",
+    "transition": "转场",
+    "filter": "滤镜",
+    "ai": {
+      "enhance": "AI增强"
+    },
+    "stabilize": "稳定",
+    "slow": {
+      "motion": "慢动作"
+    },
+    "speed": {
+      "ramp": "速度变化"
+    },
+    "reverse": "倒放",
+    "freeze": {
+      "frame": "定格"
+    }
+  },
+  "export": {
+    "format": "格式",
+    "quality": "质量",
+    "resolution": "分辨率",
+    "start": "开始导出",
+    "progress": "正在导出... {percent}%",
+    "complete": "导出完成",
+    "estimated": {
+      "time": "预计时间：{time}"
+    },
+    "output": "输出设置",
+    "video": "视频设置",
+    "audio": "音频设置",
+    "advanced": "高级设置"
+  },
+  "collab": {
+    "share": "分享项目",
+    "invite": "邀请团队",
+    "comments": "评论",
+    "version": "版本历史",
+    "live": "实时协作",
+    "offline": "离线工作"
+  },
+  "a11y": {
+    "play": {
+      "description": "播放或暂停视频"
+    },
+    "timeline": {
+      "description": "带有剪辑和特效的视频时间轴"
+    },
+    "clip": {
+      "selected": "在{time}选择剪辑{name}"
+    },
+    "effect": {
+      "applied": "对剪辑应用{effect}特效"
+    },
+    "shortcut": "按{key}键{action}",
+    "loading": "正在加载内容...",
+    "error": "发生错误"
+  },
+  "message": {
+    "loading": "加载中...",
+    "saving": "保存中...",
+    "error": "发生错误",
+    "success": "操作成功完成",
+    "warning": "警告",
+    "info": "信息",
+    "confirm": "确认操作"
+  },
+  "clip": {
+    "count": {
+      "0": "无剪辑",
+      "other": "{count}个剪辑"
+    }
+  },
+  "frame": {
+    "count": {
+      "0": "无帧",
+      "1": "1帧",
+      "other": "{count}帧"
+    }
+  },
+  "track": {
+    "count": {
+      "0": "无轨道",
+      "1": "1轨道",
+      "other": "{count}轨道"
+    }
+  },
+  "status": {
+    "online": "在线",
+    "offline": "离线",
+    "processing": "处理中...",
+    "ready": "就绪",
+    "error": "错误"
+  },
+  "quality": {
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "ultra": "超高",
+    "auto": "自动"
+  }
+}

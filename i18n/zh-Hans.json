@@ -1,0 +1,267 @@
+{
+  "app": {
+    "name": "Artone",
+    "tagline": "浏览器原生视频编辑器"
+  },
+  "common": {
+    "ok": "确定",
+    "cancel": "取消",
+    "save": "保存",
+    "delete": "删除",
+    "rename": "重命名",
+    "close": "关闭",
+    "open": "打开",
+    "yes": "是",
+    "no": "否",
+    "loading": "加载中",
+    "error": "错误",
+    "warning": "警告",
+    "info": "信息",
+    "search": "搜索",
+    "filter": "筛选",
+    "settings": "设置",
+    "help": "帮助",
+    "about": "关于",
+    "exit": "退出"
+  },
+  "menu": {
+    "file": "文件",
+    "edit": "编辑",
+    "view": "视图",
+    "clip": "剪辑",
+    "effects": "特效",
+    "color": "颜色",
+    "audio": "音频",
+    "window": "窗口",
+    "tools": "工具"
+  },
+  "file": {
+    "new": "新建项目",
+    "open": "打开项目",
+    "save": "保存",
+    "saveAs": "另存为",
+    "import": "导入",
+    "export": "导出",
+    "recent": "最近的项目"
+  },
+  "edit": {
+    "undo": "撤销",
+    "redo": "重做",
+    "cut": "剪切",
+    "copy": "复制",
+    "paste": "粘贴",
+    "selectAll": "全选"
+  },
+  "timeline": {
+    "title": "时间线",
+    "play": "播放",
+    "pause": "暂停",
+    "stop": "停止",
+    "rewind": "倒带",
+    "fastForward": "快进",
+    "frameForward": "下一帧",
+    "frameBack": "上一帧",
+    "clip": {
+      "split": "分割",
+      "trim": "修剪",
+      "delete": "删除",
+      "duplicate": "复制",
+      "speed": "速度",
+      "reverse": "反向",
+      "freeze": "定格",
+      "ripple": "波纹删除"
+    },
+    "track": {
+      "add": "添加轨道",
+      "delete": "删除轨道",
+      "lock": "锁定",
+      "mute": "静音",
+      "solo": "独奏"
+    },
+    "marker": {
+      "add": "添加标记",
+      "delete": "删除标记",
+      "next": "下一个",
+      "prev": "上一个"
+    },
+    "zoom": {
+      "in": "放大",
+      "out": "缩小",
+      "fit": "适应窗口"
+    }
+  },
+  "color": {
+    "title": "调色",
+    "primary": "主调",
+    "secondary": "二次",
+    "wheels": "色轮",
+    "curves": "曲线",
+    "lift": "暗部",
+    "gamma": "中间调",
+    "gain": "高光",
+    "saturation": "饱和度",
+    "contrast": "对比度",
+    "exposure": "曝光",
+    "lut": "LUT",
+    "lutImport": "导入 LUT",
+    "scope": {
+      "waveform": "波形",
+      "vectorscope": "矢量示波器",
+      "histogram": "直方图",
+      "parade": "RGB 分量"
+    }
+  },
+  "audio": {
+    "title": "音频",
+    "volume": "音量",
+    "pan": "声像",
+    "mute": "静音",
+    "eq": "均衡器",
+    "compressor": "压缩器",
+    "reverb": "混响",
+    "limiter": "限制器",
+    "fade": {
+      "in": "淡入",
+      "out": "淡出"
+    },
+    "noise": {
+      "reduction": "降噪"
+    }
+  },
+  "export": {
+    "title": "导出",
+    "preset": "预设",
+    "format": "格式",
+    "resolution": "分辨率",
+    "framerate": "帧率",
+    "bitrate": "比特率",
+    "codec": "编解码器",
+    "audio": "音频",
+    "destination": "保存位置",
+    "start": "开始导出",
+    "progress": "进度：{percent}%",
+    "complete": "导出完成",
+    "presets": {
+      "youtube4k": "YouTube 4K",
+      "youtube1080p": "YouTube 1080p",
+      "instagram": "Instagram",
+      "tiktok": "TikTok",
+      "broadcast": "广播",
+      "proRes": "ProRes",
+      "h265": "H.265 HEVC",
+      "av1": "AV1"
+    }
+  },
+  "ai": {
+    "title": "AI 功能",
+    "transcribe": "转录",
+    "translate": "翻译",
+    "denoise": "降噪",
+    "upscale": "升级",
+    "objectRemove": "移除物体",
+    "autoEdit": "自动剪辑",
+    "captionGen": "生成字幕",
+    "processing": "处理中",
+    "downloadModel": "下载模型"
+  },
+  "media": {
+    "title": "媒体浏览器",
+    "import": "导入",
+    "video": "视频",
+    "audio": "音频",
+    "image": "图像",
+    "title2": "标题",
+    "search": "搜索媒体",
+    "duration": "时长",
+    "size": "文件大小",
+    "createdAt": "创建时间"
+  },
+  "error": {
+    "network": {
+      "timeout": "网络超时",
+      "offline": "离线",
+      "failed": "网络错误"
+    },
+    "file": {
+      "notFound": "文件未找到",
+      "tooLarge": "文件过大",
+      "unsupported": "不支持的格式",
+      "corrupt": "文件损坏"
+    },
+    "gpu": {
+      "notSupported": "WebGPU 不可用",
+      "outOfMemory": "GPU 内存不足"
+    },
+    "codec": {
+      "notSupported": "不支持的编解码器：{codec}"
+    },
+    "generic": "错误：{message}"
+  },
+  "recovery": {
+    "title": "崩溃恢复",
+    "available": "可恢复上次会话",
+    "restore": "恢复",
+    "discard": "丢弃",
+    "autoSave": "自动保存"
+  },
+  "performance": {
+    "fps": "FPS：{value}",
+    "memory": "内存：{value}MB",
+    "gpuTime": "GPU 时间：{value}ms",
+    "warning": "检测到性能下降",
+    "autoQuality": "自动画质"
+  },
+  "shortcut": {
+    "title": "键盘快捷键",
+    "global": "全局",
+    "timeline": "时间线",
+    "playback": "播放",
+    "trimming": "修剪",
+    "navigation": "导航"
+  },
+  "plurals": {
+    "items": "{count} 项",
+    "clips": "{count} 个剪辑",
+    "tracks": "{count} 个轨道",
+    "minutes": "{count} 分钟",
+    "seconds": "{count} 秒"
+  },
+  "interchange": {
+    "title": "互通",
+    "exportOTIO": "导出 OpenTimelineIO",
+    "exportEDL": "导出 EDL",
+    "exportFCPXML": "导出 FCPXML",
+    "importOTIO": "导入 OpenTimelineIO",
+    "importFCPXML": "导入 FCPXML",
+    "validation": {
+      "valid": "有效",
+      "invalid": "无效",
+      "schemaUnsupported": "不支持的架构：{schema}"
+    }
+  },
+  "bench": {
+    "running": "运行基准测试",
+    "complete": "基准测试完成",
+    "baseline": "基线",
+    "regression": "检测到性能退化",
+    "improvement": "检测到性能改进",
+    "noBaseline": "无可用基线"
+  },
+  "accessibility": {
+    "audit": "无障碍审计",
+    "passed": "通过",
+    "failed": "失败",
+    "level": "WCAG 级别：{level}",
+    "contrastFail": "对比度 {ratio}:1 低于 {required}:1",
+    "missingAlt": "图像缺少 alt 属性",
+    "missingLabel": "表单控件缺少标签"
+  },
+  "security": {
+    "sbom": "软件物料清单",
+    "components": "{count} 个组件",
+    "vulnerabilities": "发现 {count} 个漏洞",
+    "auditPassed": "审计通过",
+    "auditFailed": "审计失败",
+    "licenseConflict": "许可证冲突：{component}"
+  }
+}

@@ -1,0 +1,267 @@
+{
+  "app": {
+    "name": "Artone",
+    "tagline": "瀏覽器原生影片編輯器"
+  },
+  "common": {
+    "ok": "確定",
+    "cancel": "取消",
+    "save": "儲存",
+    "delete": "刪除",
+    "rename": "重新命名",
+    "close": "關閉",
+    "open": "開啟",
+    "yes": "是",
+    "no": "否",
+    "loading": "載入中",
+    "error": "錯誤",
+    "warning": "警告",
+    "info": "資訊",
+    "search": "搜尋",
+    "filter": "篩選",
+    "settings": "設定",
+    "help": "說明",
+    "about": "關於",
+    "exit": "離開"
+  },
+  "menu": {
+    "file": "檔案",
+    "edit": "編輯",
+    "view": "檢視",
+    "clip": "剪輯",
+    "effects": "效果",
+    "color": "顏色",
+    "audio": "音訊",
+    "window": "視窗",
+    "tools": "工具"
+  },
+  "file": {
+    "new": "新增專案",
+    "open": "開啟專案",
+    "save": "儲存",
+    "saveAs": "另存新檔",
+    "import": "匯入",
+    "export": "匯出",
+    "recent": "最近的專案"
+  },
+  "edit": {
+    "undo": "復原",
+    "redo": "重做",
+    "cut": "剪下",
+    "copy": "複製",
+    "paste": "貼上",
+    "selectAll": "全選"
+  },
+  "timeline": {
+    "title": "時間軸",
+    "play": "播放",
+    "pause": "暫停",
+    "stop": "停止",
+    "rewind": "倒帶",
+    "fastForward": "快進",
+    "frameForward": "下一幀",
+    "frameBack": "上一幀",
+    "clip": {
+      "split": "分割",
+      "trim": "修剪",
+      "delete": "刪除",
+      "duplicate": "複製",
+      "speed": "速度",
+      "reverse": "反向",
+      "freeze": "靜止幀",
+      "ripple": "漣漪刪除"
+    },
+    "track": {
+      "add": "新增軌道",
+      "delete": "刪除軌道",
+      "lock": "鎖定",
+      "mute": "靜音",
+      "solo": "獨奏"
+    },
+    "marker": {
+      "add": "新增標記",
+      "delete": "刪除標記",
+      "next": "下一個",
+      "prev": "上一個"
+    },
+    "zoom": {
+      "in": "放大",
+      "out": "縮小",
+      "fit": "符合視窗"
+    }
+  },
+  "color": {
+    "title": "調色",
+    "primary": "主要",
+    "secondary": "次要",
+    "wheels": "色輪",
+    "curves": "曲線",
+    "lift": "暗部",
+    "gamma": "中間調",
+    "gain": "亮部",
+    "saturation": "飽和度",
+    "contrast": "對比度",
+    "exposure": "曝光",
+    "lut": "LUT",
+    "lutImport": "匯入 LUT",
+    "scope": {
+      "waveform": "波形",
+      "vectorscope": "向量示波器",
+      "histogram": "直方圖",
+      "parade": "RGB 分量"
+    }
+  },
+  "audio": {
+    "title": "音訊",
+    "volume": "音量",
+    "pan": "聲像",
+    "mute": "靜音",
+    "eq": "均衡器",
+    "compressor": "壓縮器",
+    "reverb": "殘響",
+    "limiter": "限制器",
+    "fade": {
+      "in": "淡入",
+      "out": "淡出"
+    },
+    "noise": {
+      "reduction": "降噪"
+    }
+  },
+  "export": {
+    "title": "匯出",
+    "preset": "預設集",
+    "format": "格式",
+    "resolution": "解析度",
+    "framerate": "幀率",
+    "bitrate": "位元率",
+    "codec": "編解碼器",
+    "audio": "音訊",
+    "destination": "儲存位置",
+    "start": "開始匯出",
+    "progress": "進度：{percent}%",
+    "complete": "匯出完成",
+    "presets": {
+      "youtube4k": "YouTube 4K",
+      "youtube1080p": "YouTube 1080p",
+      "instagram": "Instagram",
+      "tiktok": "TikTok",
+      "broadcast": "廣播",
+      "proRes": "ProRes",
+      "h265": "H.265 HEVC",
+      "av1": "AV1"
+    }
+  },
+  "ai": {
+    "title": "AI 功能",
+    "transcribe": "轉錄",
+    "translate": "翻譯",
+    "denoise": "降噪",
+    "upscale": "升級",
+    "objectRemove": "移除物件",
+    "autoEdit": "自動剪輯",
+    "captionGen": "產生字幕",
+    "processing": "處理中",
+    "downloadModel": "下載模型"
+  },
+  "media": {
+    "title": "媒體瀏覽器",
+    "import": "匯入",
+    "video": "影片",
+    "audio": "音訊",
+    "image": "圖片",
+    "title2": "標題",
+    "search": "搜尋媒體",
+    "duration": "時長",
+    "size": "檔案大小",
+    "createdAt": "建立時間"
+  },
+  "error": {
+    "network": {
+      "timeout": "網路逾時",
+      "offline": "離線",
+      "failed": "網路錯誤"
+    },
+    "file": {
+      "notFound": "找不到檔案",
+      "tooLarge": "檔案過大",
+      "unsupported": "不支援的格式",
+      "corrupt": "檔案損毀"
+    },
+    "gpu": {
+      "notSupported": "WebGPU 不可用",
+      "outOfMemory": "GPU 記憶體不足"
+    },
+    "codec": {
+      "notSupported": "不支援的編解碼器：{codec}"
+    },
+    "generic": "錯誤：{message}"
+  },
+  "recovery": {
+    "title": "當機復原",
+    "available": "可復原上次工作階段",
+    "restore": "復原",
+    "discard": "捨棄",
+    "autoSave": "自動儲存"
+  },
+  "performance": {
+    "fps": "FPS：{value}",
+    "memory": "記憶體：{value}MB",
+    "gpuTime": "GPU 時間：{value}ms",
+    "warning": "偵測到效能下降",
+    "autoQuality": "自動畫質"
+  },
+  "shortcut": {
+    "title": "鍵盤快速鍵",
+    "global": "全域",
+    "timeline": "時間軸",
+    "playback": "播放",
+    "trimming": "修剪",
+    "navigation": "導覽"
+  },
+  "plurals": {
+    "items": "{count} 項",
+    "clips": "{count} 個剪輯",
+    "tracks": "{count} 個軌道",
+    "minutes": "{count} 分鐘",
+    "seconds": "{count} 秒"
+  },
+  "interchange": {
+    "title": "互通",
+    "exportOTIO": "匯出 OpenTimelineIO",
+    "exportEDL": "匯出 EDL",
+    "exportFCPXML": "匯出 FCPXML",
+    "importOTIO": "匯入 OpenTimelineIO",
+    "importFCPXML": "匯入 FCPXML",
+    "validation": {
+      "valid": "有效",
+      "invalid": "無效",
+      "schemaUnsupported": "不支援的架構：{schema}"
+    }
+  },
+  "bench": {
+    "running": "執行基準測試",
+    "complete": "基準測試完成",
+    "baseline": "基準",
+    "regression": "偵測到效能退化",
+    "improvement": "偵測到效能改進",
+    "noBaseline": "無可用基準"
+  },
+  "accessibility": {
+    "audit": "無障礙稽核",
+    "passed": "通過",
+    "failed": "失敗",
+    "level": "WCAG 等級：{level}",
+    "contrastFail": "對比度 {ratio}:1 低於 {required}:1",
+    "missingAlt": "圖片缺少 alt 屬性",
+    "missingLabel": "表單控制項缺少標籤"
+  },
+  "security": {
+    "sbom": "軟體物料清單",
+    "components": "{count} 個元件",
+    "vulnerabilities": "發現 {count} 個漏洞",
+    "auditPassed": "稽核通過",
+    "auditFailed": "稽核失敗",
+    "licenseConflict": "授權衝突：{component}"
+  }
+}

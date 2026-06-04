@@ -1,0 +1,267 @@
+{
+  "app": {
+    "name": "Artone",
+    "tagline": "Видеоредактор для браузера"
+  },
+  "common": {
+    "ok": "ОК",
+    "cancel": "Отмена",
+    "save": "Сохранить",
+    "delete": "Удалить",
+    "rename": "Переименовать",
+    "close": "Закрыть",
+    "open": "Открыть",
+    "yes": "Да",
+    "no": "Нет",
+    "loading": "Загрузка",
+    "error": "Ошибка",
+    "warning": "Предупреждение",
+    "info": "Информация",
+    "search": "Поиск",
+    "filter": "Фильтр",
+    "settings": "Настройки",
+    "help": "Справка",
+    "about": "О программе",
+    "exit": "Выход"
+  },
+  "menu": {
+    "file": "Файл",
+    "edit": "Правка",
+    "view": "Вид",
+    "clip": "Клип",
+    "effects": "Эффекты",
+    "color": "Цвет",
+    "audio": "Аудио",
+    "window": "Окно",
+    "tools": "Инструменты"
+  },
+  "file": {
+    "new": "Новый проект",
+    "open": "Открыть проект",
+    "save": "Сохранить",
+    "saveAs": "Сохранить как",
+    "import": "Импорт",
+    "export": "Экспорт",
+    "recent": "Недавние проекты"
+  },
+  "edit": {
+    "undo": "Отменить",
+    "redo": "Повторить",
+    "cut": "Вырезать",
+    "copy": "Копировать",
+    "paste": "Вставить",
+    "selectAll": "Выделить всё"
+  },
+  "timeline": {
+    "title": "Таймлайн",
+    "play": "Воспроизведение",
+    "pause": "Пауза",
+    "stop": "Стоп",
+    "rewind": "Перемотка назад",
+    "fastForward": "Перемотка вперёд",
+    "frameForward": "Следующий кадр",
+    "frameBack": "Предыдущий кадр",
+    "clip": {
+      "split": "Разделить",
+      "trim": "Обрезать",
+      "delete": "Удалить",
+      "duplicate": "Дублировать",
+      "speed": "Скорость",
+      "reverse": "Реверс",
+      "freeze": "Стоп-кадр",
+      "ripple": "Удалить со сдвигом"
+    },
+    "track": {
+      "add": "Добавить дорожку",
+      "delete": "Удалить дорожку",
+      "lock": "Блокировка",
+      "mute": "Без звука",
+      "solo": "Соло"
+    },
+    "marker": {
+      "add": "Добавить маркер",
+      "delete": "Удалить маркер",
+      "next": "Следующий",
+      "prev": "Предыдущий"
+    },
+    "zoom": {
+      "in": "Увеличить",
+      "out": "Уменьшить",
+      "fit": "По размеру"
+    }
+  },
+  "color": {
+    "title": "Цветокоррекция",
+    "primary": "Первичная",
+    "secondary": "Вторичная",
+    "wheels": "Цветовые круги",
+    "curves": "Кривые",
+    "lift": "Тени",
+    "gamma": "Полутона",
+    "gain": "Света",
+    "saturation": "Насыщенность",
+    "contrast": "Контраст",
+    "exposure": "Экспозиция",
+    "lut": "LUT",
+    "lutImport": "Импорт LUT",
+    "scope": {
+      "waveform": "Волновая форма",
+      "vectorscope": "Вектороскоп",
+      "histogram": "Гистограмма",
+      "parade": "RGB-парад"
+    }
+  },
+  "audio": {
+    "title": "Аудио",
+    "volume": "Громкость",
+    "pan": "Панорама",
+    "mute": "Без звука",
+    "eq": "Эквалайзер",
+    "compressor": "Компрессор",
+    "reverb": "Реверберация",
+    "limiter": "Лимитер",
+    "fade": {
+      "in": "Появление",
+      "out": "Затухание"
+    },
+    "noise": {
+      "reduction": "Шумоподавление"
+    }
+  },
+  "export": {
+    "title": "Экспорт",
+    "preset": "Пресет",
+    "format": "Формат",
+    "resolution": "Разрешение",
+    "framerate": "Частота кадров",
+    "bitrate": "Битрейт",
+    "codec": "Кодек",
+    "audio": "Аудио",
+    "destination": "Папка назначения",
+    "start": "Начать экспорт",
+    "progress": "Прогресс: {percent}%",
+    "complete": "Экспорт завершён",
+    "presets": {
+      "youtube4k": "YouTube 4K",
+      "youtube1080p": "YouTube 1080p",
+      "instagram": "Instagram",
+      "tiktok": "TikTok",
+      "broadcast": "Broadcast",
+      "proRes": "ProRes",
+      "h265": "H.265 HEVC",
+      "av1": "AV1"
+    }
+  },
+  "ai": {
+    "title": "Функции ИИ",
+    "transcribe": "Транскрибировать",
+    "translate": "Перевести",
+    "denoise": "Шумоподавление",
+    "upscale": "Апскейл",
+    "objectRemove": "Удалить объект",
+    "autoEdit": "Авто-монтаж",
+    "captionGen": "Генерация субтитров",
+    "processing": "Обработка",
+    "downloadModel": "Загрузить модель"
+  },
+  "media": {
+    "title": "Медиа-браузер",
+    "import": "Импорт",
+    "video": "Видео",
+    "audio": "Аудио",
+    "image": "Изображение",
+    "title2": "Заголовок",
+    "search": "Поиск медиа",
+    "duration": "Длительность",
+    "size": "Размер файла",
+    "createdAt": "Создано"
+  },
+  "error": {
+    "network": {
+      "timeout": "Тайм-аут",
+      "offline": "Не в сети",
+      "failed": "Ошибка сети"
+    },
+    "file": {
+      "notFound": "Файл не найден",
+      "tooLarge": "Файл слишком большой",
+      "unsupported": "Неподдерживаемый формат",
+      "corrupt": "Повреждённый файл"
+    },
+    "gpu": {
+      "notSupported": "WebGPU недоступен",
+      "outOfMemory": "Недостаточно памяти GPU"
+    },
+    "codec": {
+      "notSupported": "Неподдерживаемый кодек: {codec}"
+    },
+    "generic": "Ошибка: {message}"
+  },
+  "recovery": {
+    "title": "Восстановление",
+    "available": "Можно восстановить предыдущий сеанс",
+    "restore": "Восстановить",
+    "discard": "Отклонить",
+    "autoSave": "Автосохранение"
+  },
+  "performance": {
+    "fps": "FPS: {value}",
+    "memory": "Память: {value} МБ",
+    "gpuTime": "GPU: {value} мс",
+    "warning": "Обнаружено снижение производительности",
+    "autoQuality": "Авто-качество"
+  },
+  "shortcut": {
+    "title": "Сочетания клавиш",
+    "global": "Глобальные",
+    "timeline": "Таймлайн",
+    "playback": "Воспроизведение",
+    "trimming": "Обрезка",
+    "navigation": "Навигация"
+  },
+  "plurals": {
+    "items": "{count, plural, one {# элемент} few {# элемента} other {# элементов}}",
+    "clips": "{count, plural, one {# клип} few {# клипа} other {# клипов}}",
+    "tracks": "{count, plural, one {# дорожка} few {# дорожки} other {# дорожек}}",
+    "minutes": "{count, plural, one {# минута} few {# минуты} other {# минут}}",
+    "seconds": "{count, plural, one {# секунда} few {# секунды} other {# секунд}}"
+  },
+  "interchange": {
+    "title": "Обмен",
+    "exportOTIO": "Экспорт OpenTimelineIO",
+    "exportEDL": "Экспорт EDL",
+    "exportFCPXML": "Экспорт FCPXML",
+    "importOTIO": "Импорт OpenTimelineIO",
+    "importFCPXML": "Импорт FCPXML",
+    "validation": {
+      "valid": "Действительно",
+      "invalid": "Недействительно",
+      "schemaUnsupported": "Неподдерживаемая схема: {schema}"
+    }
+  },
+  "bench": {
+    "running": "Выполнение бенчмарков",
+    "complete": "Бенчмарки завершены",
+    "baseline": "Базовый уровень",
+    "regression": "Обнаружена регрессия",
+    "improvement": "Обнаружено улучшение",
+    "noBaseline": "Базовый уровень недоступен"
+  },
+  "accessibility": {
+    "audit": "Аудит доступности",
+    "passed": "Пройдено",
+    "failed": "Не пройдено",
+    "level": "Уровень WCAG: {level}",
+    "contrastFail": "Контраст {ratio}:1 ниже {required}:1",
+    "missingAlt": "Изображение без атрибута alt",
+    "missingLabel": "Элемент формы без метки"
+  },
+  "security": {
+    "sbom": "Спецификация ПО",
+    "components": "{count} компонентов",
+    "vulnerabilities": "Найдено {count} уязвимостей",
+    "auditPassed": "Аудит пройден",
+    "auditFailed": "Аудит не пройден",
+    "licenseConflict": "Конфликт лицензии: {component}"
+  }
+}

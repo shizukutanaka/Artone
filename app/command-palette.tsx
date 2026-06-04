@@ -1,0 +1,366 @@
+/**
+ * Artone v3 — Command Palette
+ *
+ * Apple Spotlight 哲学: 1つの検索窓が全てを支配する。
+ *
+ * 検索対象:
+ * - コマンド (カット、エクスポート、カラー補正...)
+ * - エフェクト (ブラー、シャープ、LUT...)
+ * - プロジェクトファイル (タイムライン、マーカー...)
+ * - ヘルプ (ショートカット一覧、マニュアル...)
+ * - 設定 (テーマ、パフォーマンス...)
+ *
+ * 呼び出し: Cmd+K (Mac) / Ctrl+K (Win/Linux)
+ */
+
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { ds, color, space, radius, motion, shadow, z, type FeatureTier } from './design-system';
+
+// === 型定義 ===
+
+export interface PaletteItem {
+  id: string;
+  label: string;
+  /** 日本語検索用 (ローマ字 / かな) */
+  aliases?: string[];
+  category: 'command' | 'effect' | 'file' | 'help' | 'setting';
+  icon?: string;
+  shortcut?: string;
+  tier: FeatureTier;
+  action: () => void;
+}
+
+interface CommandPaletteProps {
+  items: PaletteItem[];
+  currentTier: FeatureTier;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+// === ファジー検索 ===
+
+function fuzzyMatch(query: string, text: string): { match: boolean; score: number } {
+  if (!query) return { match: true, score: 0 };
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+
+  // 完全前方一致 → 最高スコア
+  if (t.startsWith(q)) return { match: true, score: 100 };
+  // 部分一致
+  if (t.includes(q)) return { match: true, score: 80 };
+
+  // ファジー: クエリの各文字が順序通りに含まれるか
+  let qi = 0;
+  let consecutive = 0;
+  let maxConsecutive = 0;
+  for (let i = 0; i < t.length && qi < q.length; i++) {
+    if (t[i] === q[qi]) {
+      qi++;
+      consecutive++;
+      maxConsecutive = Math.max(maxConsecutive, consecutive);
+    } else {
+      consecutive = 0;
+    }
+  }
+  if (qi === q.length) {
+    return { match: true, score: 40 + maxConsecutive * 10 };
+  }
+  return { match: false, score: 0 };
+}
+
+function searchItems(
+  items: PaletteItem[],
+  query: string,
+  currentTier: FeatureTier
+): PaletteItem[] {
+  const tierOrder: FeatureTier[] = ['essential', 'standard', 'pro'];
+  const maxTierIndex = tierOrder.indexOf(currentTier);
+
+  const scored = items
+    .filter((item) => tierOrder.indexOf(item.tier) <= maxTierIndex)
+    .map((item) => {
+      const labelResult = fuzzyMatch(query, item.label);
+      const aliasResults = (item.aliases ?? []).map((a) => fuzzyMatch(query, a));
+      const bestAlias = aliasResults.reduce(
+        (best, r) => (r.score > best.score ? r : best),
+        { match: false, score: 0 }
+      );
+      const best = labelResult.score >= bestAlias.score ? labelResult : bestAlias;
+      return { item, ...best };
+    })
+    .filter((r) => r.match)
+    .sort((a, b) => b.score - a.score);
+
+  return scored.map((r) => r.item).slice(0, 12);
+}
+
+// === カテゴリアイコン ===
+
+const CATEGORY_ICONS: Record<string, string> = {
+  command: '⌘',
+  effect: '✦',
+  file: '◇',
+  help: '?',
+  setting: '⚙',
+};
+
+// === コンポーネント ===
+
+export const CommandPalette: React.FC<CommandPaletteProps> = ({
+  items,
+  currentTier,
+  isOpen,
+  onClose,
+}) => {
+  const [query, setQuery] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const results = useMemo(
+    () => searchItems(items, query, currentTier),
+    [items, query, currentTier]
+  );
+
+  // フォーカス
+  useEffect(() => {
+    if (isOpen) {
+      setQuery('');
+      setSelectedIndex(0);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [isOpen]);
+
+  // 選択追従スクロール
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const selected = list.children[selectedIndex] as HTMLElement | undefined;
+    selected?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [selectedIndex]);
+
+  // キーボード操作
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex((i) => Math.max(i - 1, 0));
+      } else if (e.key === 'Enter' && results[selectedIndex]) {
+        results[selectedIndex].action();
+        onClose();
+      } else if (e.key === 'Escape') {
+        onClose();
+      }
+    },
+    [results, selectedIndex, onClose]
+  );
+
+  if (!isOpen) return null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.5)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          zIndex: z.commandPalette - 1,
+          animation: `fadeIn ${motion.fast} ${motion.easeOut} forwards`,
+        }}
+        onClick={onClose}
+      />
+
+      {/* Palette */}
+      <div
+        style={{
+          position: 'fixed',
+          top: '15%',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '90%',
+          maxWidth: 560,
+          background: color.surface3,
+          borderRadius: radius.xl,
+          boxShadow: shadow.popover,
+          zIndex: z.commandPalette,
+          overflow: 'hidden',
+          animation: `slideDown ${motion.appear} forwards`,
+        }}
+      >
+        {/* 検索フィールド */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: `${space[3]}px ${space[4]}px`,
+            borderBottom: `1px solid ${color.border}`,
+            gap: space[3],
+          }}
+        >
+          <span style={{ ...ds.text('title'), color: color.textTertiary, flexShrink: 0 }}>⌘K</span>
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelectedIndex(0);
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="コマンド、エフェクト、設定を検索..."
+            style={{
+              flex: 1,
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              color: color.textPrimary,
+              ...ds.text('body'),
+              fontSize: 16,
+            }}
+          />
+        </div>
+
+        {/* 結果リスト */}
+        <div ref={listRef} style={{ maxHeight: 400, overflowY: 'auto', padding: `${space[1]}px 0` }}>
+          {results.length === 0 && query && (
+            <div
+              style={{
+                padding: `${space[6]}px ${space[4]}px`,
+                textAlign: 'center',
+                color: color.textTertiary,
+                ...ds.text('body'),
+              }}
+            >
+              見つかりません
+            </div>
+          )}
+          {results.map((item, i) => (
+            <button
+              key={item.id}
+              onClick={() => {
+                item.action();
+                onClose();
+              }}
+              onMouseEnter={() => setSelectedIndex(i)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                width: '100%',
+                padding: `${space[2]}px ${space[4]}px`,
+                background: i === selectedIndex ? color.brandSubtle : 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+                gap: space[3],
+                transition: `background ${motion.fast} ${motion.easeOut}`,
+              }}
+            >
+              <span
+                style={{
+                  width: 24,
+                  height: 24,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: radius.sm,
+                  background: color.surface4,
+                  ...ds.text('caption'),
+                  color: color.textTertiary,
+                  flexShrink: 0,
+                }}
+              >
+                {item.icon ?? CATEGORY_ICONS[item.category] ?? '·'}
+              </span>
+              <span style={{ flex: 1, ...ds.text('body'), color: color.textPrimary }}>
+                {item.label}
+              </span>
+              {item.shortcut && (
+                <span
+                  style={{
+                    ...ds.text('caption'),
+                    ...ds.text('mono'),
+                    color: color.textTertiary,
+                    background: color.surface4,
+                    padding: `2px ${space[2]}px`,
+                    borderRadius: radius.sm,
+                  }}
+                >
+                  {item.shortcut}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* フッター */}
+        <div
+          style={{
+            padding: `${space[2]}px ${space[4]}px`,
+            borderTop: `1px solid ${color.border}`,
+            display: 'flex',
+            justifyContent: 'space-between',
+            ...ds.text('caption'),
+            color: color.textTertiary,
+          }}
+        >
+          <span>↑↓ 移動 · Enter 実行 · Esc 閉じる</span>
+          <span>{results.length} 件</span>
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+      `}</style>
+    </>
+  );
+};
+
+// === デフォルトコマンド群 ===
+
+export function createDefaultCommands(
+  actions: Record<string, () => void>
+): PaletteItem[] {
+  return [
+    // Essential
+    { id: 'cmd-cut', label: 'カット', aliases: ['cut', 'katto'], category: 'command', shortcut: '⌘X', tier: 'essential', action: actions.cut ?? (() => {}) },
+    { id: 'cmd-copy', label: 'コピー', aliases: ['copy', 'kopi'], category: 'command', shortcut: '⌘C', tier: 'essential', action: actions.copy ?? (() => {}) },
+    { id: 'cmd-paste', label: 'ペースト', aliases: ['paste', 'pe-suto'], category: 'command', shortcut: '⌘V', tier: 'essential', action: actions.paste ?? (() => {}) },
+    { id: 'cmd-undo', label: '取り消し', aliases: ['undo', 'torikeshi'], category: 'command', shortcut: '⌘Z', tier: 'essential', action: actions.undo ?? (() => {}) },
+    { id: 'cmd-redo', label: 'やり直し', aliases: ['redo', 'yarinaoshi'], category: 'command', shortcut: '⌘⇧Z', tier: 'essential', action: actions.redo ?? (() => {}) },
+    { id: 'cmd-save', label: '保存', aliases: ['save', 'hozon'], category: 'command', shortcut: '⌘S', tier: 'essential', action: actions.save ?? (() => {}) },
+    { id: 'cmd-export', label: 'エクスポート', aliases: ['export', 'ekusupo-to'], category: 'command', shortcut: '⌘⇧E', tier: 'essential', action: actions.export ?? (() => {}) },
+    { id: 'cmd-import', label: 'インポート', aliases: ['import', 'inpo-to'], category: 'command', shortcut: '⌘I', tier: 'essential', action: actions.import ?? (() => {}) },
+    { id: 'cmd-play', label: '再生 / 停止', aliases: ['play', 'stop', 'saisei', 'teishi'], category: 'command', shortcut: 'Space', tier: 'essential', action: actions.play ?? (() => {}) },
+
+    // Standard
+    { id: 'cmd-color', label: 'カラー補正', aliases: ['color', 'kara-hosei', 'grade'], category: 'command', tier: 'standard', action: actions.colorGrade ?? (() => {}) },
+    { id: 'cmd-audio', label: 'オーディオミキサー', aliases: ['audio', 'mixer', 'o-dhio'], category: 'command', tier: 'standard', action: actions.audioMix ?? (() => {}) },
+    { id: 'cmd-caption', label: '字幕', aliases: ['subtitle', 'caption', 'jimaku'], category: 'command', tier: 'standard', action: actions.captions ?? (() => {}) },
+    { id: 'cmd-text', label: 'テキスト編集', aliases: ['text', 'tekisuto', 'transcript'], category: 'command', tier: 'standard', action: actions.textEdit ?? (() => {}) },
+
+    // Pro
+    { id: 'cmd-multicam', label: 'マルチカム', aliases: ['multicam', 'maruchikamu'], category: 'command', tier: 'pro', action: actions.multicam ?? (() => {}) },
+    { id: 'cmd-scope', label: 'スコープ', aliases: ['scope', 'waveform', 'vectorscope', 'suko-pu'], category: 'command', tier: 'pro', action: actions.videoScopes ?? (() => {}) },
+    { id: 'cmd-otio', label: 'OTIO エクスポート', aliases: ['opentimelineio', 'interchange'], category: 'command', tier: 'pro', action: actions.otioExport ?? (() => {}) },
+
+    // Settings
+    { id: 'set-theme', label: 'テーマ切り替え', aliases: ['theme', 'dark', 'light', 'te-ma'], category: 'setting', tier: 'essential', action: actions.toggleTheme ?? (() => {}) },
+    { id: 'set-shortcuts', label: 'ショートカット一覧', aliases: ['shortcuts', 'keyboard', 'sho-tokatto'], category: 'help', tier: 'essential', action: actions.showShortcuts ?? (() => {}) },
+
+    // Help
+    { id: 'help-about', label: 'Artone について', aliases: ['about', 'version'], category: 'help', tier: 'essential', action: actions.about ?? (() => {}) },
+  ];
+}

@@ -1,0 +1,305 @@
+{
+  "app": {
+    "name": "Artone",
+    "tagline": "Browser-native video editor"
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "rename": "Rename",
+    "close": "Close",
+    "open": "Open",
+    "yes": "Yes",
+    "no": "No",
+    "loading": "Loading",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info",
+    "search": "Search",
+    "filter": "Filter",
+    "settings": "Settings",
+    "help": "Help",
+    "about": "About",
+    "exit": "Exit"
+  },
+  "menu": {
+    "file": "File",
+    "edit": "Edit",
+    "view": "View",
+    "clip": "Clip",
+    "effects": "Effects",
+    "color": "Color",
+    "audio": "Audio",
+    "window": "Window",
+    "tools": "Tools"
+  },
+  "file": {
+    "new": "New Project",
+    "open": "Open Project",
+    "save": "Save",
+    "saveAs": "Save As",
+    "import": "Import",
+    "export": "Export",
+    "recent": "Recent Projects"
+  },
+  "edit": {
+    "undo": "Undo",
+    "redo": "Redo",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "selectAll": "Select All"
+  },
+  "timeline": {
+    "title": "Timeline",
+    "play": "Play",
+    "pause": "Pause",
+    "stop": "Stop",
+    "rewind": "Rewind",
+    "fastForward": "Fast Forward",
+    "frameForward": "Next Frame",
+    "frameBack": "Previous Frame",
+    "clip": {
+      "split": "Split Clip",
+      "trim": "Trim",
+      "delete": "Delete",
+      "duplicate": "Duplicate",
+      "speed": "Speed",
+      "reverse": "Reverse",
+      "freeze": "Freeze Frame",
+      "ripple": "Ripple Delete"
+    },
+    "track": {
+      "add": "Add Track",
+      "delete": "Delete Track",
+      "lock": "Lock",
+      "mute": "Mute",
+      "solo": "Solo"
+    },
+    "marker": {
+      "add": "Add Marker",
+      "delete": "Delete Marker",
+      "next": "Next Marker",
+      "prev": "Previous Marker"
+    },
+    "zoom": {
+      "in": "Zoom In",
+      "out": "Zoom Out",
+      "fit": "Fit to Window"
+    }
+  },
+  "color": {
+    "title": "Color Grading",
+    "primary": "Primary",
+    "secondary": "Secondary",
+    "wheels": "Color Wheels",
+    "curves": "Curves",
+    "lift": "Lift",
+    "gamma": "Gamma",
+    "gain": "Gain",
+    "saturation": "Saturation",
+    "contrast": "Contrast",
+    "exposure": "Exposure",
+    "lut": "LUT",
+    "lutImport": "Import LUT",
+    "scope": {
+      "waveform": "Waveform",
+      "vectorscope": "Vectorscope",
+      "histogram": "Histogram",
+      "parade": "RGB Parade"
+    }
+  },
+  "audio": {
+    "title": "Audio",
+    "volume": "Volume",
+    "pan": "Pan",
+    "mute": "Mute",
+    "eq": "EQ",
+    "compressor": "Compressor",
+    "reverb": "Reverb",
+    "limiter": "Limiter",
+    "fade": {
+      "in": "Fade In",
+      "out": "Fade Out"
+    },
+    "noise": {
+      "reduction": "Noise Reduction"
+    }
+  },
+  "export": {
+    "title": "Export",
+    "preset": "Preset",
+    "format": "Format",
+    "resolution": "Resolution",
+    "framerate": "Frame Rate",
+    "bitrate": "Bitrate",
+    "codec": "Codec",
+    "audio": "Audio",
+    "destination": "Destination",
+    "start": "Start Export",
+    "progress": "Progress: {percent}%",
+    "complete": "Export Complete",
+    "presets": {
+      "youtube4k": "YouTube 4K",
+      "youtube1080p": "YouTube 1080p",
+      "instagram": "Instagram",
+      "tiktok": "TikTok",
+      "broadcast": "Broadcast",
+      "proRes": "ProRes",
+      "h265": "H.265 HEVC",
+      "av1": "AV1"
+    }
+  },
+  "ai": {
+    "title": "AI Features",
+    "transcribe": "Transcribe",
+    "translate": "Translate",
+    "denoise": "Denoise",
+    "upscale": "Upscale",
+    "objectRemove": "Remove Object",
+    "autoEdit": "Auto Edit",
+    "captionGen": "Generate Captions",
+    "processing": "Processing",
+    "downloadModel": "Download Model"
+  },
+  "media": {
+    "title": "Media Browser",
+    "import": "Import",
+    "video": "Video",
+    "audio": "Audio",
+    "image": "Image",
+    "title2": "Title",
+    "search": "Search Media",
+    "duration": "Duration",
+    "size": "File Size",
+    "createdAt": "Created"
+  },
+  "error": {
+    "network": {
+      "timeout": "Network Timeout",
+      "offline": "Offline",
+      "failed": "Network Error"
+    },
+    "file": {
+      "notFound": "File Not Found",
+      "tooLarge": "File Too Large",
+      "unsupported": "Unsupported Format",
+      "corrupt": "Corrupt File"
+    },
+    "gpu": {
+      "notSupported": "WebGPU Not Available",
+      "outOfMemory": "GPU Out of Memory"
+    },
+    "codec": {
+      "notSupported": "Unsupported codec: {codec}"
+    },
+    "generic": "Error: {message}"
+  },
+  "recovery": {
+    "title": "Crash Recovery",
+    "available": "Previous session can be restored",
+    "restore": "Restore",
+    "discard": "Discard",
+    "autoSave": "Auto-save"
+  },
+  "performance": {
+    "fps": "FPS: {value}",
+    "memory": "Memory: {value}MB",
+    "gpuTime": "GPU Time: {value}ms",
+    "warning": "Performance Degradation Detected",
+    "autoQuality": "Auto Quality"
+  },
+  "shortcut": {
+    "title": "Keyboard Shortcuts",
+    "global": "Global",
+    "timeline": "Timeline",
+    "playback": "Playback",
+    "trimming": "Trimming",
+    "navigation": "Navigation"
+  },
+  "interchange": {
+    "title": "Interchange",
+    "exportOTIO": "Export OpenTimelineIO",
+    "exportEDL": "Export EDL",
+    "exportFCPXML": "Export FCPXML",
+    "importOTIO": "Import OpenTimelineIO",
+    "importFCPXML": "Import FCPXML",
+    "validation": {
+      "valid": "Valid",
+      "invalid": "Invalid",
+      "schemaUnsupported": "Unsupported schema: {schema}"
+    }
+  },
+  "bench": {
+    "running": "Running benchmarks",
+    "complete": "Benchmarks complete",
+    "baseline": "Baseline",
+    "regression": "Regression detected",
+    "improvement": "Improvement detected",
+    "noBaseline": "No baseline available"
+  },
+  "accessibility": {
+    "audit": "Accessibility Audit",
+    "passed": "Passed",
+    "failed": "Failed",
+    "level": "WCAG Level: {level}",
+    "contrastFail": "Contrast {ratio}:1 below {required}:1",
+    "missingAlt": "Image missing alt attribute",
+    "missingLabel": "Form control missing label"
+  },
+  "security": {
+    "sbom": "Software Bill of Materials",
+    "components": "{count} components",
+    "vulnerabilities": "{count} vulnerabilities found",
+    "auditPassed": "Audit passed",
+    "auditFailed": "Audit failed",
+    "licenseConflict": "License conflict: {component}"
+  },
+  "plurals": {
+    "items": "{count, plural, one {# item} other {# items}}",
+    "clips": "{count, plural, one {# clip} other {# clips}}",
+    "tracks": "{count, plural, one {# track} other {# tracks}}",
+    "minutes": "{count, plural, one {# minute} other {# minutes}}",
+    "seconds": "{count, plural, one {# second} other {# seconds}}"
+  },
+  "interchange": {
+    "title": "Import / Export",
+    "exportOTIO": "Export as OpenTimelineIO",
+    "exportEDL": "Export as EDL",
+    "exportFCPXML": "Export as FCPXML",
+    "importOTIO": "Import OpenTimelineIO",
+    "importFCPXML": "Import FCPXML",
+    "validation": {
+      "valid": "Valid timeline",
+      "invalid": "Invalid format: {error}",
+      "schemaUnsupported": "Unsupported schema version"
+    }
+  },
+  "bench": {
+    "running": "Running benchmarks...",
+    "complete": "Benchmarks complete in {ms}ms",
+    "regression": "Performance regression detected",
+    "improvement": "Performance improvement",
+    "baseline": "Baseline updated",
+    "noBaseline": "No baseline. Run with --update-baseline first"
+  },
+  "accessibility": {
+    "audit": "Accessibility Audit",
+    "level": "WCAG Level: {level}",
+    "passed": "Passed ({count} checks)",
+    "failed": "Failed ({count} issues)",
+    "contrastFail": "Contrast {ratio}:1 fails {required}:1",
+    "missingAlt": "Image missing alt attribute",
+    "missingLabel": "Form control missing label"
+  },
+  "security": {
+    "sbom": "Software Bill of Materials",
+    "components": "{count} components",
+    "vulnerabilities": "{count} vulnerabilities",
+    "licenseConflict": "License conflict: {warning}",
+    "auditPassed": "Supply chain audit passed",
+    "auditFailed": "Supply chain audit failed"
+  }
+}

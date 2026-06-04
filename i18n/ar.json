@@ -1,0 +1,267 @@
+{
+  "app": {
+    "name": "Artone",
+    "tagline": "محرر فيديو يعمل في المتصفح"
+  },
+  "common": {
+    "ok": "موافق",
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "delete": "حذف",
+    "rename": "إعادة تسمية",
+    "close": "إغلاق",
+    "open": "فتح",
+    "yes": "نعم",
+    "no": "لا",
+    "loading": "جارٍ التحميل",
+    "error": "خطأ",
+    "warning": "تحذير",
+    "info": "معلومات",
+    "search": "بحث",
+    "filter": "تصفية",
+    "settings": "الإعدادات",
+    "help": "مساعدة",
+    "about": "حول",
+    "exit": "خروج"
+  },
+  "menu": {
+    "file": "ملف",
+    "edit": "تحرير",
+    "view": "عرض",
+    "clip": "مقطع",
+    "effects": "تأثيرات",
+    "color": "ألوان",
+    "audio": "صوت",
+    "window": "نافذة",
+    "tools": "أدوات"
+  },
+  "file": {
+    "new": "مشروع جديد",
+    "open": "فتح مشروع",
+    "save": "حفظ",
+    "saveAs": "حفظ باسم",
+    "import": "استيراد",
+    "export": "تصدير",
+    "recent": "المشاريع الأخيرة"
+  },
+  "edit": {
+    "undo": "تراجع",
+    "redo": "إعادة",
+    "cut": "قص",
+    "copy": "نسخ",
+    "paste": "لصق",
+    "selectAll": "تحديد الكل"
+  },
+  "timeline": {
+    "title": "الخط الزمني",
+    "play": "تشغيل",
+    "pause": "إيقاف مؤقت",
+    "stop": "إيقاف",
+    "rewind": "ترجيع",
+    "fastForward": "تقديم سريع",
+    "frameForward": "الإطار التالي",
+    "frameBack": "الإطار السابق",
+    "clip": {
+      "split": "تقسيم",
+      "trim": "تشذيب",
+      "delete": "حذف",
+      "duplicate": "تكرار",
+      "speed": "السرعة",
+      "reverse": "عكس",
+      "freeze": "تجميد إطار",
+      "ripple": "حذف متموج"
+    },
+    "track": {
+      "add": "إضافة مسار",
+      "delete": "حذف مسار",
+      "lock": "قفل",
+      "mute": "كتم",
+      "solo": "منفرد"
+    },
+    "marker": {
+      "add": "إضافة علامة",
+      "delete": "حذف علامة",
+      "next": "التالي",
+      "prev": "السابق"
+    },
+    "zoom": {
+      "in": "تكبير",
+      "out": "تصغير",
+      "fit": "ملاءمة"
+    }
+  },
+  "color": {
+    "title": "تدرج الألوان",
+    "primary": "أساسي",
+    "secondary": "ثانوي",
+    "wheels": "عجلات الألوان",
+    "curves": "المنحنيات",
+    "lift": "الظلال",
+    "gamma": "النصف",
+    "gain": "الإضاءات",
+    "saturation": "التشبع",
+    "contrast": "التباين",
+    "exposure": "التعريض",
+    "lut": "LUT",
+    "lutImport": "استيراد LUT",
+    "scope": {
+      "waveform": "الموجة",
+      "vectorscope": "Vectorscope",
+      "histogram": "المدرج التكراري",
+      "parade": "RGB Parade"
+    }
+  },
+  "audio": {
+    "title": "الصوت",
+    "volume": "مستوى الصوت",
+    "pan": "الاستقبال",
+    "mute": "كتم",
+    "eq": "EQ",
+    "compressor": "ضاغط",
+    "reverb": "صدى",
+    "limiter": "محدد",
+    "fade": {
+      "in": "تلاشي للداخل",
+      "out": "تلاشي للخارج"
+    },
+    "noise": {
+      "reduction": "تقليل الضوضاء"
+    }
+  },
+  "export": {
+    "title": "تصدير",
+    "preset": "إعداد مسبق",
+    "format": "التنسيق",
+    "resolution": "الدقة",
+    "framerate": "معدل الإطارات",
+    "bitrate": "معدل البت",
+    "codec": "كودك",
+    "audio": "صوت",
+    "destination": "الوجهة",
+    "start": "بدء التصدير",
+    "progress": "التقدم: {percent}%",
+    "complete": "اكتمل التصدير",
+    "presets": {
+      "youtube4k": "YouTube 4K",
+      "youtube1080p": "YouTube 1080p",
+      "instagram": "Instagram",
+      "tiktok": "TikTok",
+      "broadcast": "بث",
+      "proRes": "ProRes",
+      "h265": "H.265 HEVC",
+      "av1": "AV1"
+    }
+  },
+  "ai": {
+    "title": "ميزات الذكاء الاصطناعي",
+    "transcribe": "نسخ",
+    "translate": "ترجمة",
+    "denoise": "إزالة الضوضاء",
+    "upscale": "ترقية",
+    "objectRemove": "إزالة كائن",
+    "autoEdit": "تحرير تلقائي",
+    "captionGen": "إنشاء ترجمات",
+    "processing": "جارٍ المعالجة",
+    "downloadModel": "تنزيل النموذج"
+  },
+  "media": {
+    "title": "متصفح الوسائط",
+    "import": "استيراد",
+    "video": "فيديو",
+    "audio": "صوت",
+    "image": "صورة",
+    "title2": "عنوان",
+    "search": "بحث في الوسائط",
+    "duration": "المدة",
+    "size": "حجم الملف",
+    "createdAt": "تاريخ الإنشاء"
+  },
+  "error": {
+    "network": {
+      "timeout": "انتهت مهلة الاتصال",
+      "offline": "غير متصل",
+      "failed": "خطأ في الشبكة"
+    },
+    "file": {
+      "notFound": "الملف غير موجود",
+      "tooLarge": "الملف كبير جدًا",
+      "unsupported": "تنسيق غير مدعوم",
+      "corrupt": "ملف تالف"
+    },
+    "gpu": {
+      "notSupported": "WebGPU غير متاح",
+      "outOfMemory": "ذاكرة GPU ممتلئة"
+    },
+    "codec": {
+      "notSupported": "كودك غير مدعوم: {codec}"
+    },
+    "generic": "خطأ: {message}"
+  },
+  "recovery": {
+    "title": "استعادة بعد التعطل",
+    "available": "يمكن استعادة الجلسة السابقة",
+    "restore": "استعادة",
+    "discard": "تجاهل",
+    "autoSave": "حفظ تلقائي"
+  },
+  "performance": {
+    "fps": "FPS: {value}",
+    "memory": "الذاكرة: {value} ميجابايت",
+    "gpuTime": "GPU: {value} مللي ثانية",
+    "warning": "تم اكتشاف تدهور في الأداء",
+    "autoQuality": "جودة تلقائية"
+  },
+  "shortcut": {
+    "title": "اختصارات لوحة المفاتيح",
+    "global": "عام",
+    "timeline": "الخط الزمني",
+    "playback": "التشغيل",
+    "trimming": "التشذيب",
+    "navigation": "التنقل"
+  },
+  "plurals": {
+    "items": "{count, plural, zero {لا عناصر} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}",
+    "clips": "{count, plural, zero {لا مقاطع} one {مقطع واحد} two {مقطعان} few {# مقاطع} many {# مقطعًا} other {# مقطع}}",
+    "tracks": "{count, plural, zero {لا مسارات} one {مسار واحد} two {مساران} few {# مسارات} many {# مسارًا} other {# مسار}}",
+    "minutes": "{count, plural, zero {لا دقائق} one {دقيقة} two {دقيقتان} few {# دقائق} many {# دقيقة} other {# دقيقة}}",
+    "seconds": "{count, plural, zero {لا ثوانٍ} one {ثانية} two {ثانيتان} few {# ثوانٍ} many {# ثانية} other {# ثانية}}"
+  },
+  "interchange": {
+    "title": "التبادل",
+    "exportOTIO": "تصدير OpenTimelineIO",
+    "exportEDL": "تصدير EDL",
+    "exportFCPXML": "تصدير FCPXML",
+    "importOTIO": "استيراد OpenTimelineIO",
+    "importFCPXML": "استيراد FCPXML",
+    "validation": {
+      "valid": "صالح",
+      "invalid": "غير صالح",
+      "schemaUnsupported": "مخطط غير مدعوم: {schema}"
+    }
+  },
+  "bench": {
+    "running": "تشغيل الاختبارات المعيارية",
+    "complete": "اكتملت الاختبارات المعيارية",
+    "baseline": "خط الأساس",
+    "regression": "تم اكتشاف انحدار",
+    "improvement": "تم اكتشاف تحسن",
+    "noBaseline": "لا يوجد خط أساس متاح"
+  },
+  "accessibility": {
+    "audit": "تدقيق إمكانية الوصول",
+    "passed": "اجتاز",
+    "failed": "فشل",
+    "level": "مستوى WCAG: {level}",
+    "contrastFail": "التباين {ratio}:1 أقل من {required}:1",
+    "missingAlt": "الصورة تفتقد سمة alt",
+    "missingLabel": "عنصر تحكم النموذج يفتقد التسمية"
+  },
+  "security": {
+    "sbom": "قائمة مواد البرامج",
+    "components": "{count} مكون",
+    "vulnerabilities": "تم العثور على {count} ثغرة",
+    "auditPassed": "اجتاز التدقيق",
+    "auditFailed": "فشل التدقيق",
+    "licenseConflict": "تعارض الترخيص: {component}"
+  }
+}

@@ -1,0 +1,267 @@
+{
+  "app": {
+    "name": "Artone",
+    "tagline": "ブラウザ完結の動画エディタ"
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "delete": "削除",
+    "rename": "名前変更",
+    "close": "閉じる",
+    "open": "開く",
+    "yes": "はい",
+    "no": "いいえ",
+    "loading": "読み込み中",
+    "error": "エラー",
+    "warning": "警告",
+    "info": "情報",
+    "search": "検索",
+    "filter": "フィルター",
+    "settings": "設定",
+    "help": "ヘルプ",
+    "about": "情報",
+    "exit": "終了"
+  },
+  "menu": {
+    "file": "ファイル",
+    "edit": "編集",
+    "view": "表示",
+    "clip": "クリップ",
+    "effects": "エフェクト",
+    "color": "カラー",
+    "audio": "オーディオ",
+    "window": "ウィンドウ",
+    "tools": "ツール"
+  },
+  "file": {
+    "new": "新規プロジェクト",
+    "open": "プロジェクトを開く",
+    "save": "保存",
+    "saveAs": "名前を付けて保存",
+    "import": "読み込み",
+    "export": "書き出し",
+    "recent": "最近のプロジェクト"
+  },
+  "edit": {
+    "undo": "元に戻す",
+    "redo": "やり直す",
+    "cut": "カット",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "selectAll": "すべて選択"
+  },
+  "timeline": {
+    "title": "タイムライン",
+    "play": "再生",
+    "pause": "一時停止",
+    "stop": "停止",
+    "rewind": "巻き戻し",
+    "fastForward": "早送り",
+    "frameForward": "1フレーム進む",
+    "frameBack": "1フレーム戻る",
+    "clip": {
+      "split": "クリップ分割",
+      "trim": "トリム",
+      "delete": "削除",
+      "duplicate": "複製",
+      "speed": "速度変更",
+      "reverse": "逆再生",
+      "freeze": "フリーズフレーム",
+      "ripple": "リップル削除"
+    },
+    "track": {
+      "add": "トラック追加",
+      "delete": "トラック削除",
+      "lock": "ロック",
+      "mute": "ミュート",
+      "solo": "ソロ"
+    },
+    "marker": {
+      "add": "マーカー追加",
+      "delete": "マーカー削除",
+      "next": "次のマーカー",
+      "prev": "前のマーカー"
+    },
+    "zoom": {
+      "in": "拡大",
+      "out": "縮小",
+      "fit": "全体表示"
+    }
+  },
+  "color": {
+    "title": "カラーグレーディング",
+    "primary": "プライマリ",
+    "secondary": "セカンダリ",
+    "wheels": "カラーホイール",
+    "curves": "カーブ",
+    "lift": "リフト",
+    "gamma": "ガンマ",
+    "gain": "ゲイン",
+    "saturation": "彩度",
+    "contrast": "コントラスト",
+    "exposure": "露出",
+    "lut": "LUT",
+    "lutImport": "LUT読み込み",
+    "scope": {
+      "waveform": "波形モニター",
+      "vectorscope": "ベクトルスコープ",
+      "histogram": "ヒストグラム",
+      "parade": "RGBパレード"
+    }
+  },
+  "audio": {
+    "title": "オーディオ",
+    "volume": "音量",
+    "pan": "パン",
+    "mute": "ミュート",
+    "eq": "EQ",
+    "compressor": "コンプレッサー",
+    "reverb": "リバーブ",
+    "limiter": "リミッター",
+    "fade": {
+      "in": "フェードイン",
+      "out": "フェードアウト"
+    },
+    "noise": {
+      "reduction": "ノイズ除去"
+    }
+  },
+  "export": {
+    "title": "書き出し",
+    "preset": "プリセット",
+    "format": "形式",
+    "resolution": "解像度",
+    "framerate": "フレームレート",
+    "bitrate": "ビットレート",
+    "codec": "コーデック",
+    "audio": "オーディオ",
+    "destination": "出力先",
+    "start": "書き出し開始",
+    "progress": "進捗: {percent}%",
+    "complete": "書き出し完了",
+    "presets": {
+      "youtube4k": "YouTube 4K",
+      "youtube1080p": "YouTube 1080p",
+      "instagram": "Instagram",
+      "tiktok": "TikTok",
+      "broadcast": "放送品質",
+      "proRes": "ProRes",
+      "h265": "H.265 HEVC",
+      "av1": "AV1"
+    }
+  },
+  "ai": {
+    "title": "AI機能",
+    "transcribe": "文字起こし",
+    "translate": "翻訳",
+    "denoise": "ノイズ除去",
+    "upscale": "アップスケール",
+    "objectRemove": "オブジェクト削除",
+    "autoEdit": "自動編集",
+    "captionGen": "キャプション自動生成",
+    "processing": "処理中",
+    "downloadModel": "モデルダウンロード"
+  },
+  "media": {
+    "title": "メディアブラウザ",
+    "import": "読み込み",
+    "video": "動画",
+    "audio": "オーディオ",
+    "image": "画像",
+    "title2": "タイトル",
+    "search": "メディア検索",
+    "duration": "再生時間",
+    "size": "ファイルサイズ",
+    "createdAt": "作成日時"
+  },
+  "error": {
+    "network": {
+      "timeout": "通信タイムアウト",
+      "offline": "オフライン",
+      "failed": "通信失敗"
+    },
+    "file": {
+      "notFound": "ファイルが見つかりません",
+      "tooLarge": "ファイルサイズ超過",
+      "unsupported": "未対応形式",
+      "corrupt": "ファイル破損"
+    },
+    "gpu": {
+      "notSupported": "WebGPUが利用できません",
+      "outOfMemory": "GPU メモリ不足"
+    },
+    "codec": {
+      "notSupported": "未対応コーデック: {codec}"
+    },
+    "generic": "エラーが発生しました: {message}"
+  },
+  "recovery": {
+    "title": "クラッシュリカバリ",
+    "available": "前回セッションを復元できます",
+    "restore": "復元",
+    "discard": "破棄",
+    "autoSave": "自動保存"
+  },
+  "performance": {
+    "fps": "FPS: {value}",
+    "memory": "メモリ: {value}MB",
+    "gpuTime": "GPU時間: {value}ms",
+    "warning": "パフォーマンス低下検出",
+    "autoQuality": "自動品質調整"
+  },
+  "shortcut": {
+    "title": "キーボードショートカット",
+    "global": "全般",
+    "timeline": "タイムライン",
+    "playback": "再生制御",
+    "trimming": "トリム",
+    "navigation": "ナビゲーション"
+  },
+  "plurals": {
+    "items": "{count, plural, other {# 個のアイテム}}",
+    "clips": "{count, plural, other {# 個のクリップ}}",
+    "tracks": "{count, plural, other {# 個のトラック}}",
+    "minutes": "{count, plural, other {# 分}}",
+    "seconds": "{count, plural, other {# 秒}}"
+  },
+  "interchange": {
+    "title": "インポート / エクスポート",
+    "exportOTIO": "OpenTimelineIO 形式でエクスポート",
+    "exportEDL": "EDL 形式でエクスポート",
+    "exportFCPXML": "FCPXML 形式でエクスポート",
+    "importOTIO": "OpenTimelineIO インポート",
+    "importFCPXML": "FCPXML インポート",
+    "validation": {
+      "valid": "有効なタイムライン",
+      "invalid": "無効な形式: {error}",
+      "schemaUnsupported": "未対応のスキーマバージョン"
+    }
+  },
+  "bench": {
+    "running": "ベンチマーク実行中...",
+    "complete": "ベンチマーク完了 ({ms}ms)",
+    "regression": "パフォーマンス退行検出",
+    "improvement": "パフォーマンス改善",
+    "baseline": "ベースライン更新",
+    "noBaseline": "ベースライン無し。--update-baseline で初回作成"
+  },
+  "accessibility": {
+    "audit": "アクセシビリティ監査",
+    "level": "WCAG レベル: {level}",
+    "passed": "合格 ({count} 項目)",
+    "failed": "不合格 ({count} 件)",
+    "contrastFail": "コントラスト {ratio}:1 は {required}:1 未満",
+    "missingAlt": "画像に alt 属性なし",
+    "missingLabel": "フォーム要素にラベルなし"
+  },
+  "security": {
+    "sbom": "ソフトウェア部品表 (SBOM)",
+    "components": "{count} 個のコンポーネント",
+    "vulnerabilities": "{count} 件の脆弱性",
+    "licenseConflict": "ライセンス競合: {warning}",
+    "auditPassed": "サプライチェーン監査合格",
+    "auditFailed": "サプライチェーン監査不合格"
+  }
+}

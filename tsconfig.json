@@ -1,0 +1,129 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable",
+      "WebWorker"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "@app/*": [
+        "app/*"
+      ],
+      "@core/*": [
+        "core/*"
+      ],
+      "@ai/*": [
+        "ai/*"
+      ],
+      "@audio/*": [
+        "audio/*"
+      ],
+      "@color/*": [
+        "color/*"
+      ],
+      "@timeline/*": [
+        "timeline/*"
+      ],
+      "@render/*": [
+        "render/*"
+      ],
+      "@export/*": [
+        "export/*"
+      ],
+      "@plugins/*": [
+        "plugins/*"
+      ],
+      "@collab/*": [
+        "collab/*"
+      ],
+      "@animation/*": [
+        "animation/*"
+      ],
+      "@project/*": [
+        "project/*"
+      ],
+      "@media/*": [
+        "media/*"
+      ],
+      "@scopes/*": [
+        "scopes/*"
+      ],
+      "@perf/*": [
+        "perf/*"
+      ],
+      "@recovery/*": [
+        "recovery/*"
+      ],
+      "@interchange/*": [
+        "interchange/*"
+      ],
+      "@security/*": [
+        "security/*"
+      ],
+      "@i18n/*": [
+        "i18n/*"
+      ]
+    },
+    "types": [
+      "vite/client",
+      "@webgpu/types"
+    ]
+  },
+  "include": [
+    "app/**/*",
+    "core/**/*",
+    "render/**/*",
+    "timeline/**/*",
+    "color/**/*",
+    "audio/**/*",
+    "ai/**/*",
+    "animation/**/*",
+    "captions/**/*",
+    "plugins/**/*",
+    "collab/**/*",
+    "undo/**/*",
+    "scopes/**/*",
+    "perf/**/*",
+    "recovery/**/*",
+    "media/**/*",
+    "project/**/*",
+    "interchange/**/*",
+    "bench/**/*",
+    "accessibility/**/*",
+    "security/**/*",
+    "i18n/**/*",
+    "install/**/*",
+    "tests/**/*",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "install.ts",
+    "*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

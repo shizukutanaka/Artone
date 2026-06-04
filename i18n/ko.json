@@ -1,0 +1,267 @@
+{
+  "app": {
+    "name": "Artone",
+    "tagline": "브라우저 기반 비디오 에디터"
+  },
+  "common": {
+    "ok": "확인",
+    "cancel": "취소",
+    "save": "저장",
+    "delete": "삭제",
+    "rename": "이름 변경",
+    "close": "닫기",
+    "open": "열기",
+    "yes": "예",
+    "no": "아니오",
+    "loading": "로드 중",
+    "error": "오류",
+    "warning": "경고",
+    "info": "정보",
+    "search": "검색",
+    "filter": "필터",
+    "settings": "설정",
+    "help": "도움말",
+    "about": "정보",
+    "exit": "종료"
+  },
+  "menu": {
+    "file": "파일",
+    "edit": "편집",
+    "view": "보기",
+    "clip": "클립",
+    "effects": "효과",
+    "color": "컬러",
+    "audio": "오디오",
+    "window": "창",
+    "tools": "도구"
+  },
+  "file": {
+    "new": "새 프로젝트",
+    "open": "프로젝트 열기",
+    "save": "저장",
+    "saveAs": "다른 이름으로 저장",
+    "import": "가져오기",
+    "export": "내보내기",
+    "recent": "최근 프로젝트"
+  },
+  "edit": {
+    "undo": "실행 취소",
+    "redo": "다시 실행",
+    "cut": "잘라내기",
+    "copy": "복사",
+    "paste": "붙여넣기",
+    "selectAll": "모두 선택"
+  },
+  "timeline": {
+    "title": "타임라인",
+    "play": "재생",
+    "pause": "일시정지",
+    "stop": "정지",
+    "rewind": "되감기",
+    "fastForward": "빨리 감기",
+    "frameForward": "다음 프레임",
+    "frameBack": "이전 프레임",
+    "clip": {
+      "split": "분할",
+      "trim": "트림",
+      "delete": "삭제",
+      "duplicate": "복제",
+      "speed": "속도",
+      "reverse": "역재생",
+      "freeze": "정지 프레임",
+      "ripple": "리플 삭제"
+    },
+    "track": {
+      "add": "트랙 추가",
+      "delete": "트랙 삭제",
+      "lock": "잠금",
+      "mute": "음소거",
+      "solo": "솔로"
+    },
+    "marker": {
+      "add": "마커 추가",
+      "delete": "마커 삭제",
+      "next": "다음 마커",
+      "prev": "이전 마커"
+    },
+    "zoom": {
+      "in": "확대",
+      "out": "축소",
+      "fit": "창에 맞추기"
+    }
+  },
+  "color": {
+    "title": "컬러 그레이딩",
+    "primary": "기본",
+    "secondary": "보조",
+    "wheels": "컬러 휠",
+    "curves": "커브",
+    "lift": "리프트",
+    "gamma": "감마",
+    "gain": "게인",
+    "saturation": "채도",
+    "contrast": "대비",
+    "exposure": "노출",
+    "lut": "LUT",
+    "lutImport": "LUT 가져오기",
+    "scope": {
+      "waveform": "웨이브폼",
+      "vectorscope": "벡터스코프",
+      "histogram": "히스토그램",
+      "parade": "RGB 퍼레이드"
+    }
+  },
+  "audio": {
+    "title": "오디오",
+    "volume": "볼륨",
+    "pan": "팬",
+    "mute": "음소거",
+    "eq": "EQ",
+    "compressor": "컴프레서",
+    "reverb": "리버브",
+    "limiter": "리미터",
+    "fade": {
+      "in": "페이드 인",
+      "out": "페이드 아웃"
+    },
+    "noise": {
+      "reduction": "노이즈 제거"
+    }
+  },
+  "export": {
+    "title": "내보내기",
+    "preset": "프리셋",
+    "format": "형식",
+    "resolution": "해상도",
+    "framerate": "프레임 레이트",
+    "bitrate": "비트레이트",
+    "codec": "코덱",
+    "audio": "오디오",
+    "destination": "저장 위치",
+    "start": "내보내기 시작",
+    "progress": "진행률: {percent}%",
+    "complete": "내보내기 완료",
+    "presets": {
+      "youtube4k": "YouTube 4K",
+      "youtube1080p": "YouTube 1080p",
+      "instagram": "Instagram",
+      "tiktok": "TikTok",
+      "broadcast": "방송",
+      "proRes": "ProRes",
+      "h265": "H.265 HEVC",
+      "av1": "AV1"
+    }
+  },
+  "ai": {
+    "title": "AI 기능",
+    "transcribe": "자막화",
+    "translate": "번역",
+    "denoise": "노이즈 제거",
+    "upscale": "업스케일",
+    "objectRemove": "객체 제거",
+    "autoEdit": "자동 편집",
+    "captionGen": "자막 생성",
+    "processing": "처리 중",
+    "downloadModel": "모델 다운로드"
+  },
+  "media": {
+    "title": "미디어 브라우저",
+    "import": "가져오기",
+    "video": "비디오",
+    "audio": "오디오",
+    "image": "이미지",
+    "title2": "타이틀",
+    "search": "미디어 검색",
+    "duration": "재생 시간",
+    "size": "파일 크기",
+    "createdAt": "생성일"
+  },
+  "error": {
+    "network": {
+      "timeout": "네트워크 타임아웃",
+      "offline": "오프라인",
+      "failed": "네트워크 오류"
+    },
+    "file": {
+      "notFound": "파일을 찾을 수 없음",
+      "tooLarge": "파일이 너무 큼",
+      "unsupported": "지원되지 않는 형식",
+      "corrupt": "파일 손상"
+    },
+    "gpu": {
+      "notSupported": "WebGPU 사용 불가",
+      "outOfMemory": "GPU 메모리 부족"
+    },
+    "codec": {
+      "notSupported": "지원되지 않는 코덱: {codec}"
+    },
+    "generic": "오류: {message}"
+  },
+  "recovery": {
+    "title": "충돌 복구",
+    "available": "이전 세션 복구 가능",
+    "restore": "복구",
+    "discard": "취소",
+    "autoSave": "자동 저장"
+  },
+  "performance": {
+    "fps": "FPS: {value}",
+    "memory": "메모리: {value}MB",
+    "gpuTime": "GPU 시간: {value}ms",
+    "warning": "성능 저하 감지됨",
+    "autoQuality": "자동 품질"
+  },
+  "shortcut": {
+    "title": "키보드 단축키",
+    "global": "전역",
+    "timeline": "타임라인",
+    "playback": "재생",
+    "trimming": "트리밍",
+    "navigation": "탐색"
+  },
+  "plurals": {
+    "items": "{count}개 항목",
+    "clips": "{count}개 클립",
+    "tracks": "{count}개 트랙",
+    "minutes": "{count}분",
+    "seconds": "{count}초"
+  },
+  "interchange": {
+    "title": "호환성",
+    "exportOTIO": "OpenTimelineIO 내보내기",
+    "exportEDL": "EDL 내보내기",
+    "exportFCPXML": "FCPXML 내보내기",
+    "importOTIO": "OpenTimelineIO 가져오기",
+    "importFCPXML": "FCPXML 가져오기",
+    "validation": {
+      "valid": "유효",
+      "invalid": "유효하지 않음",
+      "schemaUnsupported": "지원되지 않는 스키마: {schema}"
+    }
+  },
+  "bench": {
+    "running": "벤치마크 실행 중",
+    "complete": "벤치마크 완료",
+    "baseline": "기준선",
+    "regression": "성능 저하 감지됨",
+    "improvement": "성능 개선 감지됨",
+    "noBaseline": "사용 가능한 기준선 없음"
+  },
+  "accessibility": {
+    "audit": "접근성 감사",
+    "passed": "통과",
+    "failed": "실패",
+    "level": "WCAG 수준: {level}",
+    "contrastFail": "대비 {ratio}:1 이 {required}:1 미만",
+    "missingAlt": "이미지에 alt 속성 없음",
+    "missingLabel": "양식 컨트롤에 레이블 없음"
+  },
+  "security": {
+    "sbom": "소프트웨어 부품 명세서",
+    "components": "{count}개 구성 요소",
+    "vulnerabilities": "{count}개 취약점 발견",
+    "auditPassed": "감사 통과",
+    "auditFailed": "감사 실패",
+    "licenseConflict": "라이선스 충돌: {component}"
+  }
+}

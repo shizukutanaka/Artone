@@ -92,10 +92,10 @@ DEAD=""
 INFRA="accessibility bench security interchange install i18n"
 for d in "$DIR"/*/; do
   dname=$(basename "$d")
-  case "$dname" in tests|docs|scripts|future|.github|.claude|node_modules|coverage|dist|app) continue;; esac
+  case "$dname" in tests|docs|scripts|future|.github|.claude|node_modules|coverage|dist|public|app) continue;; esac
   # infra はスキップ
   echo " $INFRA " | grep -q " $dname " && continue
-  refs=$(grep -c "/${dname}/" "$APP/main.ts" 2>/dev/null)
+  refs=$(grep -c "/${dname}/" "$APP/main.ts" 2>/dev/null || true)
   refs=${refs:-0}
   if [ "$refs" -eq 0 ]; then
     lines=$(find "$d" -maxdepth 1 \( -name '*.ts' -o -name '*.tsx' \) -exec cat {} + 2>/dev/null | wc -l)
@@ -113,7 +113,7 @@ echo "[7/10] CLAUDE.md coverage..."
 MISSING_DOCS=""
 for d in "$DIR"/*/; do
   dname=$(basename "$d")
-  case "$dname" in tests|docs|scripts|.github|.claude|node_modules|coverage|dist) continue;; esac
+  case "$dname" in tests|docs|scripts|.github|.claude|node_modules|coverage|dist|public) continue;; esac
   [ ! -f "$d/CLAUDE.md" ] && MISSING_DOCS="$MISSING_DOCS $dname"
 done
 if [ -n "$MISSING_DOCS" ]; then

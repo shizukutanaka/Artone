@@ -603,7 +603,12 @@ export class ArtoneApp {
       log.info(`Import: ${file.name} → FFmpeg WASM transcode`, { reason: plan.reason });
     }
 
-    await this.media.importFiles([file]);
+    // importFiles は未対応/失敗ファイルを握りつぶして空配列を返すため、
+    // 1件も取り込めなければ呼び出し側にエラーを伝播する (silent failure 防止)。
+    const imported = await this.media.importFiles([file]);
+    if (imported.length === 0) {
+      throw new Error(`Import failed — "${file.name}" is unsupported or could not be processed`);
+    }
   }
 
   /** ファイル名/MIME からコーデックを推定 (codec-router 入力用) */
@@ -620,11 +625,18 @@ export class ArtoneApp {
   }
 
   async exportProject(preset?: string): Promise<void> {
-    const exportPreset = this.export.getPresetById(preset ?? 'h264_1080p');
+    // 'youtube-1080p' は EXPORT_PRESETS に存在する有効な既定値。
+    const presetId = preset ?? 'youtube-1080p';
+    const exportPreset = this.export.getPresetById(presetId);
     if (!exportPreset) {
-      throw new Error(`Export not available — unknown preset "${preset ?? 'h264_1080p'}"`);
+      throw new Error(`Export failed — unknown preset "${presetId}"`);
     }
-    await this.export.quickExport([], exportPreset);
+    // タイムラインをフレーム列にレンダリングするパイプラインは未接続。
+    // ここで空フレーム (quickExport([])) を渡すと無音・無映像の空ファイルが
+    // 静かに生成されてしまうため、明示的に失敗させる (silent data loss 防止)。
+    throw new Error(
+      'Export is not yet wired to the render pipeline — timeline frame rendering is required before quickExport can run.'
+    );
   }
 
   // ============================================================

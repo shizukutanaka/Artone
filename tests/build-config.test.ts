@@ -114,7 +114,7 @@ describe('directory structure', () => {
   });
 
   it('all module directories have CLAUDE.md', () => {
-    const skipDirs = new Set(['tests', 'scripts', 'future', 'docs', '.git', 'node_modules', 'dist', 'coverage']);
+    const skipDirs = new Set(['tests', 'scripts', 'future', 'docs', 'public', '.git', 'node_modules', 'dist', 'coverage']);
     const missing: string[] = [];
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;

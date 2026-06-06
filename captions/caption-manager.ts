@@ -290,6 +290,31 @@ export class CaptionManager {
   // Import/Export
   // ============================================================
 
+  /**
+   * ASR (音声認識) のセグメントから自動字幕トラックを生成する。
+   * `ai-effects-engine` の TranscriptionSegment と構造的に互換 (start/end/text)。
+   * @param cues - { start, end, text } の配列 (秒)
+   * @param trackId - 既存トラックに追記する場合に指定。未指定なら新規作成。
+   */
+  importFromTranscription(
+    cues: Array<{ start: number; end: number; text: string }>,
+    trackId?: string
+  ): CaptionTrack {
+    const track = trackId
+      ? this.tracks.get(trackId) || this.createTrack('Auto Captions')
+      : this.createTrack('Auto Captions');
+
+    for (const cue of cues) {
+      const text = cue.text.trim();
+      if (text.length === 0) continue;
+      this.addCaption(track.id, cue.start, cue.end, text);
+    }
+
+    track.captions.sort((a, b) => a.startTime - b.startTime);
+    this.notify();
+    return track;
+  }
+
   importSRT(content: string, trackId?: string): CaptionTrack {
     const track = trackId 
       ? this.tracks.get(trackId) || this.createTrack('Imported')

@@ -34,6 +34,62 @@ export type AIModelType =
   | 'face-detection' | 'pose-estimation' | 'speech-recognition'
   | 'scene-detection' | 'object-tracking';
 
+/** ASR の単語 (タイムスタンプ付き)。 */
+export interface TranscriptionWord {
+  text: string;
+  start: number; // 秒
+  end: number; // 秒
+  confidence: number;
+}
+
+/** ASR のセグメント (字幕1行相当)。 */
+export interface TranscriptionSegment {
+  id: string;
+  text: string;
+  start: number;
+  end: number;
+  words: TranscriptionWord[];
+  speaker?: string;
+}
+
+/** ASR の結果全体。 */
+export interface TranscriptionResult {
+  language: string;
+  duration: number;
+  segments: TranscriptionSegment[];
+}
+
+/** transcribe のオプション。 */
+export interface TranscribeOptions {
+  language?: string;
+  /** 使用する speech-recognition モデル ID。既定 'whisper-base'。 */
+  modelId?: string;
+}
+
+/**
+ * 音声認識バックエンドの抽象 (Transformers.js/ONNX Runtime Web 等を注入)。
+ * 重いモデル推論を分離し、テスト/差し替えを可能にする。
+ */
+export interface SpeechRecognizer {
+  transcribe(
+    audio: Float32Array,
+    options: TranscribeOptions & { sampleRate: number }
+  ): Promise<TranscriptionResult>;
+}
+
+/** ASR 結果を text-based-editing 用のフラットな単語配列へ変換する。 */
+export function transcriptionToWords(
+  result: TranscriptionResult
+): Array<{ text: string; start: number; end: number; confidence: number; speaker?: string }> {
+  const words: Array<{ text: string; start: number; end: number; confidence: number; speaker?: string }> = [];
+  for (const seg of result.segments) {
+    for (const w of seg.words) {
+      words.push({ text: w.text, start: w.start, end: w.end, confidence: w.confidence, speaker: seg.speaker });
+    }
+  }
+  return words;
+}
+
 export interface SegmentationResult {
   mask: ImageData;
   confidence: number;
@@ -92,6 +148,7 @@ export class AIEffectsEngine {
   private canvas: OffscreenCanvas;
   private ctx: OffscreenCanvasRenderingContext2D;
   private listeners: Set<() => void> = new Set();
+  private recognizer: SpeechRecognizer | null = null;
 
   constructor() {
     this.canvas = new OffscreenCanvas(1920, 1080);
@@ -167,6 +224,41 @@ export class AIEffectsEngine {
 
   isModelLoaded(modelId: string): boolean {
     return this.models.get(modelId)?.loaded ?? false;
+  }
+
+  // ============================================================
+  // Speech Recognition (ASR)
+  // ============================================================
+
+  /** 音声認識バックエンド (Whisper/ONNX 等) を注入する。 */
+  setSpeechRecognizer(recognizer: SpeechRecognizer): void {
+    this.recognizer = recognizer;
+  }
+
+  /**
+   * 音声を文字起こしする。実推論は注入された SpeechRecognizer に委譲。
+   * バックエンド未設定なら明示的に失敗する (静かな no-op を避ける)。
+   * @param audio - モノラル PCM サンプル
+   * @param sampleRate - サンプルレート (Hz)
+   * @param options - 言語 / モデル ID
+   */
+  async transcribe(
+    audio: Float32Array,
+    sampleRate: number,
+    options: TranscribeOptions = {}
+  ): Promise<TranscriptionResult> {
+    if (!this.recognizer) {
+      throw new Error(
+        'No SpeechRecognizer configured — call setSpeechRecognizer() with a Whisper/ONNX backend first.'
+      );
+    }
+    const modelId = options.modelId ?? 'whisper-base';
+    const model = this.models.get(modelId);
+    if (!model || model.type !== 'speech-recognition') {
+      throw new Error(`Unknown speech-recognition model "${modelId}"`);
+    }
+    if (!model.loaded) await this.loadModel(modelId);
+    return this.recognizer.transcribe(audio, { ...options, sampleRate });
   }
 
   // ============================================================

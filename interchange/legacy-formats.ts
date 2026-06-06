@@ -318,11 +318,82 @@ export class FCPXMLExporter {
   }
 }
 
+// === FCPXML Import (Final Cut Pro X 1.10) ===
+
+/**
+ * FCPXML を ArtoneTimeline へインポートする。FCPXMLExporter と往復可能。
+ * DOMParser で解析 (ブラウザ/jsdom 前提)。spine の clip を映像トラックへ。
+ * 注: 現状 exporter は spine に映像のみ書き出すため、音声トラックは往復対象外。
+ */
+export class FCPXMLImporter {
+  import(xml: string): ArtoneTimeline {
+    if (typeof DOMParser === 'undefined') {
+      throw new Error('FCPXMLImporter requires DOMParser (browser/jsdom environment).');
+    }
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    if (doc.querySelector('parsererror')) {
+      throw new Error('Invalid FCPXML: XML parse error');
+    }
+
+    // frameDuration "1/30s" → fps
+    let fps = 30;
+    const fd = doc.querySelector('format')?.getAttribute('frameDuration');
+    const fdMatch = fd?.match(/^(\d+)\/(\d+)s$/);
+    if (fdMatch) {
+      const numer = Number(fdMatch[1]);
+      if (numer > 0) fps = Math.round(Number(fdMatch[2]) / numer);
+    }
+
+    // asset id → src
+    const assets = new Map<string, string>();
+    const assetEls = doc.getElementsByTagName('asset');
+    for (let i = 0; i < assetEls.length; i++) {
+      const id = assetEls[i].getAttribute('id');
+      if (id) assets.set(id, assetEls[i].getAttribute('src') ?? '');
+    }
+
+    const name =
+      doc.querySelector('project')?.getAttribute('name') ??
+      doc.querySelector('event')?.getAttribute('name') ??
+      'Imported FCPXML';
+
+    const clips: ArtoneClip[] = [];
+    const clipEls = doc.getElementsByTagName('clip');
+    for (let i = 0; i < clipEls.length; i++) {
+      const el = clipEls[i];
+      const ref = el.getAttribute('ref') ?? '';
+      clips.push({
+        id: crypto.randomUUID(),
+        name: el.getAttribute('name') ?? `Clip ${i + 1}`,
+        startFrame: this.parseFrames(el.getAttribute('offset')),
+        durationFrames: this.parseFrames(el.getAttribute('duration')),
+        sourceInFrame: this.parseFrames(el.getAttribute('start')),
+        mediaUrl: assets.get(ref) ?? '',
+        effects: [],
+        markers: [],
+        enabled: true,
+      });
+    }
+
+    const videoTracks: ArtoneTrack[] =
+      clips.length > 0 ? [{ name: 'V1', kind: 'video', clips, enabled: true }] : [];
+    return { name, fps, videoTracks, audioTracks: [], markers: [] };
+  }
+
+  /** "N/Rs" または "Ns" 形式の rational 時間からフレーム番号 (分子) を取り出す。 */
+  private parseFrames(value: string | null): number {
+    if (!value) return 0;
+    const m = value.match(/^(-?\d+)(?:\/(\d+))?s$/);
+    return m ? Number(m[1]) : 0;
+  }
+}
+
 // === ファクトリ ===
 
 export const interchange = {
   edl: () => new EDLExporter(),
   edlImporter: () => new EDLImporter(),
   fcpxml: () => new FCPXMLExporter(),
+  fcpxmlImporter: () => new FCPXMLImporter(),
   timecode: TimecodeUtil,
 };

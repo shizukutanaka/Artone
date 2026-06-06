@@ -7,7 +7,7 @@
  * - AAF: Avid Media Composer (XML 経由の簡易対応)
  */
 
-import type { ArtoneTimeline, ArtoneClip } from './otio';
+import type { ArtoneTimeline, ArtoneClip, ArtoneTrack } from './otio';
 import { pad, escapeXML } from '../app/utils';
 
 // === タイムコード変換 ===
@@ -145,6 +145,106 @@ export class EDLExporter {
   }
 }
 
+// === EDL Import (CMX 3600) ===
+
+/** EDL のイベント1件 (パース中間表現)。 */
+interface EDLEvent {
+  editNum: number;
+  channel: string;
+  srcIn: number;
+  srcOut: number;
+  recIn: number;
+  recOut: number;
+  name: string;
+}
+
+const TC_TOKEN = /^\d{2}[:;]\d{2}[:;]\d{2}[:;]\d{2}$/;
+
+/**
+ * CMX 3600 EDL を ArtoneTimeline へインポートする。EDLExporter と往復可能。
+ * EDL はフレームレートを持たないため fps はオプション (DROP FRAME 検出時は 29.97)。
+ */
+export class EDLImporter {
+  import(edl: string, options: { fps?: number } = {}): ArtoneTimeline {
+    const lines = edl.split(/\r?\n/);
+    let title = 'Imported EDL';
+    let dropFrame = false;
+
+    // ヘッダ走査 (TITLE / FCM)
+    for (const line of lines) {
+      const t = line.trim();
+      if (t.startsWith('TITLE:')) title = t.slice('TITLE:'.length).trim();
+      else if (t.startsWith('FCM:')) dropFrame = /DROP/i.test(t) && !/NON-DROP/i.test(t);
+    }
+
+    const fps = options.fps ?? (dropFrame ? 29.97 : 30);
+    const events: EDLEvent[] = [];
+
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (line.length === 0) continue;
+
+      // コメント: 直近イベントへ名前を付与
+      if (line.startsWith('*')) {
+        const m = line.match(/FROM CLIP NAME:\s*(.+)$/i);
+        if (m && events.length > 0) events[events.length - 1].name = m[1].trim();
+        continue;
+      }
+
+      const tokens = line.split(/\s+/);
+      const tcs = tokens.filter((tk) => TC_TOKEN.test(tk));
+      if (tcs.length !== 4) continue; // イベント行でない (TITLE/FCM/その他)
+
+      const editNum = parseInt(tokens[0], 10);
+      if (Number.isNaN(editNum)) continue;
+      const channel = tokens[2] ?? 'V';
+      const [srcIn, srcOut, recIn, recOut] = tcs.map((tc) => TimecodeUtil.tcToFrames(tc, fps));
+
+      events.push({
+        editNum,
+        channel,
+        srcIn,
+        srcOut,
+        recIn,
+        recOut,
+        name: tokens[1] ?? `Event ${editNum}`,
+      });
+    }
+
+    const videoClips: ArtoneClip[] = [];
+    const audioClips: ArtoneClip[] = [];
+    for (const ev of events) {
+      const clip = this.toClip(ev);
+      // チャンネル 'A'(かつ 'V' を含まない) は音声、それ以外は映像扱い。
+      const isAudio = /A/i.test(ev.channel) && !/V/i.test(ev.channel);
+      (isAudio ? audioClips : videoClips).push(clip);
+    }
+
+    const videoTracks: ArtoneTrack[] = videoClips.length > 0
+      ? [{ name: 'V1', kind: 'video', clips: videoClips, enabled: true }]
+      : [];
+    const audioTracks: ArtoneTrack[] = audioClips.length > 0
+      ? [{ name: 'A1', kind: 'audio', clips: audioClips, enabled: true }]
+      : [];
+
+    return { name: title, fps, videoTracks, audioTracks, markers: [] };
+  }
+
+  private toClip(ev: EDLEvent): ArtoneClip {
+    return {
+      id: crypto.randomUUID(),
+      name: ev.name,
+      startFrame: ev.recIn,
+      durationFrames: Math.max(0, ev.recOut - ev.recIn),
+      sourceInFrame: ev.srcIn,
+      mediaUrl: '',
+      effects: [],
+      markers: [],
+      enabled: true,
+    };
+  }
+}
+
 // === FCPXML (Final Cut Pro X 1.10) ===
 
 export class FCPXMLExporter {
@@ -222,6 +322,7 @@ export class FCPXMLExporter {
 
 export const interchange = {
   edl: () => new EDLExporter(),
+  edlImporter: () => new EDLImporter(),
   fcpxml: () => new FCPXMLExporter(),
   timecode: TimecodeUtil,
 };

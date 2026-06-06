@@ -1,4 +1,5 @@
 import { color } from '../app/design-system';
+import { alignAnglesByAudio, type AudioSamples } from './audio-sync';
 /**
  * Artone v3 — Multi-Cam Editor
  * 
@@ -139,22 +140,33 @@ export class MultiCamEditor {
   // Synchronization
   // ============================================================
 
-  async syncByAudio(clipId: string, referenceAngleId: string): Promise<boolean> {
+  /**
+   * 各アングルの音声を相互相関で整列し、offset(秒) を実測する。
+   * @param audioByAngle - angleId → 音声サンプル。基準アングルの音声は必須。
+   * @returns 基準アングルの音声が無い場合 false。
+   */
+  async syncByAudio(
+    clipId: string,
+    referenceAngleId: string,
+    audioByAngle: Map<string, AudioSamples>
+  ): Promise<boolean> {
     const mcClip = this.state.clips.get(clipId);
     if (!mcClip) return false;
 
     const refAngle = mcClip.angles.find(a => a.id === referenceAngleId);
     if (!refAngle) return false;
 
-    // In production, would use audio waveform cross-correlation
-    // Here we simulate sync
+    const referenceAudio = audioByAngle.get(referenceAngleId);
+    if (!referenceAudio) return false;
+
+    // 正規化相互相関で基準に対する各アングルのラグを実測 (audio-sync.ts)。
+    const offsets = alignAnglesByAudio(
+      referenceAudio,
+      mcClip.angles.map(a => ({ id: a.id, audio: audioByAngle.get(a.id) })),
+      referenceAngleId
+    );
     for (const angle of mcClip.angles) {
-      if (angle.id === referenceAngleId) {
-        angle.offset = 0;
-      } else {
-        // Simulated offset calculation
-        angle.offset = Math.random() * 0.5 - 0.25;
-      }
+      angle.offset = offsets.get(angle.id) ?? 0;
     }
 
     this.notify();

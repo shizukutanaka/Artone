@@ -434,14 +434,27 @@ export class SurroundAudioEngine {
   // Metering
   // ============================================================
 
-  getChannelLevels(): Map<ChannelLabel, number> {
+  /**
+   * 各チャンネルの RMS レベル (線形, 0..1) を算出する。
+   * buffer のチャンネル順は現在フォーマットの channel 順 (L,R,C,LFE,Ls,Rs...) と一致する前提。
+   * @param buffer - マルチチャンネル音声。未指定/チャンネル不足分は 0。
+   */
+  getChannelLevels(buffer?: AudioBuffer): Map<ChannelLabel, number> {
     const levels = new Map<ChannelLabel, number>();
-    
-    for (const channel of this.channels.values()) {
-      // Would use AnalyserNode in real implementation
-      levels.set(channel.label, Math.random() * 0.8); // Simulated
+    const labels = Array.from(this.channels.keys()) as ChannelLabel[];
+
+    for (let i = 0; i < labels.length; i++) {
+      const label = labels[i];
+      if (!buffer || i >= buffer.numberOfChannels) {
+        levels.set(label, 0);
+        continue;
+      }
+      const data = buffer.getChannelData(i);
+      let sumSquared = 0;
+      for (let j = 0; j < data.length; j++) sumSquared += data[j] * data[j];
+      levels.set(label, data.length > 0 ? Math.sqrt(sumSquared / data.length) : 0);
     }
-    
+
     return levels;
   }
 

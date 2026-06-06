@@ -11,6 +11,7 @@
  * 
  * @version 1.0.0
  */
+import { measureLoudness, computeDuckingGain, type DuckingOptions } from './loudness';
 
 // ============================================================
 // Types
@@ -291,73 +292,20 @@ export class AudioEngine {
   // ============================================================
 
   async analyzeLoudness(buffer: AudioBuffer): Promise<LoudnessReading> {
-    const data = buffer.getChannelData(0);
-    const sampleRate = buffer.sampleRate;
-
-    // 全体 RMS と True Peak
-    let sumSquared = 0;
-    let peak = 0;
-    for (let i = 0; i < data.length; i++) {
-      const abs = Math.abs(data[i]);
-      if (abs > peak) peak = abs;
-      sumSquared += data[i] * data[i];
+    // ITU-R BS.1770-4 / EBU R128 準拠の測定は audio/loudness.ts に委譲。
+    const channels: Float32Array[] = [];
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+      channels.push(buffer.getChannelData(c));
     }
-    const rms = Math.sqrt(sumSquared / data.length);
-    // ITU-R BS.1770 K-weighting オフセット (-0.691) を含む integrated loudness
-    const integrated = rms > 0 ? -0.691 + 10 * Math.log10(rms * rms) : -70;
-
-    // Momentary (400ms 窓) と Short-term (3s 窓) を実測 — 最大値を採用
-    const momentary = this.windowedLoudness(data, sampleRate, 0.4);
-    const shortTerm = this.windowedLoudness(data, sampleRate, 3.0);
-
-    // Loudness Range (LRA): 窓ごとの分布の 10-95 パーセンタイル幅
-    const range = this.computeLoudnessRange(data, sampleRate);
-
-    return {
-      momentary,
-      shortTerm,
-      integrated,
-      range,
-      truePeak: peak > 0 ? 20 * Math.log10(peak) : -Infinity,
-    };
+    return measureLoudness(channels, buffer.sampleRate);
   }
 
-  /** 指定窓長での最大ラウドネス (momentary/short-term 用) */
-  private windowedLoudness(data: Float32Array, sampleRate: number, windowSec: number): number {
-    const windowSize = Math.floor(sampleRate * windowSec);
-    if (windowSize <= 0 || data.length < windowSize) {
-      const rms = Math.sqrt(data.reduce((s, x) => s + x * x, 0) / Math.max(1, data.length));
-      return rms > 0 ? -0.691 + 10 * Math.log10(rms * rms) : -70;
-    }
-    let maxLoudness = -70;
-    const step = Math.floor(windowSize / 4); // 75% オーバーラップ
-    for (let start = 0; start + windowSize <= data.length; start += step) {
-      let sq = 0;
-      for (let i = start; i < start + windowSize; i++) sq += data[i] * data[i];
-      const rms = Math.sqrt(sq / windowSize);
-      const loud = rms > 0 ? -0.691 + 10 * Math.log10(rms * rms) : -70;
-      if (loud > maxLoudness) maxLoudness = loud;
-    }
-    return maxLoudness;
-  }
-
-  /** Loudness Range (LRA) を窓ごとのパーセンタイル幅で算出 */
-  private computeLoudnessRange(data: Float32Array, sampleRate: number): number {
-    const windowSize = Math.floor(sampleRate * 3.0);
-    if (windowSize <= 0 || data.length < windowSize) return 0;
-    const loudnesses: number[] = [];
-    const step = windowSize; // 非オーバーラップ
-    for (let start = 0; start + windowSize <= data.length; start += step) {
-      let sq = 0;
-      for (let i = start; i < start + windowSize; i++) sq += data[i] * data[i];
-      const rms = Math.sqrt(sq / windowSize);
-      if (rms > 0) loudnesses.push(-0.691 + 10 * Math.log10(rms * rms));
-    }
-    if (loudnesses.length < 2) return 0;
-    loudnesses.sort((a, b) => a - b);
-    const p10 = loudnesses[Math.floor(loudnesses.length * 0.1)];
-    const p95 = loudnesses[Math.floor(loudnesses.length * 0.95)];
-    return Math.max(0, p95 - p10);
+  /**
+   * サイドチェーン(セリフ)に応じて BGM を減衰させるダッキングゲイン包絡を計算する。
+   * 返り値は music と同じ長さの線形ゲイン配列 (オフライン適用用)。
+   */
+  computeDucking(music: Float32Array, sidechain: Float32Array, options: DuckingOptions): Float32Array {
+    return computeDuckingGain(music, sidechain, options);
   }
 
   /**

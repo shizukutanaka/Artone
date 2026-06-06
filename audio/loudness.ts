@@ -1,0 +1,359 @@
+/**
+ * Artone v3 — Loudness (ITU-R BS.1770-4 / EBU R128) + Auto-Ducking
+ *
+ * オフライン解析用の純関数群 (AudioWorklet の realtime path ではない)。
+ * 既存 `audio-engine.ts` の簡易 RMS 実装を、規格準拠の測定に置き換える:
+ *  - K-weighting プレフィルタ (stage1 high-shelf + stage2 high-pass)
+ *  - ゲーティング積分ラウドネス (絶対 -70 LUFS + 相対 -10 LU)
+ *  - momentary(400ms)/short-term(3s) 窓ラウドネス
+ *  - Loudness Range (LRA, EBU Tech 3342: 相対 -20 LU, 10-95 パーセンタイル)
+ *  - True Peak (4x オーバーサンプリング近似, BS.1770-4 Annex 2)
+ *  - マルチチャンネル channel-weighted 加算 (L/R/C=1.0, surround=1.41)
+ *
+ * 設計根拠: ITU-R BS.1770-4 / EBU R128 / EBU Tech 3342。
+ * 係数導出は libebur128 / pyloudnorm と同一 (48kHz で規格係数に一致, 任意 fs 対応)。
+ *
+ * @version 1.0.0
+ */
+
+// ============================================================
+// Types
+// ============================================================
+
+/** transposed direct-form II biquad の係数 (a0 は 1 に正規化済み)。 */
+export interface BiquadCoeffs {
+  b0: number;
+  b1: number;
+  b2: number;
+  a1: number;
+  a2: number;
+}
+
+/** K-weighting 2段フィルタの係数。 */
+export interface KWeightingCoeffs {
+  stage1: BiquadCoeffs;
+  stage2: BiquadCoeffs;
+}
+
+/** BS.1770/R128 ラウドネス測定結果 (全て LUFS / dBTP)。 */
+export interface LoudnessMeasurement {
+  momentary: number;
+  shortTerm: number;
+  integrated: number;
+  range: number;
+  truePeak: number;
+}
+
+/** 自動ダッキングのパラメータ。 */
+export interface DuckingOptions {
+  sampleRate: number;
+  /** これを超えるサイドチェーン(セリフ)レベルでダッキング開始 (dBFS)。既定 -30。 */
+  thresholdDb?: number;
+  /** ダッキング量 (dB, 負値)。既定 -12。 */
+  duckDb?: number;
+  /** ダッキングへ入る時定数 (ms)。既定 50。 */
+  attackMs?: number;
+  /** ダッキングから戻る時定数 (ms)。既定 300。 */
+  releaseMs?: number;
+}
+
+// ============================================================
+// Constants
+// ============================================================
+
+/** BS.1770 ラウドネス較正オフセット。 */
+const ABS_OFFSET = -0.691;
+/** 絶対ゲート閾値 (LUFS)。 */
+const ABSOLUTE_GATE = -70;
+/** 積分ラウドネスの相対ゲート (LU)。 */
+const RELATIVE_GATE_INTEGRATED = -10;
+/** LRA の相対ゲート (LU, EBU Tech 3342)。 */
+const RELATIVE_GATE_LRA = -20;
+
+/**
+ * チャンネル重み (BS.1770)。L/R/C=1.0、surround(Ls/Rs)=1.41、LFE=0(除外)。
+ * index は AudioBuffer のチャンネル順 (0:L 1:R 2:C 3:LFE 4:Ls 5:Rs) を仮定。
+ */
+function channelWeight(index: number): number {
+  if (index === 3) return 0; // LFE は除外
+  return index >= 4 ? 1.41 : 1.0;
+}
+
+// ============================================================
+// K-weighting
+// ============================================================
+
+/**
+ * 指定サンプルレートの K-weighting 係数を導出する。
+ * 48kHz で BS.1770-4 の規定係数に一致 (libebur128/pyloudnorm と同一導出)。
+ */
+export function kWeightingCoeffs(sampleRate: number): KWeightingCoeffs {
+  // Stage 1: high-shelf
+  const f0 = 1681.9744509555319;
+  const gainDb = 3.99984385397;
+  const q1 = 0.7071752369554196;
+  const k1 = Math.tan((Math.PI * f0) / sampleRate);
+  const vh = Math.pow(10, gainDb / 20);
+  const vb = Math.pow(vh, 0.4996667741545416);
+  const den1 = 1 + k1 / q1 + k1 * k1;
+  const stage1: BiquadCoeffs = {
+    b0: (vh + (vb * k1) / q1 + k1 * k1) / den1,
+    b1: (2 * (k1 * k1 - vh)) / den1,
+    b2: (vh - (vb * k1) / q1 + k1 * k1) / den1,
+    a1: (2 * (k1 * k1 - 1)) / den1,
+    a2: (1 - k1 / q1 + k1 * k1) / den1,
+  };
+
+  // Stage 2: high-pass (RLB)
+  const f0b = 38.13547087602444;
+  const q2 = 0.5003270373238773;
+  const k2 = Math.tan((Math.PI * f0b) / sampleRate);
+  const den2 = 1 + k2 / q2 + k2 * k2;
+  const stage2: BiquadCoeffs = {
+    b0: 1,
+    b1: -2,
+    b2: 1,
+    a1: (2 * (k2 * k2 - 1)) / den2,
+    a2: (1 - k2 / q2 + k2 * k2) / den2,
+  };
+
+  return { stage1, stage2 };
+}
+
+/** 単一 biquad をサンプル列に適用 (transposed direct-form II)。 */
+function applyBiquad(samples: Float32Array, c: BiquadCoeffs): Float32Array {
+  const out = new Float32Array(samples.length);
+  let z1 = 0;
+  let z2 = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const x = samples[i];
+    const y = c.b0 * x + z1;
+    z1 = c.b1 * x - c.a1 * y + z2;
+    z2 = c.b2 * x - c.a2 * y;
+    out[i] = y;
+  }
+  return out;
+}
+
+/** K-weighting (stage1 → stage2) を適用する。 */
+export function applyKWeighting(samples: Float32Array, sampleRate: number): Float32Array {
+  const c = kWeightingCoeffs(sampleRate);
+  return applyBiquad(applyBiquad(samples, c.stage1), c.stage2);
+}
+
+// ============================================================
+// Block energy (channel-weighted mean square)
+// ============================================================
+
+/** z をラウドネス(LUFS)へ変換。z<=0 は -Infinity。 */
+function loudnessFromZ(z: number): number {
+  return z > 0 ? ABS_OFFSET + 10 * Math.log10(z) : -Infinity;
+}
+
+/**
+ * K-weighting 済みチャンネル列から、窓ごとの channel-weighted 平均二乗 z を返す。
+ * windowSec の窓を hopSec ステップでスライド。
+ */
+function blockEnergies(
+  weightedChannels: Float32Array[],
+  params: { sampleRate: number; windowSec: number; hopSec: number }
+): number[] {
+  const { sampleRate, windowSec, hopSec } = params;
+  const n = weightedChannels[0]?.length ?? 0;
+  const windowSize = Math.max(1, Math.round(windowSec * sampleRate));
+  const hop = Math.max(1, Math.round(hopSec * sampleRate));
+  const out: number[] = [];
+  if (n < windowSize) return out;
+  for (let start = 0; start + windowSize <= n; start += hop) {
+    let z = 0;
+    for (let ch = 0; ch < weightedChannels.length; ch++) {
+      const w = channelWeight(ch);
+      if (w === 0) continue;
+      const data = weightedChannels[ch];
+      let sq = 0;
+      for (let i = start; i < start + windowSize; i++) sq += data[i] * data[i];
+      z += w * (sq / windowSize);
+    }
+    out.push(z);
+  }
+  return out;
+}
+
+/** チャンネル全体の channel-weighted 平均二乗 (窓が取れない短尺用フォールバック)。 */
+function overallEnergy(weightedChannels: Float32Array[]): number {
+  let z = 0;
+  for (let ch = 0; ch < weightedChannels.length; ch++) {
+    const w = channelWeight(ch);
+    if (w === 0) continue;
+    const data = weightedChannels[ch];
+    if (data.length === 0) continue;
+    let sq = 0;
+    for (let i = 0; i < data.length; i++) sq += data[i] * data[i];
+    z += w * (sq / data.length);
+  }
+  return z;
+}
+
+// ============================================================
+// Gated integrated loudness
+// ============================================================
+
+/** ゲーティング積分ラウドネス (絶対 -70 + 相対 relativeGate)。 */
+function gatedLoudness(blockZ: number[], relativeGate: number): number {
+  const absKept = blockZ.filter((z) => loudnessFromZ(z) >= ABSOLUTE_GATE);
+  if (absKept.length === 0) return -Infinity;
+
+  const meanAbs = absKept.reduce((s, z) => s + z, 0) / absKept.length;
+  const relThreshold = loudnessFromZ(meanAbs) + relativeGate;
+
+  const relKept = absKept.filter((z) => loudnessFromZ(z) >= relThreshold);
+  if (relKept.length === 0) return loudnessFromZ(meanAbs);
+
+  const meanRel = relKept.reduce((s, z) => s + z, 0) / relKept.length;
+  return loudnessFromZ(meanRel);
+}
+
+/** 窓ラウドネスの最大値 (momentary/short-term メーター用)。 */
+function maxWindowLoudness(weightedChannels: Float32Array[], sampleRate: number, windowSec: number): number {
+  const energies = blockEnergies(weightedChannels, { sampleRate, windowSec, hopSec: windowSec / 4 });
+  if (energies.length === 0) return loudnessFromZ(overallEnergy(weightedChannels));
+  let max = -Infinity;
+  for (const z of energies) {
+    const l = loudnessFromZ(z);
+    if (l > max) max = l;
+  }
+  return max;
+}
+
+/** Loudness Range (LRA, EBU Tech 3342): 3s 窓 / 100ms hop, 相対 -20 LU, 10-95 パーセンタイル。 */
+function loudnessRange(weightedChannels: Float32Array[], sampleRate: number): number {
+  const energies = blockEnergies(weightedChannels, { sampleRate, windowSec: 3.0, hopSec: 0.1 });
+  const absKept = energies.filter((z) => loudnessFromZ(z) >= ABSOLUTE_GATE);
+  if (absKept.length < 2) return 0;
+
+  const meanAbs = absKept.reduce((s, z) => s + z, 0) / absKept.length;
+  const relThreshold = loudnessFromZ(meanAbs) + RELATIVE_GATE_LRA;
+  const loud = absKept
+    .map(loudnessFromZ)
+    .filter((l) => l >= relThreshold)
+    .sort((a, b) => a - b);
+  if (loud.length < 2) return 0;
+
+  const p10 = loud[Math.floor(loud.length * 0.1)];
+  const p95 = loud[Math.min(loud.length - 1, Math.floor(loud.length * 0.95))];
+  return Math.max(0, p95 - p10);
+}
+
+// ============================================================
+// True peak (4x oversampling approximation)
+// ============================================================
+
+/**
+ * True Peak (dBTP) を 4x 線形オーバーサンプリングで近似する。
+ * 注: BS.1770-4 Annex 2 は専用 FIR を規定。本実装は inter-sample peak を
+ * 線形補間で近似 (サンプルピークより安全側だが規格 FIR より控えめ)。
+ */
+function truePeakDbtp(channels: Float32Array[]): number {
+  const OS = 4;
+  let peak = 0;
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) {
+      const a = Math.abs(ch[i]);
+      if (a > peak) peak = a;
+      if (i + 1 < ch.length) {
+        const next = ch[i + 1];
+        for (let s = 1; s < OS; s++) {
+          const interp = Math.abs(ch[i] + ((next - ch[i]) * s) / OS);
+          if (interp > peak) peak = interp;
+        }
+      }
+    }
+  }
+  return peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+}
+
+// ============================================================
+// Public: full measurement
+// ============================================================
+
+/**
+ * チャンネル列 (各 Float32Array) から BS.1770-4 / EBU R128 ラウドネスを測定する。
+ * @param channels - 非加重 (raw) のチャンネルサンプル列
+ * @param sampleRate - サンプルレート (Hz)
+ */
+export function measureLoudness(channels: Float32Array[], sampleRate: number): LoudnessMeasurement {
+  if (channels.length === 0 || (channels[0]?.length ?? 0) === 0) {
+    return { momentary: -Infinity, shortTerm: -Infinity, integrated: -Infinity, range: 0, truePeak: -Infinity };
+  }
+
+  // True peak は K-weighting *前* の信号で測る (BS.1770-4 Annex 2)。
+  const truePeak = truePeakDbtp(channels);
+
+  // 以降の loudness は K-weighting 済み信号で算出。
+  const weighted = channels.map((ch) => applyKWeighting(ch, sampleRate));
+
+  const momentaryEnergies = blockEnergies(weighted, { sampleRate, windowSec: 0.4, hopSec: 0.1 });
+  const integrated =
+    momentaryEnergies.length > 0
+      ? gatedLoudness(momentaryEnergies, RELATIVE_GATE_INTEGRATED)
+      : loudnessFromZ(overallEnergy(weighted));
+
+  return {
+    momentary: maxWindowLoudness(weighted, sampleRate, 0.4),
+    shortTerm: maxWindowLoudness(weighted, sampleRate, 3.0),
+    integrated,
+    range: loudnessRange(weighted, sampleRate),
+    truePeak,
+  };
+}
+
+// ============================================================
+// Public: auto-ducking
+// ============================================================
+
+/** ms 時定数を一次フィルタ係数へ変換。 */
+function timeConstant(ms: number, sampleRate: number): number {
+  if (ms <= 0) return 0;
+  return Math.exp(-1 / ((ms / 1000) * sampleRate));
+}
+
+/**
+ * サイドチェーン(セリフ)に応じて BGM を減衰させるゲイン包絡を生成する純関数。
+ * 返り値は music と同じ長さの線形ゲイン (0..1) 配列。
+ *
+ * @param music - 対象 (BGM) サンプル — 長さの基準
+ * @param sidechain - 検出元 (セリフ等) サンプル
+ * @param options - 閾値/減衰量/アタック/リリース
+ */
+export function computeDuckingGain(
+  music: Float32Array,
+  sidechain: Float32Array,
+  options: DuckingOptions
+): Float32Array {
+  const { sampleRate } = options;
+  const thresholdDb = options.thresholdDb ?? -30;
+  const duckDb = options.duckDb ?? -12;
+  const attack = timeConstant(options.attackMs ?? 50, sampleRate);
+  const release = timeConstant(options.releaseMs ?? 300, sampleRate);
+
+  // サイドチェーン用エンベロープフォロワ (高速アタック/中速リリース)。
+  const envAtk = timeConstant(5, sampleRate);
+  const envRel = timeConstant(100, sampleRate);
+
+  const gain = new Float32Array(music.length);
+  let env = 0;
+  let gDb = 0; // 現在のゲイン (dB)。0 = 非ダッキング、duckDb まで下降。
+  for (let i = 0; i < music.length; i++) {
+    const sc = i < sidechain.length ? Math.abs(sidechain[i]) : 0;
+    const ec = sc > env ? envAtk : envRel;
+    env = sc + (env - sc) * ec;
+
+    const envDb = env > 1e-7 ? 20 * Math.log10(env) : -Infinity;
+    const target = envDb > thresholdDb ? duckDb : 0;
+    // ダッキングへ入る (target<gDb) ときは attack、戻るときは release。
+    const coeff = target < gDb ? attack : release;
+    gDb = target + (gDb - target) * coeff;
+    gain[i] = Math.pow(10, gDb / 20);
+  }
+  return gain;
+}

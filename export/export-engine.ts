@@ -10,6 +10,7 @@
  * 
  * @version 1.0.0
  */
+import { encodeWAVBlob, type WavBitDepth } from './wav-encoder';
 
 // ============================================================
 // Types
@@ -561,6 +562,20 @@ export class ExportEngine {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  /**
+   * AudioBuffer を再生可能な WAV (audio/wav) として書き出す。
+   * WebCodecs 非対応環境や音声/ステム出力のための実フォーマット経路。
+   * @param buffer - 書き出す音声
+   * @param bitDepth - 16/24 (整数PCM) または 32 (float)。既定 16。
+   */
+  exportAudioWAV(buffer: AudioBuffer, bitDepth: WavBitDepth = 16): Blob {
+    const channels: Float32Array[] = [];
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      channels.push(buffer.getChannelData(ch));
+    }
+    return encodeWAVBlob(channels, { sampleRate: buffer.sampleRate, bitDepth });
   }
 
   // ============================================================

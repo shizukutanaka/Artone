@@ -55,6 +55,7 @@ Artone v3 の全変更を記録。
 - **`audio/loudness.ts`** に EBU R128 / ITU-R BS.1770-4 ストリーミングメーター機能を統合。`createLoudnessMeter()` ストリーミング API（任意ブロックサイズ対応）、`kWeightChannel()` エイリアス、`LoudnessMeasurement` に `loudnessRange`（`range` の別名）・`samplePeak`（dBFS）フィールドを追加。重複実装 `audio/loudness-meter.ts` を削除し `audio/loudness.ts` に一本化（CLAUDE.md「重複ファイルは統合」準拠）。テスト合計 51（38 + 13）。
 - **`color/white-balance.ts`** — 自動ホワイトバランス解析・ゲイン補正。Gray World (Buchsbaum 1980 平均輝度推定) / White Patch (Max RGB 最大輝度推定) / Percentile (ヒストグラム分位推定、デフォルト98th) の3アルゴリズム + 明示的光源指定 `illuminantGains()`。von Kries 対角ゲインモデル (緑チャンネル基準正規化)。`applyWhiteBalance()` で RGBA バッファ in-place 補正、`composeGains()` で連鎖補正、`invertGains()` で補正の取り消し。`estimateWhiteBalance()` 統一 API。45 テスト。
 - **`audio/eq-response.ts`** — マルチバンドパラメトリック EQ 周波数応答計算 (Audio EQ Cookbook / Zölzer 2011)。`biquad-filter.ts` 上に構築。Lowpass/Highpass/Bandpass/Notch/Peak/LowShelf/HighShelf の全バンドタイプ対応。カスケード biquad チェーンの dB 合算で正確な複合応答。20 Hz〜Nyquist の対数等間隔周波数グリッド (`makeLogFrequencies`)。`computeEQResponse()` / `isFlat()` / `peakMagnitude()` / `minMagnitude()` / `nearestFrequencyIndex()`。50 テスト。
+- **`audio/resampler.ts`** — 高品質サンプルレート変換 (Smith 2011 / Zölzer 2011)。任意有理比 (44100↔48000/96000 等) 対応。品質 3 段階: `'linear'` (一次補間・プロキシ用) / `'sinc4'` (4-tap Hann 窓 sinc・リアルタイム向き) / `'sinc16'` (16-tap・最終書き出し品質)。グローバル位置追跡によりストリーミング (`createResampler`) とバッチ (`resample`) の出力が完全一致。`resampleMultichannel()` でマルチチャンネル対応。`outputSampleCount()` 整数乗算先行で高精度。34 テスト。
 
 ## [3.0.0] - 2026-05-23
 

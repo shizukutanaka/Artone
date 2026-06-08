@@ -58,6 +58,7 @@ Artone v3 の全変更を記録。
 - **`audio/resampler.ts`** — 高品質サンプルレート変換 (Smith 2011 / Zölzer 2011)。任意有理比 (44100↔48000/96000 等) 対応。品質 3 段階: `'linear'` (一次補間・プロキシ用) / `'sinc4'` (4-tap Hann 窓 sinc・リアルタイム向き) / `'sinc16'` (16-tap・最終書き出し品質)。グローバル位置追跡によりストリーミング (`createResampler`) とバッチ (`resample`) の出力が完全一致。`resampleMultichannel()` でマルチチャンネル対応。`outputSampleCount()` 整数乗算先行で高精度。34 テスト。
 - **`core/ring-buffer.ts`** — ロックフリー SPSC リングバッファ (Lamport 1977)。容量は pow2 に正規化。`write()` / `read()` / `writeSample()` / `readSample()` / `skip()` / `peek()` を提供。ラップアラウンド対応の高速 bitmask モジュロ。`StereoRingBuffer` で L/R インターリーブ書き込み/デインターリーブ読み出しを追加。`audio/CLAUDE.md` 必須要件の lock-free ring buffer を実装。32 テスト。
 - **`audio/spectral-gate.ts`** — スペクトル減算ノイズリダクション (Boll 1979 / Martin 2001)。Hann 窓 50 % オーバーラップ OLA フレーム分析 (周期 Hann の∑hann = 1.0 性質を利用し合成窓・正規化不要)。純 TypeScript FFT/IFFT (Cooley-Tukey 基数-2) を内蔵。`estimateNoiseProfile()` でノイズ専用区間からパワースペクトル推定。`applySpectralGate()` が静的プロファイル + ハーフ波整流スペクトル減算 (α 係数 + スペクトルフロアで "musical noise" 抑制)。`denoiseAudio()` 高レベル API。`createSpectralGateProcessor()` 対応ストリーミング版 (適応型ノイズ追跡・フレーム分割処理)。31 テスト。
+- **`audio/transient-detector.ts`** — マルチバンドスペクトルフラックス型トランジェント/オンセット検出 (Bello et al. 2005 / Dixon 2006)。帯域分割 RMS エネルギーによるハーフ波整流フラックスを onset strength とし、局所中央値 + MAD (Median Absolute Deviation) スケールによる適応閾値でピーク検出。リフラクタリー期間制御で最小オンセット間隔を保証。`detectTransients()` バッチ解析、`createTransientDetector()` ストリーミング対応 (任意ブロックサイズ)。`onsetsToSampleIndices()` / `filterByConfidence()` ユーティリティ。42 テスト。
 
 ## [3.0.0] - 2026-05-23
 

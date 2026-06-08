@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { otio, type ArtoneTimeline } from '../interchange/otio';
+import { otio, type ArtoneTimeline, type OTIOImportLoss, type OTIOImportResult } from '../interchange/otio';
 import { interchange } from '../interchange/legacy-formats';
 import { sampleTimeline } from './fixtures/timelines';
 
@@ -182,6 +182,212 @@ describe('EDL reel name conflicts', () => {
     expect(edl.match(/^001\s+SHOT\s+/m)).toBeTruthy();
     expect(edl.match(/^002\s+SHOT2\s+/m)).toBeTruthy();
     expect(edl.match(/^003\s+SHOT3\s+/m)).toBeTruthy();
+  });
+});
+
+describe('OTIO LinearTimeWarp round-trip', () => {
+  const makeSpeedClip = (speedFactor?: number) => ({
+    id: 's1',
+    name: 'SlowMo',
+    startFrame: 0,
+    durationFrames: 60,
+    sourceInFrame: 0,
+    mediaUrl: 'file:///tmp/clip.mp4',
+    effects: [],
+    markers: [],
+    enabled: true,
+    ...(speedFactor !== undefined ? { speedFactor } : {}),
+  });
+
+  const makeSpeedTimeline = (speedFactor?: number): ArtoneTimeline => ({
+    name: 'Speed Test',
+    fps: 30,
+    videoTracks: [{ name: 'V1', kind: 'video', enabled: true, clips: [makeSpeedClip(speedFactor)] }],
+    audioTracks: [],
+    markers: [],
+  });
+
+  it('exports speedFactor 2.0 as LinearTimeWarp.1 with time_scalar 0.5', () => {
+    const json = otio.exporter().exportToString(makeSpeedTimeline(2.0));
+    const parsed = JSON.parse(json);
+    const clip = parsed.tracks.children[0].children[0];
+    const ltw = clip.effects.find((e: { OTIO_SCHEMA: string }) => e.OTIO_SCHEMA === 'LinearTimeWarp.1');
+    expect(ltw).toBeDefined();
+    expect(ltw.time_scalar).toBeCloseTo(0.5, 10);
+    expect(ltw.effect_name).toBe('LinearTimeWarp');
+  });
+
+  it('stores original speedFactor in artone metadata', () => {
+    const json = otio.exporter().exportToString(makeSpeedTimeline(2.0));
+    const parsed = JSON.parse(json);
+    const clip = parsed.tracks.children[0].children[0];
+    const ltw = clip.effects.find((e: { OTIO_SCHEMA: string }) => e.OTIO_SCHEMA === 'LinearTimeWarp.1');
+    expect((ltw.metadata?.artone as { speedFactor?: number })?.speedFactor).toBe(2.0);
+  });
+
+  it('exports speedFactor 0.5 (double speed) as time_scalar 2.0', () => {
+    const json = otio.exporter().exportToString(makeSpeedTimeline(0.5));
+    const ltw = JSON.parse(json).tracks.children[0].children[0].effects
+      .find((e: { OTIO_SCHEMA: string }) => e.OTIO_SCHEMA === 'LinearTimeWarp.1');
+    expect(ltw.time_scalar).toBeCloseTo(2.0, 10);
+  });
+
+  it('does not emit LinearTimeWarp for normal speed (1.0)', () => {
+    const json = otio.exporter().exportToString(makeSpeedTimeline(1.0));
+    const clip = JSON.parse(json).tracks.children[0].children[0];
+    const ltw = clip.effects.find((e: { OTIO_SCHEMA: string }) => e.OTIO_SCHEMA === 'LinearTimeWarp.1');
+    expect(ltw).toBeUndefined();
+    expect(clip.effects.length).toBe(0);
+  });
+
+  it('does not emit LinearTimeWarp when speedFactor is undefined', () => {
+    const json = otio.exporter().exportToString(makeSpeedTimeline(undefined));
+    const clip = JSON.parse(json).tracks.children[0].children[0];
+    const ltw = clip.effects.find((e: { OTIO_SCHEMA: string }) => e.OTIO_SCHEMA === 'LinearTimeWarp.1');
+    expect(ltw).toBeUndefined();
+  });
+
+  it('round-trips speedFactor 2.0 through export/import', () => {
+    const original = makeSpeedTimeline(2.0);
+    const json = otio.exporter().exportToString(original);
+    const restored = otio.importer().importFromString(json, 30);
+    expect(restored.videoTracks[0].clips[0].speedFactor).toBeCloseTo(2.0, 10);
+  });
+
+  it('round-trips speedFactor 0.25 through export/import', () => {
+    const original = makeSpeedTimeline(0.25);
+    const json = otio.exporter().exportToString(original);
+    const restored = otio.importer().importFromString(json, 30);
+    expect(restored.videoTracks[0].clips[0].speedFactor).toBeCloseTo(0.25, 10);
+  });
+
+  it('leaves speedFactor undefined when no LinearTimeWarp in OTIO', () => {
+    const original = makeSpeedTimeline(undefined);
+    const json = otio.exporter().exportToString(original);
+    const restored = otio.importer().importFromString(json, 30);
+    expect(restored.videoTracks[0].clips[0].speedFactor).toBeUndefined();
+  });
+});
+
+describe('OTIOImporter.importWithReport', () => {
+  const makeCleanJson = (): string =>
+    otio.exporter().exportToString(sampleTimeline);
+
+  it('returns OTIOImportResult with timeline and losses fields', () => {
+    const result: OTIOImportResult = otio.importer().importWithReport(makeCleanJson(), 30);
+    expect(result).toHaveProperty('timeline');
+    expect(result).toHaveProperty('losses');
+    expect(Array.isArray(result.losses)).toBe(true);
+  });
+
+  it('returns empty losses for a clean Artone-originated round-trip', () => {
+    const result = otio.importer().importWithReport(makeCleanJson(), 30);
+    expect(result.losses).toEqual([]);
+  });
+
+  it('timeline from importWithReport matches importFromString', () => {
+    const json = makeCleanJson();
+    const withReport = otio.importer().importWithReport(json, 30);
+    const direct = otio.importer().importFromString(json, 30);
+    expect(withReport.timeline.name).toBe(direct.name);
+    expect(withReport.timeline.fps).toBe(direct.fps);
+    expect(withReport.timeline.videoTracks.length).toBe(direct.videoTracks.length);
+    expect(withReport.timeline.videoTracks[0].clips.length).toBe(direct.videoTracks[0].clips.length);
+  });
+
+  it('reports a loss for a foreign NLE effect (no artone metadata)', () => {
+    // Build OTIO JSON with a foreign effect (no metadata.artone.params)
+    const baseJson = makeCleanJson();
+    const parsed = JSON.parse(baseJson);
+    parsed.tracks.children[0].children[0].effects = [
+      { OTIO_SCHEMA: 'Effect.1', effect_name: 'DaVinci_FilmGrain', name: 'Film Grain' },
+    ];
+    const result = otio.importer().importWithReport(JSON.stringify(parsed), 30);
+    const losses: OTIOImportLoss[] = result.losses;
+    expect(losses.length).toBeGreaterThan(0);
+    const loss = losses.find((l) => l.field === 'effect');
+    expect(loss).toBeDefined();
+    expect(loss?.otioType).toContain('DaVinci_FilmGrain');
+    expect(loss?.trackName).toBe('V1');
+    expect(loss?.clipName).toBe('Shot 1');
+  });
+
+  it('does NOT report a loss for an effect that came from Artone (has artone metadata)', () => {
+    const baseJson = makeCleanJson();
+    const parsed = JSON.parse(baseJson);
+    parsed.tracks.children[0].children[1].effects = [
+      {
+        OTIO_SCHEMA: 'Effect.1',
+        effect_name: 'colorGrade',
+        name: 'Cool Look',
+        metadata: { artone: { params: { temp: -10 } } },
+      },
+    ];
+    const result = otio.importer().importWithReport(JSON.stringify(parsed), 30);
+    const effectLosses = result.losses.filter((l) => l.field === 'effect');
+    expect(effectLosses.length).toBe(0);
+  });
+
+  it('reports a loss for MissingReference.1 media', () => {
+    const baseJson = makeCleanJson();
+    const parsed = JSON.parse(baseJson);
+    parsed.tracks.children[0].children[0].media_reference = {
+      OTIO_SCHEMA: 'MissingReference.1',
+    };
+    const result = otio.importer().importWithReport(JSON.stringify(parsed), 30);
+    const loss = result.losses.find((l) => l.field === 'media_reference');
+    expect(loss).toBeDefined();
+    expect(loss?.otioType).toBe('MissingReference.1');
+    expect(loss?.clipName).toBe('Shot 1');
+  });
+
+  it('reports losses for multiple clips independently', () => {
+    const baseJson = makeCleanJson();
+    const parsed = JSON.parse(baseJson);
+    // Foreign effects on both clips
+    parsed.tracks.children[0].children[0].effects = [
+      { OTIO_SCHEMA: 'Effect.1', effect_name: 'ForeignA', name: 'A' },
+    ];
+    parsed.tracks.children[0].children[2].effects = [
+      { OTIO_SCHEMA: 'Effect.1', effect_name: 'ForeignB', name: 'B' },
+    ];
+    const result = otio.importer().importWithReport(JSON.stringify(parsed), 30);
+    const effectLosses = result.losses.filter((l) => l.field === 'effect');
+    expect(effectLosses.length).toBe(2);
+    const types = effectLosses.map((l) => l.otioType);
+    expect(types.some((t) => t.includes('ForeignA'))).toBe(true);
+    expect(types.some((t) => t.includes('ForeignB'))).toBe(true);
+  });
+
+  it('speedFactor round-trip via importWithReport preserves speed', () => {
+    const tl: ArtoneTimeline = {
+      name: 'Speed',
+      fps: 24,
+      videoTracks: [{
+        name: 'V1', kind: 'video', enabled: true,
+        clips: [{
+          id: 'x1', name: 'Clip', startFrame: 0, durationFrames: 48,
+          sourceInFrame: 0, mediaUrl: 'x.mp4', effects: [], markers: [],
+          enabled: true, speedFactor: 4.0,
+        }],
+      }],
+      audioTracks: [],
+      markers: [],
+    };
+    const json = otio.exporter().exportToString(tl);
+    const result = otio.importer().importWithReport(json, 24);
+    expect(result.losses).toEqual([]);
+    expect(result.timeline.videoTracks[0].clips[0].speedFactor).toBeCloseTo(4.0, 10);
+  });
+
+  it('throws on invalid JSON', () => {
+    expect(() => otio.importer().importWithReport('not json', 30)).toThrow('Invalid OTIO JSON');
+  });
+
+  it('throws on non-Timeline.1 schema', () => {
+    expect(() =>
+      otio.importer().importWithReport(JSON.stringify({ OTIO_SCHEMA: 'Clip.1' }), 30)
+    ).toThrow('Unsupported OTIO schema');
   });
 });
 

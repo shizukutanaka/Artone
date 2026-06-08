@@ -30,6 +30,15 @@ Artone v3 の全変更を記録。
 
 ### Added
 - 欠落アセットを補完: Artone ブランドの `favicon.svg`、`accessibility/bundle-entry.ts` (`build:a11y` 用エントリ)。
+- **`captions/readability.ts`** — EBU/Netflix/YouTube/BBC 準拠キャプション正規化。放送規格 CPS 制限・行長制限・最小時間を実装。`normalizeCues()` / `auditCues()` を `CaptionManager.importFromTranscription()` に統合。26 テスト。
+- **`color/lut-apply.ts`** — 純関数 3D-LUT 三線形補間 (ICC.1:2022/.cube 仕様準拠)。Fritsch-Carlson 単調三次スプライン曲線。`parseCubeLUT()` で .cube ファイルをパース。`grading-engine.ts` の CPU パスに統合。33 テスト。
+- **`audio/biquad-filter.ts`** — Audio EQ Cookbook (Bristow-Johnson 2005) 準拠バイクアッドフィルタ。LPF/HPF/Peak EQ/LowShelf/HighShelf/Notch/Bandpass を実装。転置直接形 II で数値安定性を確保。`applyParametricEQ()` で複数バンド処理。26 テスト。
+- **`color/color-science.ts`** — ACES カラーサイエンス純関数ライブラリ。AP0/AP1/sRGB/Rec.2020 相互変換行列、sRGB OETF/EOTF、ACEScc/ACEScct 対数符号化、Hill 2017 多項式 RRT+ODT。40 テスト。
+- **`audio/dynamics.ts`** — Giannoulis 2012 設計コンプレッサー/リミッター/ゲート。ソフトニー対応、マルチチャンネル対応、ゲインリダクション曲線出力。`gainComputeCompressor()` のみ純粋関数で単体テスト可能。27 テスト。
+- **`animation/keyframe-animator.ts`** に `bezierHandles` オプション引数を追加 (`addKeyframe()` の第6引数)。
+- **`tests/keyframe-animator.test.ts`** — 22 種イージングの境界値・単調性・ベジェ・CRUD・エッジケースを網羅する 59 テスト。
+- **`interchange/otio.ts`** — OTIO `LinearTimeWarp.1` 対応 (エクスポート/インポート)。`ArtoneClip.speedFactor` をクリップ速度として保持し、OTIO 往復で完全ラウンドトリップ。`OTIOImporter.importWithReport()` メソッドで損失箇所を明示 (`OTIOImportLoss` / `OTIOImportResult`)。外部 NLE エフェクト・`MissingReference.1` メディアを損失リストに記録。18 テスト追加 (合計 36 テスト)。
+- **`color/aces-idt-odt.ts`** — ACES IDT/ODT 完全実装 (OCIO 準拠)。カメラ IDT: Rec.709/sRGB、Sony S-Log3/S-Gamut3 (MLUT-001 v2.5)、ARRI LogC3 EI800/Wide Gamut。ディスプレイ ODT: sRGB SDR (Hill 2017 RRT+ODT)、DCI-P3 D65、HDR10 (Rec.2020+PQ, ST 2084)、HLG (ARIB STD-B67)。`primaryToXYZMatrix()` / `mat3Inv()` / `colorTransform()` / `applyColorTransformToBuffer()` を含む。69 テスト。
 
 ## [3.0.0] - 2026-05-23
 

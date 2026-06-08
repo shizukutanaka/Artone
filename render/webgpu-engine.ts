@@ -633,6 +633,9 @@ export class WebGPURenderEngine {
 
   destroy(): void {
     this.clearCache();
+    // GPURenderPipeline and GPUComputePipeline have no .destroy(), but holding
+    // references prevents GC. Clear the map so the device can be reclaimed.
+    this.pipelines.clear();
     this.device = null;
     this.context = null;
   }

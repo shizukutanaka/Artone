@@ -37,6 +37,7 @@ Artone v3 の全変更を記録。
 - **`audio/dynamics.ts`** — Giannoulis 2012 設計コンプレッサー/リミッター/ゲート。ソフトニー対応、マルチチャンネル対応、ゲインリダクション曲線出力。`gainComputeCompressor()` のみ純粋関数で単体テスト可能。27 テスト。
 - **`animation/keyframe-animator.ts`** に `bezierHandles` オプション引数を追加 (`addKeyframe()` の第6引数)。
 - **`tests/keyframe-animator.test.ts`** — 22 種イージングの境界値・単調性・ベジェ・CRUD・エッジケースを網羅する 59 テスト。
+- **`color/false-color.ts`** — False color 露出モニタリング。ARRI Alexa / RED / Simple の 3 プリセット + カスタム停留点対応。線形輝度 → sRGB カラーへの補間マッピング。`applyToBuffer()` で sRGB RGBA バッファを in-place false color 化 (α チャンネル保持)。30 テスト。
 - **`export/export-queue.ts`** — バックグラウンド書き出しキュー。優先度キュー (high/normal/low)、最大並列数制御 (concurrency)、指数バックオフリトライ、キャンセル (個別/全体)、pause/resume、drain() 待機、onStatusChange 購読を実装。JobExecutor&lt;T&gt; で型安全なジョブ管理。29 テスト。
 - **`render/tone-mapping.ts`** — CPU 側トーンマッピング演算子コレクション。Reinhard 2002 (シンプル/拡張)、Hable 2010 "Uncharted 2" フィルミック、Narkowicz 2015 ACES 近似、Uchimura 2017 "Gran Turismo" の 5 演算子 + Linear。`createToneMapper(algo, opts)` ファクトリで露出・ホワイトポイント・出力エンコーディング (sRGB / Linear / ガンマ) を制御。`applyToFloatBuffer` / `applyToUint8Buffer` でバッファ一括変換。57 テスト。
 - **`interchange/otio.ts`** — OTIO `LinearTimeWarp.1` 対応 (エクスポート/インポート)。`ArtoneClip.speedFactor` をクリップ速度として保持し、OTIO 往復で完全ラウンドトリップ。`OTIOImporter.importWithReport()` メソッドで損失箇所を明示 (`OTIOImportLoss` / `OTIOImportResult`)。外部 NLE エフェクト・`MissingReference.1` メディアを損失リストに記録。18 テスト追加 (合計 36 テスト)。

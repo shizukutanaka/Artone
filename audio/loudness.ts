@@ -35,13 +35,28 @@ export interface KWeightingCoeffs {
   stage2: BiquadCoeffs;
 }
 
-/** BS.1770/R128 ラウドネス測定結果 (全て LUFS / dBTP)。 */
+/** BS.1770/R128 ラウドネス測定結果 (全て LUFS / dBTP / dBFS)。 */
 export interface LoudnessMeasurement {
   momentary: number;
   shortTerm: number;
   integrated: number;
+  /** LRA (Loudness Range, EBU Tech 3342). */
   range: number;
+  /** Alias for {@link range}. */
+  loudnessRange: number;
   truePeak: number;
+  /** Sample peak in dBFS (no oversampling). */
+  samplePeak: number;
+}
+
+/** Stateful streaming loudness meter. */
+export interface LoudnessMeter {
+  /** Feed the next block of audio. `channels` may vary in length between calls. */
+  process(channels: Float32Array[]): void;
+  /** Return aggregate measurement over all processed audio so far. */
+  getMeasurement(): LoudnessMeasurement;
+  /** Clear all accumulated state. */
+  reset(): void;
 }
 
 /** 自動ダッキングのパラメータ。 */
@@ -140,6 +155,9 @@ export function applyKWeighting(samples: Float32Array, sampleRate: number): Floa
   const c = kWeightingCoeffs(sampleRate);
   return applyBiquad(applyBiquad(samples, c.stage1), c.stage2);
 }
+
+/** Alias for {@link applyKWeighting}. */
+export const kWeightChannel = applyKWeighting;
 
 // ============================================================
 // Block energy (channel-weighted mean square)
@@ -273,6 +291,22 @@ function truePeakDbtp(channels: Float32Array[]): number {
 }
 
 // ============================================================
+// Sample peak
+// ============================================================
+
+/** Maximum absolute sample value across all channels, expressed in dBFS. */
+function samplePeakDbfs(channels: Float32Array[]): number {
+  let peak = 0;
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) {
+      const a = Math.abs(ch[i]);
+      if (a > peak) peak = a;
+    }
+  }
+  return peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+}
+
+// ============================================================
 // Public: full measurement
 // ============================================================
 
@@ -281,10 +315,15 @@ function truePeakDbtp(channels: Float32Array[]): number {
  * @param channels - 非加重 (raw) のチャンネルサンプル列
  * @param sampleRate - サンプルレート (Hz)
  */
-export function measureLoudness(channels: Float32Array[], sampleRate: number): LoudnessMeasurement {
+export function measureLoudness(channels: Float32Array[], sampleRate = 48000): LoudnessMeasurement {
   if (channels.length === 0 || (channels[0]?.length ?? 0) === 0) {
-    return { momentary: -Infinity, shortTerm: -Infinity, integrated: -Infinity, range: 0, truePeak: -Infinity };
+    return {
+      momentary: -Infinity, shortTerm: -Infinity, integrated: -Infinity,
+      range: 0, loudnessRange: 0, truePeak: -Infinity, samplePeak: -Infinity,
+    };
   }
+
+  const sp = samplePeakDbfs(channels);
 
   // True peak は K-weighting *前* の信号で測る (BS.1770-4 Annex 2)。
   const truePeak = truePeakDbtp(channels);
@@ -298,13 +337,77 @@ export function measureLoudness(channels: Float32Array[], sampleRate: number): L
       ? gatedLoudness(momentaryEnergies, RELATIVE_GATE_INTEGRATED)
       : loudnessFromZ(overallEnergy(weighted));
 
+  const lra = loudnessRange(weighted, sampleRate);
   return {
     momentary: maxWindowLoudness(weighted, sampleRate, 0.4),
     shortTerm: maxWindowLoudness(weighted, sampleRate, 3.0),
     integrated,
-    range: loudnessRange(weighted, sampleRate),
+    range: lra,
+    loudnessRange: lra,
     truePeak,
+    samplePeak: sp,
   };
+}
+
+// ============================================================
+// Public: streaming meter
+// ============================================================
+
+/**
+ * Create a stateful streaming loudness meter.
+ *
+ * Call {@link LoudnessMeter.process} with successive audio blocks (any size).
+ * {@link LoudnessMeter.getMeasurement} returns an aggregate over all blocks
+ * processed so far. Call {@link LoudnessMeter.reset} to start a new session.
+ *
+ * @param sampleRate  Sample rate in Hz. Default: 48000.
+ */
+export function createLoudnessMeter(sampleRate = 48000): LoudnessMeter {
+  const blocks: Array<Float32Array[]> = [];
+  let numChannels = 0;
+  let runningPeak = 0;
+
+  function process(channels: Float32Array[]): void {
+    if (channels.length === 0) return;
+    if (numChannels === 0) numChannels = channels.length;
+    blocks.push(channels.map((ch) => ch.slice()));
+    for (const ch of channels) {
+      for (let i = 0; i < ch.length; i++) {
+        const a = Math.abs(ch[i]);
+        if (a > runningPeak) runningPeak = a;
+      }
+    }
+  }
+
+  function getMeasurement(): LoudnessMeasurement {
+    const empty: LoudnessMeasurement = {
+      momentary: -Infinity, shortTerm: -Infinity, integrated: -Infinity,
+      range: 0, loudnessRange: 0, truePeak: -Infinity, samplePeak: -Infinity,
+    };
+    if (blocks.length === 0 || numChannels === 0) return empty;
+
+    // Concatenate stored blocks into full-length per-channel arrays
+    const merged: Float32Array[] = [];
+    for (let c = 0; c < numChannels; c++) {
+      const parts = blocks.filter((blk) => c < blk.length).map((blk) => blk[c]);
+      const total = parts.reduce((s, p) => s + p.length, 0);
+      const data  = new Float32Array(total);
+      let off = 0;
+      for (const p of parts) { data.set(p, off); off += p.length; }
+      merged.push(data);
+    }
+
+    const m = measureLoudness(merged, sampleRate);
+    return { ...m, samplePeak: runningPeak > 0 ? 20 * Math.log10(runningPeak) : -Infinity };
+  }
+
+  function reset(): void {
+    blocks.length = 0;
+    numChannels   = 0;
+    runningPeak   = 0;
+  }
+
+  return { process, getMeasurement, reset };
 }
 
 // ============================================================

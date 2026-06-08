@@ -12,8 +12,7 @@ import {
   measureLoudness,
   createLoudnessMeter,
   type LoudnessMeasurement,
-} from '../audio/loudness-meter';
-import { applyFilter, frequencyResponse } from '../audio/biquad-filter';
+} from '../audio/loudness';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -39,54 +38,54 @@ function constant(value: number, samples: number): Float32Array {
 // ─── kWeightingCoeffs ─────────────────────────────────────────────────────────
 
 describe('kWeightingCoeffs', () => {
-  it('returns two coefficient objects (pre-filter and RLB)', () => {
-    const [pre, rlb] = kWeightingCoeffs(48000);
+  it('returns stage1 (pre-filter) and stage2 (RLB) coefficient objects', () => {
+    const { stage1: pre, stage2: rlb } = kWeightingCoeffs(48000);
     expect(typeof pre.b0).toBe('number');
     expect(typeof rlb.b0).toBe('number');
   });
 
   it('48kHz pre-filter b0 matches BS.1770 reference value', () => {
-    const [pre] = kWeightingCoeffs(48000);
+    const { stage1: pre } = kWeightingCoeffs(48000);
     expect(pre.b0).toBeCloseTo(1.53512485958697, 5);
   });
 
   it('48kHz pre-filter b1 matches BS.1770 reference value', () => {
-    const [pre] = kWeightingCoeffs(48000);
+    const { stage1: pre } = kWeightingCoeffs(48000);
     expect(pre.b1).toBeCloseTo(-2.69169618940638, 5);
   });
 
   it('48kHz RLB a1 matches BS.1770 reference value', () => {
-    const [, rlb] = kWeightingCoeffs(48000);
+    const { stage2: rlb } = kWeightingCoeffs(48000);
     expect(rlb.a1).toBeCloseTo(-1.99004745483398, 5);
   });
 
   it('48kHz RLB a2 matches BS.1770 reference value', () => {
-    const [, rlb] = kWeightingCoeffs(48000);
+    const { stage2: rlb } = kWeightingCoeffs(48000);
     expect(rlb.a2).toBeCloseTo(0.99007225036616, 5);
   });
 
   it('pre-filter poles are inside the unit circle (stable)', () => {
-    const [pre] = kWeightingCoeffs(48000);
+    const { stage1: pre } = kWeightingCoeffs(48000);
     // Check stability: |a1| < 2 and discriminant of characteristic polynomial
     // is a necessary (not sufficient) condition; exact criterion: |a2| < 1
     expect(Math.abs(pre.a2)).toBeLessThan(1);
   });
 
   it('RLB filter poles are inside the unit circle (stable)', () => {
-    const [, rlb] = kWeightingCoeffs(48000);
+    const { stage2: rlb } = kWeightingCoeffs(48000);
     expect(Math.abs(rlb.a2)).toBeLessThan(1);
   });
 
   it('coefficients differ between 44100 Hz and 48000 Hz', () => {
-    const [pre44] = kWeightingCoeffs(44100);
-    const [pre48] = kWeightingCoeffs(48000);
+    const { stage1: pre44 } = kWeightingCoeffs(44100);
+    const { stage1: pre48 } = kWeightingCoeffs(48000);
     expect(pre44.b0).not.toBeCloseTo(pre48.b0, 3);
   });
 
   it('K-weighting gain at DC is ~0 (high-pass blocks DC)', () => {
     // Evaluate combined K-weighting transfer function at DC (z = 1)
     // H(z=1) = (b0+b1+b2)/(1+a1+a2) for both stages combined numerically
-    const [pre, rlb] = kWeightingCoeffs(48000);
+    const { stage1: pre, stage2: rlb } = kWeightingCoeffs(48000);
     const preAtDC = (pre.b0 + pre.b1 + pre.b2) / (1 + pre.a1 + pre.a2);
     const rlbAtDC = (rlb.b0 + rlb.b1 + rlb.b2) / (1 + rlb.a1 + rlb.a2);
     expect(Math.abs(rlbAtDC)).toBeLessThan(0.01);  // RLB kills DC
@@ -95,7 +94,7 @@ describe('kWeightingCoeffs', () => {
 
   it('K-weighting gain at Nyquist is ~+4 dB (pre-filter shelf)', () => {
     // At Nyquist: H(z=-1) = (b0-b1+b2)/(1-a1+a2)
-    const [pre, rlb] = kWeightingCoeffs(48000);
+    const { stage1: pre, stage2: rlb } = kWeightingCoeffs(48000);
     const preAtNy = Math.abs((pre.b0 - pre.b1 + pre.b2) / (1 - pre.a1 + pre.a2));
     const rlbAtNy = Math.abs((rlb.b0 - rlb.b1 + rlb.b2) / (1 - rlb.a1 + rlb.a2));
     const gainDb = 20 * Math.log10(preAtNy * rlbAtNy);

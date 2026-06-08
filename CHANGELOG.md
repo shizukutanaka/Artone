@@ -54,6 +54,7 @@ Artone v3 の全変更を記録。
 - **`audio/beat-detector.ts`** — エネルギーベースビート検出 (Brossier 2004 / Scheirer 1998 Sub-band Energy)。スライディング局所平均との比較でオンセット検出。BPM推定は中央値 IBIから。`detectBeats()` バッチ解析、`createBeatDetector()` ストリーミング（任意ブロックサイズ対応）。閾値・ヒストリサイズ・最小間隔・ウィンドウサイズを設定可能。29 テスト。
 - **`audio/loudness.ts`** に EBU R128 / ITU-R BS.1770-4 ストリーミングメーター機能を統合。`createLoudnessMeter()` ストリーミング API（任意ブロックサイズ対応）、`kWeightChannel()` エイリアス、`LoudnessMeasurement` に `loudnessRange`（`range` の別名）・`samplePeak`（dBFS）フィールドを追加。重複実装 `audio/loudness-meter.ts` を削除し `audio/loudness.ts` に一本化（CLAUDE.md「重複ファイルは統合」準拠）。テスト合計 51（38 + 13）。
 - **`color/white-balance.ts`** — 自動ホワイトバランス解析・ゲイン補正。Gray World (Buchsbaum 1980 平均輝度推定) / White Patch (Max RGB 最大輝度推定) / Percentile (ヒストグラム分位推定、デフォルト98th) の3アルゴリズム + 明示的光源指定 `illuminantGains()`。von Kries 対角ゲインモデル (緑チャンネル基準正規化)。`applyWhiteBalance()` で RGBA バッファ in-place 補正、`composeGains()` で連鎖補正、`invertGains()` で補正の取り消し。`estimateWhiteBalance()` 統一 API。45 テスト。
+- **`audio/eq-response.ts`** — マルチバンドパラメトリック EQ 周波数応答計算 (Audio EQ Cookbook / Zölzer 2011)。`biquad-filter.ts` 上に構築。Lowpass/Highpass/Bandpass/Notch/Peak/LowShelf/HighShelf の全バンドタイプ対応。カスケード biquad チェーンの dB 合算で正確な複合応答。20 Hz〜Nyquist の対数等間隔周波数グリッド (`makeLogFrequencies`)。`computeEQResponse()` / `isFlat()` / `peakMagnitude()` / `minMagnitude()` / `nearestFrequencyIndex()`。50 テスト。
 
 ## [3.0.0] - 2026-05-23
 

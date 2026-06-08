@@ -1,6 +1,6 @@
 /**
  * Artone v3 — DaVinci Resolve級カラーグレーディングエンジン
- * 
+ *
  * Node-based color grading with:
  * - Color Wheels (Lift/Gamma/Gain/Offset)
  * - RGB + Hue Curves
@@ -8,9 +8,11 @@
  * - Power Windows
  * - 3D LUT support
  * - WebGPU acceleration
- * 
+ *
  * @version 1.0.0
  */
+
+import { applyLUTToBuffer, applyCurvesToBuffer, buildCurve } from './lut-apply';
 
 // ============================================================
 // Types
@@ -488,6 +490,22 @@ export class ColorGradingEngine {
       if (!node?.enabled || node.type !== 'corrector') continue;
 
       this.applyWheels(data, node.wheels);
+
+      // Apply per-channel curves (monotone cubic spline)
+      const cv = node.curves;
+      if (cv) {
+        applyCurvesToBuffer(data, {
+          master: buildCurve(cv.master),
+          red:    buildCurve(cv.red),
+          green:  buildCurve(cv.green),
+          blue:   buildCurve(cv.blue),
+        });
+      }
+
+      // Apply 3D LUT last (same order as DaVinci: wheels → curves → LUT)
+      if (node.lut) {
+        applyLUTToBuffer(data, node.lut);
+      }
     }
 
     ctx.putImageData(imgData, 0, 0);

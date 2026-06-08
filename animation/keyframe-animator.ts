@@ -255,7 +255,8 @@ export class KeyframeAnimator {
     propertyName: string,
     time: number,
     value: number,
-    easing: EasingType = 'easeInOut'
+    easing: EasingType = 'easeInOut',
+    bezierHandles?: Partial<{ inX: number; inY: number; outX: number; outY: number }>
   ): Keyframe | null {
     const animation = this.animations.get(animationId);
     if (!animation) return null;
@@ -274,7 +275,8 @@ export class KeyframeAnimator {
       id: crypto.randomUUID(),
       time,
       value,
-      easing
+      easing,
+      ...(bezierHandles ? { bezierHandles: { inX: 0, inY: 0, outX: 1, outY: 1, ...bezierHandles } } : {})
     };
 
     property.keyframes.push(keyframe);

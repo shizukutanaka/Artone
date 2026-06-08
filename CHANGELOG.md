@@ -49,6 +49,7 @@ Artone v3 の全変更を記録。
 - **`color/cie-chromaticity.ts`** — CIE 1931 xy 色度座標ライブラリ。XYZ→xy変換、sRGB(線形/バイト)→xy変換、標準光源 (D50/D55/D65/D75/A/DCI/D60/E)、色域プライマリ三角形 (sRGB/Rec.2020/DCI-P3/Display P3/ACES AP0/AP1)、Kim 2002 多項式近似 Planckian ローカス、McCamy 1992 CCT推定。スコープ表示用バッファサンプリング (`sampleBufferChromaticities`)。43 テスト。
 - **`timeline/scene-detector.ts`** — ヒストグラム比較によるシーンチェンジ検出。BT.601 輝度ヒストグラム計算。Chi-square / Bhattacharyya / SAD の3距離指標。`createSceneDetector()` でストリーミング逐次検出、`detectSceneCuts()` でバッチ一括解析。`minSceneDuration` デバウンスでフェード時の多重検出を防止。39 テスト。
 - **`animation/spring-physics.ts`** — 減衰調和振動子の解析的閉形式解。Underdamped (ζ<1) / Critically damped (ζ=1) / Overdamped (ζ>1) の3レジームを正確に処理。`createSpringAnimation()` で任意時刻の位置/速度を解析的にサンプリング。`settlingTime()` で高密度スキャンによる収束時間推定。半陰解法オイラー `springStep()` / `isAtRest()` でゲームループ対応。`SPRING_PRESETS` (bouncy/wobbly/gentle/stiff/slow/molasses) を同梱。43 テスト。
+- **`color/white-balance.ts`** — 自動ホワイトバランス解析・ゲイン補正。Gray World (Buchsbaum 1980 平均輝度推定) / White Patch (Max RGB 最大輝度推定) / Percentile (ヒストグラム分位推定、デフォルト98th) の3アルゴリズム + 明示的光源指定 `illuminantGains()`。von Kries 対角ゲインモデル (緑チャンネル基準正規化)。`applyWhiteBalance()` で RGBA バッファ in-place 補正、`composeGains()` で連鎖補正、`invertGains()` で補正の取り消し。`estimateWhiteBalance()` 統一 API。45 テスト。
 
 ## [3.0.0] - 2026-05-23
 

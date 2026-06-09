@@ -140,7 +140,9 @@ export class LUTManager {
       }
     }
 
-    if (size === 0 || data.length === 0) return null;
+    // Guard: parseInt(undefined) = NaN when the size token is missing;
+    // NaN === 0 is false so the original check silently passed.
+    if (size === 0 || isNaN(size) || data.length === 0) return null;
 
     metadata.domainMin = domainMin;
     metadata.domainMax = domainMax;

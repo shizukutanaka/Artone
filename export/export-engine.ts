@@ -442,11 +442,14 @@ export class ExportEngine {
         const offset = f * frameSize;
         const length = Math.min(frameSize, buffer.length - offset);
         
+        // REGRESSION fix: f32-planar requires all ch-0 samples first, then ch-1.
+        // The previous write `data[i * channels + ch]` produced interleaved layout
+        // which mismatches f32-planar → garbled audio in the WebCodecs pipeline.
         const data = new Float32Array(length * channels);
         for (let ch = 0; ch < channels; ch++) {
           const channelData = buffer.getChannelData(ch);
           for (let i = 0; i < length; i++) {
-            data[i * channels + ch] = channelData[offset + i];
+            data[ch * length + i] = channelData[offset + i];
           }
         }
 

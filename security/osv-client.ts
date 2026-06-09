@@ -301,8 +301,20 @@ export class OfflineCVEStore {
   private db: CVE[] = [];
 
   load(json: string): void {
-    const data = JSON.parse(json) as { cves: CVE[] };
-    this.db = data.cves;
+    // Resilient like OSVClient.loadCache: a corrupt or old-format offline cache
+    // must never block startup, since this store is the OFFLINE fallback. On any
+    // problem the existing db is left untouched (empty for a fresh store).
+    try {
+      const data = JSON.parse(json) as unknown;
+      const cves = (data as { cves?: unknown } | null)?.cves;
+      if (Array.isArray(cves)) {
+        this.db = cves as CVE[];
+      } else {
+        log.warn('OfflineCVEStore: missing or invalid "cves" array, ignoring');
+      }
+    } catch (err) {
+      log.warn('OfflineCVEStore: parse failed, ignoring:', err);
+    }
   }
 
   serialize(): string {

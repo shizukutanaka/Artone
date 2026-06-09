@@ -14,6 +14,8 @@ Artone v3 の全変更を記録。
 - `prepare` フックを husky v9 形式 + CI 安全ガード (`husky || true`) に変更。
 
 ### Fixed
+- **未テストモジュール監査 (`security/osv-client.ts`) で堅牢性バグを発見・修正**。テストゼロだったセキュリティモジュールに 28 テストを新規追加:
+  - `OfflineCVEStore.load()`: 兄弟の `OSVClient.loadCache()` は破損データを握り潰して起動を阻害しない設計なのに対し、本メソッドは `JSON.parse` が例外送出し、`data.cves` 欠落時に `this.db` が `undefined` となり以降の `query`/`all`/`size` がクラッシュする不具合を修正。オフライン fallback の本旨に反するため try-catch + 配列検証で堅牢化 (破損時は既存 db を保持)。
 - **未テストモジュール監査 (`timeline/nested-sequences.ts`) で実バグ 2 件を発見・修正**。573 行・テストゼロだった純ロジックモジュールに 29 テストを新規追加:
   - `unnestSequence()`: ネストクリップがトリム済み (`mediaIn > 0`) の場合、復元クリップ位置が `mediaIn` 分ずれる不具合を修正 (`renderNestedFrame` の `nestedTime = (t − startTime) + mediaIn` 写像の逆変換に整合)。
   - `duplicateSequence()`: スプレッドで `settings` が複製されず元シーケンスと共有参照になり、複製側の解像度/fps 編集が原本を破壊する不具合を `settings: { ...original.settings }` で修正。

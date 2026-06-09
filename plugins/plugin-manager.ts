@@ -505,6 +505,9 @@ export class PluginManager {
       worker.onerror = (e) => {
         clearTimeout(timeout);
         worker.terminate();
+        // Clear the reference like the message/timeout paths do; otherwise a
+        // terminated worker stays referenced in this security-boundary field.
+        this.sandbox = null;
         reject(new Error(e.message));
       };
 

@@ -14,6 +14,10 @@ Artone v3 の全変更を記録。
 - `prepare` フックを husky v9 形式 + CI 安全ガード (`husky || true`) に変更。
 
 ### Fixed
+- **追加モジュール監査で実バグ 3 件を発見・修正** (各モジュールに網羅的 Vitest を新規追加、計 +101 テスト)。誤検知は実コード照合で排除:
+  - `captions/caption-manager.ts`: `CAPTION_PRESETS` の 'default' プリセットが `DEFAULT_STYLE`/`DEFAULT_POSITION` を直接参照しており (他プリセットは spread コピー)、「デフォルト字幕スタイル」編集が共有定数を破壊し以降の全 `addCaption` に波及する不具合を spread コピーで修正 (43 テスト)。
+  - `audio/surround-audio.ts`: `createDownmix()` が全チャンネルに `centerGain` を適用し `surroundGain`/`lfeGain` が dead config だった不具合を、`downmixGainForLabel()` でチャンネルカテゴリ別ゲイン (L/R=1.0, C=centerGain, サラウンド/ハイト=surroundGain, LFE=lfeGain) を正しく適用するよう修正 (31 テスト, リスクゾーン)。
+  - `plugins/plugin-manager.ts`: `executeSandboxed` の `worker.onerror` パスのみ `this.sandbox` を null クリアせず終了済み Worker への参照が残る不整合を修正 (27 テスト, セキュリティ境界ゾーン)。
 - **純ロジックモジュール連続監査で実バグ 10 件を発見・修正** (各モジュールに網羅的 Vitest を新規追加、計 +384 テスト)。誤検知は実コード照合で排除:
   - `timeline/magnetic-timeline.ts`: `insertClip` が `shiftClipsAfter` を呼んだ上で `addClip` も呼ぶため後続クリップが尺の 2 倍ずれる二重リップル、および排他選択時に Set から外したクリップの `clip.selected=true` が残る不整合を修正 (40 テスト)。
   - `perf/performance-monitor.ts`: フレーム未記録時に `getMetrics()` の `1000/mean` が Infinity を返す、`getMemoryTrend()` が `olderAvg=0` で NaN になる問題をガード (35 テスト)。

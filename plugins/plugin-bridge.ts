@@ -110,6 +110,9 @@ export class PluginBridge {
           super();
           this.wasmMemory = null;
           this.processFunc = null;
+          // Exported WASM functions stored individually (wasmInstance is never set)
+          this.wasmSetParameter = null;
+          this.wasmAllocString = null;
           this.inputPtr = 0;
           this.outputPtr = 0;
           this.blockSize = 128;
@@ -152,6 +155,8 @@ export class PluginBridge {
           const instance = await WebAssembly.instantiate(module, importObject);
           
           this.processFunc = instance.exports.process;
+          this.wasmSetParameter = instance.exports.setParameter || null;
+          this.wasmAllocString = instance.exports.allocString || null;
           this.inputPtr = instance.exports.getInputBuffer();
           this.outputPtr = instance.exports.getOutputBuffer();
           
@@ -163,11 +168,12 @@ export class PluginBridge {
         }
         
         setParameter(id, value) {
-          if (this.wasmInstance?.exports?.setParameter) {
+          // Use the stored export references; wasmInstance is never set in this processor.
+          if (this.wasmSetParameter && this.wasmAllocString) {
             const idBytes = new TextEncoder().encode(id);
-            const idPtr = this.wasmInstance.exports.allocString(idBytes.length);
+            const idPtr = this.wasmAllocString(idBytes.length);
             new Uint8Array(this.wasmMemory.buffer, idPtr, idBytes.length).set(idBytes);
-            this.wasmInstance.exports.setParameter(idPtr, idBytes.length, value);
+            this.wasmSetParameter(idPtr, idBytes.length, value);
           }
         }
         

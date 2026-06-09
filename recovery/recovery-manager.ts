@@ -86,6 +86,10 @@ export class RecoveryManager {
   private crashFlag = 'artone_crash_flag';
   /** Guards against attaching crash-detection listeners more than once. */
   private crashDetectionSetup = false;
+  // Saved by startAutoSave so crash handlers can capture live project state.
+  private currentGetData: (() => RecoveryData) | null = null;
+  private currentProjectId: string | null = null;
+  private currentProjectName: string | null = null;
 
   constructor(config: Partial<RecoveryConfig> = {}) {
     this.config = {
@@ -153,14 +157,21 @@ export class RecoveryManager {
       safeStorageRemove(this.crashFlag);
     });
 
-    // Handle errors
-    window.addEventListener('error', () => {
-      this.saveSnapshot('crash');
-    });
+    // Handle errors — use stored project state so the snapshot contains real data.
+    // Without currentGetData, saveSnapshot returns null because data is undefined.
+    const saveCrashSnapshot = (): void => {
+      if (!this.currentGetData) return;
+      const data = this.currentGetData();
+      this.saveSnapshot(
+        'crash',
+        this.currentProjectId ?? undefined,
+        this.currentProjectName ?? undefined,
+        data,
+      );
+    };
 
-    window.addEventListener('unhandledrejection', () => {
-      this.saveSnapshot('crash');
-    });
+    window.addEventListener('error', saveCrashSnapshot);
+    window.addEventListener('unhandledrejection', saveCrashSnapshot);
 
     // Check for previous crash
     if (hadCrash) {
@@ -170,6 +181,11 @@ export class RecoveryManager {
 
   // ----- 自動保存 -----
   startAutoSave(getData: () => RecoveryData, projectId: string, projectName: string): void {
+    // Store for crash handlers — enables saveSnapshot('crash') to include real data.
+    this.currentGetData = getData;
+    this.currentProjectId = projectId;
+    this.currentProjectName = projectName;
+
     this.stopAutoSave();
 
     this.autoSaveTimer = window.setInterval(async () => {

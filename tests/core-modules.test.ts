@@ -328,6 +328,28 @@ describe('RecoveryManager', () => {
     const id = await rm.saveSnapshot('auto', 'p1', 'Test', { tracks: [], settings: {} } as any);
     expect(id).toBeNull();
   });
+
+  it('REGRESSION: crash handler is a no-op when startAutoSave has not been called', async () => {
+    const rm = new RecoveryManager();
+    await rm.init();
+    const spy = vi.spyOn(rm, 'saveSnapshot');
+    window.dispatchEvent(new ErrorEvent('error'));
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: crash handler saves a snapshot with data from startAutoSave', async () => {
+    const rm = new RecoveryManager();
+    await rm.init();
+    const mockData = {
+      timeline: null, clips: [], tracks: [], effects: [],
+      markers: [], playhead: 0, selection: [], historyPosition: 0, settings: {}
+    };
+    // Replace saveSnapshot so this test does not need a working IDB write path
+    const spy = vi.spyOn(rm, 'saveSnapshot').mockResolvedValue('snap-id');
+    rm.startAutoSave(() => mockData as any, 'proj-1', 'My Project');
+    window.dispatchEvent(new ErrorEvent('error'));
+    expect(spy).toHaveBeenCalledWith('crash', 'proj-1', 'My Project', mockData);
+  });
 });
 
 // === Color Grading Engine ===

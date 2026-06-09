@@ -121,6 +121,26 @@ const DOWNMIX_51_TO_STEREO: Record<ChannelLabel, [number, number]> = {
   'Rtr': [0, 0.35]
 };
 
+/**
+ * 各チャンネルラベルに対応する DownmixConfig のカテゴリゲインを返す。
+ * L/R は基準 (1.0)、C は centerGain、サラウンド/ハイトは surroundGain、LFE は lfeGain。
+ * config 未指定時は 1.0。
+ */
+export function downmixGainForLabel(label: ChannelLabel, config?: Partial<DownmixConfig>): number {
+  if (!config) return 1;
+  switch (label) {
+    case 'C':
+      return config.centerGain ?? 1;
+    case 'LFE':
+      return config.lfeGain ?? 1;
+    case 'Ls': case 'Rs': case 'Lrs': case 'Rrs':
+    case 'Ltf': case 'Rtf': case 'Ltr': case 'Rtr':
+      return config.surroundGain ?? 1;
+    default: // L, R
+      return 1;
+  }
+}
+
 // ============================================================
 // Surround Audio Engine
 // ============================================================
@@ -377,8 +397,12 @@ export class SurroundAudioEngine {
         if (!matrix) continue;
 
         const sourceData = buffer.getChannelData(0);
-        const leftGain = matrix[0] * (config?.centerGain ?? 1);
-        const rightGain = matrix[1] * (config?.centerGain ?? 1);
+        // Apply the per-category gain matching the channel; previously only
+        // centerGain was used and it was (incorrectly) applied to every channel,
+        // leaving surroundGain/lfeGain dead config.
+        const categoryGain = downmixGainForLabel(label, config);
+        const leftGain = matrix[0] * categoryGain;
+        const rightGain = matrix[1] * categoryGain;
 
         for (let i = 0; i < length; i++) {
           leftData[i] += sourceData[i] * leftGain;

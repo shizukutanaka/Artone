@@ -368,13 +368,16 @@ export class ProjectManager {
       return this.createProject(name);
     }
 
+    // Deep clone via JSON round-trip to prevent nested objects (timeline.clips,
+    // media, markers, settings) being shared between the original and the copy.
+    // Shallow spread would cause addClip/addMedia to mutate both projects.
     const newProject: Project = {
-      ...this.currentProject,
+      ...(JSON.parse(JSON.stringify(this.currentProject)) as Project),
       id: crypto.randomUUID(),
       name,
       created: Date.now(),
       modified: Date.now(),
-      version: 1
+      version: 1,
     };
 
     await this.db.saveProject(newProject);

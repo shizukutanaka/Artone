@@ -246,6 +246,7 @@ function timeRange(startFrame: number, durationFrames: number, fps: number): OTI
 
 function fromRationalTime(rt: OTIORationalTime, targetFps: number): number {
   // レート差を吸収。targetFps に揃える
+  if (rt.rate === 0) return 0; // guard: invalid OTIO rate must not produce Infinity
   if (rt.rate === targetFps) return Math.round(rt.value);
   // 整数演算優先で誤差軽減: (value * targetFps) / rate
   return Math.round((rt.value * targetFps) / rt.rate);
@@ -487,9 +488,11 @@ export class OTIOImporter {
           child as OTIOClip, cursor, fps, trackName,
         );
         if (pendingTransition) {
-          artoneClip.transitionIn = pendingTransition;
+          // Use separate copies so mutating transitionIn on one clip does not
+          // accidentally alter transitionOut on the other (aliasing bug).
+          artoneClip.transitionIn = { ...pendingTransition };
           const prev = clips[clips.length - 1];
-          if (prev) prev.transitionOut = pendingTransition;
+          if (prev) prev.transitionOut = { ...pendingTransition };
           pendingTransition = null;
         }
         clips.push(artoneClip);
@@ -596,10 +599,11 @@ export class OTIOImporter {
       if (child.OTIO_SCHEMA === 'Clip.1' || child.OTIO_SCHEMA === 'Clip.2') {
         const artoneClip = this.fromOTIOClip(child as OTIOClip, cursor, fps);
         if (pendingTransition) {
-          artoneClip.transitionIn = pendingTransition;
+          // Use separate copies — same aliasing guard as fromOTIOTrackWithReport.
+          artoneClip.transitionIn = { ...pendingTransition };
           // 直前クリップに transitionOut も付与
           const prev = clips[clips.length - 1];
-          if (prev) prev.transitionOut = pendingTransition;
+          if (prev) prev.transitionOut = { ...pendingTransition };
           pendingTransition = null;
         }
         clips.push(artoneClip);

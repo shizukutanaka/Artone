@@ -91,3 +91,36 @@ describe('mergeRemoteClock', () => {
     expect(() => engine.mergeRemoteClock({ u1: 10 })).not.toThrow();
   });
 });
+
+describe('restoreVersion — corrupt snapshot handling', () => {
+  it('returns false (does not throw) on a corrupt snapshot', async () => {
+    const engine = new CollaborationEngine();
+    await engine.connect('proj', { id: 'alice', name: 'Alice' });
+    const version = engine.createVersion('v1');
+    // Simulate a corrupted/truncated persisted snapshot
+    (version as { snapshot: string }).snapshot = '{ not valid json';
+    expect(() => engine.restoreVersion(version.id)).not.toThrow();
+    expect(engine.restoreVersion(version.id)).toBe(false);
+  });
+
+  it('returns false for a non-object snapshot', async () => {
+    const engine = new CollaborationEngine();
+    await engine.connect('proj', { id: 'alice', name: 'Alice' });
+    const version = engine.createVersion('v1');
+    (version as { snapshot: string }).snapshot = '42';
+    expect(engine.restoreVersion(version.id)).toBe(false);
+  });
+
+  it('restores a valid snapshot (returns true)', async () => {
+    const engine = new CollaborationEngine();
+    await engine.connect('proj', { id: 'alice', name: 'Alice' });
+    const version = engine.createVersion('v1');
+    expect(engine.restoreVersion(version.id)).toBe(true);
+  });
+
+  it('returns false for an unknown version id', async () => {
+    const engine = new CollaborationEngine();
+    await engine.connect('proj', { id: 'alice', name: 'Alice' });
+    expect(engine.restoreVersion('does-not-exist')).toBe(false);
+  });
+});

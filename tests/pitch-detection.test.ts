@@ -11,7 +11,6 @@ import {
   detectPitch,
   createPitchDetector,
   type YINConfig,
-  type PitchResult,
 } from '../audio/pitch-detection';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

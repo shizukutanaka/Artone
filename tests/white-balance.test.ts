@@ -50,7 +50,7 @@ function alternating(
 }
 
 /** Expect gains to be close to target values. */
-function expectGains(gains: WBGains, r: number, g: number, b: number, tol = 1e-3): void {
+function expectGains(gains: WBGains, r: number, g: number, b: number): void {
   expect(gains.r).toBeCloseTo(r, 3);
   expect(gains.g).toBeCloseTo(g, 3);
   expect(gains.b).toBeCloseTo(b, 3);
@@ -196,7 +196,7 @@ describe('percentileGains', () => {
   it('neutral solid image → gains ≈ {r:1, g:1, b:1} at any percentile', () => {
     const data = solid(150, 150, 150);
     for (const p of [50, 75, 90, 98, 100]) {
-      expectGains(percentileGains(data, p), 1, 1, 1, 0.01);
+      expectGains(percentileGains(data, p), 1, 1, 1);
     }
   });
 
@@ -388,7 +388,7 @@ describe('invertGains', () => {
   it('invert then compose = identity', () => {
     const g = { r: 1.5, g: 1, b: 0.75 };
     const c = composeGains(g, invertGains(g));
-    expectGains(c, 1, 1, 1, 1e-6);
+    expectGains(c, 1, 1, 1);
   });
 
   it('handles near-zero gains without throwing', () => {
@@ -401,7 +401,7 @@ describe('invertGains', () => {
   it('invert(invert(g)) ≈ g', () => {
     const g = { r: 1.8, g: 1, b: 0.6 };
     const gg = invertGains(invertGains(g));
-    expectGains(gg, g.r, g.g, g.b, 1e-5);
+    expectGains(gg, g.r, g.g, g.b);
   });
 });
 

@@ -477,7 +477,11 @@ export class PluginManager {
         };
       `], { type: 'application/javascript' });
 
-      const worker = new Worker(URL.createObjectURL(blob));
+      const blobUrl = URL.createObjectURL(blob);
+      const worker = new Worker(blobUrl);
+      // The worker has begun fetching its script synchronously, so the object
+      // URL can be revoked immediately to avoid leaking it for the process life.
+      URL.revokeObjectURL(blobUrl);
       this.sandbox = worker; // 実行中の Worker を保持 (terminate/cleanup 用)
       
       const timeout = setTimeout(() => {

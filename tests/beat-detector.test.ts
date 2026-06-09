@@ -9,7 +9,6 @@ import { describe, it, expect } from 'vitest';
 import {
   detectBeats,
   createBeatDetector,
-  type BeatDetectionResult,
 } from '../audio/beat-detector';
 
 const SR = 48000; // default sample rate

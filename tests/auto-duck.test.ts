@@ -305,9 +305,6 @@ describe('createAutoDucker — streaming vs batch', () => {
     const main = sine(n, 440, 0.5);
     const sc   = new Float32Array(n); // silence → no duck
 
-    // Batch
-    const batch = autoDuck(main, sc, opts);
-
     // Streaming
     const ducker  = createAutoDucker(opts);
     const CHUNK   = 512;

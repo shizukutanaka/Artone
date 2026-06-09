@@ -402,7 +402,7 @@ describe('insert32Pulldown', () => {
   });
 
   it('isRepeat marks duplicates correctly', () => {
-    const { sourceIndices, isRepeat } = insert32Pulldown(4);
+    const { isRepeat } = insert32Pulldown(4);
     // frame 0→same as none (not repeat), frame 1→same as 0 (repeat), others unique
     expect(isRepeat[0]).toBe(false);
     expect(isRepeat[1]).toBe(true); // sourceIndices[1] === sourceIndices[0] === 0

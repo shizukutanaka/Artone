@@ -202,7 +202,9 @@ export function gaussianBlur(
   const boxWidth = Math.max(1, Math.round(Math.sqrt((12 * sigma * sigma / 3) + 1)));
   const r = (boxWidth - 1) >> 1; // half-width
 
-  let buf = new Float32Array(src);
+  // Annotate as the unparameterized Float32Array so the buffer-backing generic
+  // matches the box-blur helpers' return type across reassignment.
+  let buf: Float32Array = new Float32Array(src);
   for (let pass = 0; pass < 3; pass++) {
     buf = boxBlurH(buf, width, height, r);
     buf = boxBlurV(buf, width, height, r);

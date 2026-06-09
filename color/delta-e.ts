@@ -43,10 +43,17 @@ export interface LCH {
 
 // ─── Reference illuminants (XYZ, normalised so Yn = 1) ───────────────────────
 
+/** A reference white point (XYZ tristimulus values, normalised so Yn = 1). */
+export interface WhitePoint {
+  readonly Xn: number;
+  readonly Yn: number;
+  readonly Zn: number;
+}
+
 /** D65 reference white tristimulus values (sRGB / Rec.709 / Rec.2020). */
-export const D65_WHITE = { Xn: 0.95047, Yn: 1.00000, Zn: 1.08883 } as const;
+export const D65_WHITE: WhitePoint = { Xn: 0.95047, Yn: 1.00000, Zn: 1.08883 };
 /** D50 reference white (ISO print / ICC profiles). */
-export const D50_WHITE = { Xn: 0.96422, Yn: 1.00000, Zn: 0.82521 } as const;
+export const D50_WHITE: WhitePoint = { Xn: 0.96422, Yn: 1.00000, Zn: 0.82521 };
 
 // ─── XYZ ↔ Lab ────────────────────────────────────────────────────────────────
 

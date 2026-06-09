@@ -14,6 +14,17 @@ Artone v3 の全変更を記録。
 - `prepare` フックを husky v9 形式 + CI 安全ガード (`husky || true`) に変更。
 
 ### Fixed
+- **全カテゴリ横断監査による実バグ・堅牢性修正** (並列カテゴリ監査 → 検証 → 修正)。誤検知を排除し確証あるもののみ修正:
+  - `recovery/recovery-manager.ts`: クラッシュ検出リスナーが `init()` 毎に再登録され重複ハンドラ・多重 `saveSnapshot` を招く不具合を冪等ガードで修正 (データ損失リスクゾーン)。
+  - `plugins/plugin-manager.ts`: サンドボックス Worker 生成時の Blob オブジェクト URL が revoke されずリークする不具合を修正 (セキュリティ境界ゾーン)。
+  - `color/delta-e.ts`: `D65_WHITE`/`D50_WHITE` の `as const` により `xyzToLab`/`labToXYZ` の `ref` 引数型が D65 リテラルに過剰絞り込みされ、ドキュメント通り D50 を渡せなかった API バグを `WhitePoint` インターフェース導入で修正。
+  - `color/hdr-engine.ts`: `Math.smoothstep` の edge0===edge1 でゼロ除算→NaN になるガードを追加。
+  - `i18n/i18n-manager.ts`: `loadLocale()` が locale を検証せず fetch パスへ補間していた問題に BCP 47 形式バリデーションを追加 (パストラバーサル防止)。新規 6 テスト。
+  - `collab/collaboration-engine.ts`: `restoreVersion()` の `JSON.parse` が破損スナップショットでクラッシュする問題を try-catch で安全に false 返却へ。新規 4 テスト。
+- **`npm run typecheck` / `npm run build` を再 green 化** (`tsc --noEmit` エラー 27 → 0)。`strict`/`noUnusedLocals` 下の実型エラーを behavior-preserving に解消 (`any` 不使用):
+  - `export/export-queue.ts`: await 中に `cancel()` が `job.status` を変更しうるがフロー解析が `'active'` リテラルに絞り込むためキャンセルガードが型エラーになる問題を、意図をコメント明記の上で型ワイドニングして解消。
+  - `color/noise-reduction.ts` の `Float32Array` ジェネリック不整合、`timeline/trim-operations.ts` の未使用 `findNextAdjacent`、`animation/motion-path.ts` の未使用 `chordLen` を除去。
+  - テスト 18 ファイルの未使用 import/変数を整理し、`createExportQueue<string>` の正しいジェネリック使用へ修正。
 - **コンパイル不能だった全ソースをビルド可能化** (`tsc --noEmit` エラー 206 → 0)。
   - JSDoc コメント内に紛れ込んでいた `import`/`const` 文を 4 ファイルで修正 (recovery-manager / lut-manager / sw-manager / proxy-workflow)。
   - `undo/history-manager.ts`: 未 import の `color`、未定義 `dsColor` を design-system 由来 `color` に統一。

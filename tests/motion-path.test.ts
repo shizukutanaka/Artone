@@ -7,11 +7,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   vecAdd, vecSub, vecScale, vecLerp, vecLength, vecNormalize, vecCross, vecDot,
-  bezierPoint, bezierDerivative, bezierSecondDerivative, bezierCurvature,
+  bezierPoint, bezierDerivative, bezierCurvature,
   bezierSplit, bezierArcLength, bezierArcLengthRange,
   makeMotionPath, makeLinearPath, makeClosedPath,
-  evaluateAt, tangentAt, normalAt, curvatureAt,
-  buildArcLengthTable, arcLengthToParameter, evaluateAtLength, sampleAtLength,
+  evaluateAt, tangentAt, normalAt,
+  buildArcLengthTable, evaluateAtLength, sampleAtLength,
   pathTotalLength, flattenPath, pathBoundingBox, samplePathUniform,
 } from '../animation/motion-path';
 import type { Vec2, BezierSegment, MotionPath } from '../animation/motion-path';

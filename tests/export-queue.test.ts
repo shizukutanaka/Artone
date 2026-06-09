@@ -2,8 +2,8 @@
  * バックグラウンド書き出しキューのテスト
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { createExportQueue, type QueueJob } from '../export/export-queue';
+import { describe, it, expect } from 'vitest';
+import { createExportQueue } from '../export/export-queue';
 
 // ─── ヘルパー ────────────────────────────────────────────────────────────────
 
@@ -243,7 +243,7 @@ describe('failure and retry', () => {
   });
 
   it('job succeeds on retry after initial failures', async () => {
-    const q = createExportQueue({ retryDelay: 5 });
+    const q = createExportQueue<string>({ retryDelay: 5 });
     let attempt = 0;
     const job = q.enqueue(async () => {
       attempt++;

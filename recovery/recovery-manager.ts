@@ -84,6 +84,8 @@ export class RecoveryManager {
   private lastSaveTime = 0;
   private listeners: Set<(status: RecoveryStatus) => void> = new Set();
   private crashFlag = 'artone_crash_flag';
+  /** Guards against attaching crash-detection listeners more than once. */
+  private crashDetectionSetup = false;
 
   constructor(config: Partial<RecoveryConfig> = {}) {
     this.config = {
@@ -136,6 +138,12 @@ export class RecoveryManager {
 
   // ----- クラッシュ検出 -----
   private setupCrashDetection(): void {
+    // Idempotent: window listeners below are anonymous and cannot be removed,
+    // so attaching them more than once would stack duplicate handlers (a memory
+    // leak that also fires saveSnapshot multiple times per error).
+    if (this.crashDetectionSetup) return;
+    this.crashDetectionSetup = true;
+
     // Set crash flag on load
     const hadCrash = safeStorageGet(this.crashFlag) === 'true';
     safeStorageSet(this.crashFlag, 'true');

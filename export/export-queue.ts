@@ -220,15 +220,19 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
         controller.signal,
       );
 
-      // Guard: job may have been cancelled mid-flight
-      if (job.status !== 'cancelled') {
+      // Guard: job may have been cancelled mid-flight. cancel() can mutate
+      // job.status during the await above, which TS's flow analysis cannot see
+      // (it still narrows from `job.status = 'active'`), so widen via the cast.
+      const postStatus = job.status as QueueJobStatus;
+      if (postStatus !== 'cancelled') {
         job.result = result;
         job.status = 'completed';
         job.progress = 1;
         job.completedAt = Date.now();
       }
     } catch (err) {
-      if (job.status === 'cancelled') {
+      // Same concurrent-mutation caveat as above: widen the flow-narrowed type.
+      if ((job.status as QueueJobStatus) === 'cancelled') {
         // cancel() already set status; do nothing extra
       } else if (job.retries < job.maxRetries) {
         job.retries += 1;

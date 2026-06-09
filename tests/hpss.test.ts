@@ -238,8 +238,6 @@ describe('signalPsnr', () => {
   it('higher noise → lower PSNR', () => {
     const sr = 16000;
     const ref = sine(440, sr, 0.1);
-    const noisy1 = ref.map(v => v + 0.01 * (Math.random() - 0.5)) as unknown as Float32Array;
-    const noisy2 = ref.map(v => v + 0.1  * (Math.random() - 0.5)) as unknown as Float32Array;
 
     // Use deterministic noise for reproducibility
     const mild = new Float32Array(ref.length);

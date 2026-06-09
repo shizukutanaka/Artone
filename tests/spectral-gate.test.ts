@@ -12,7 +12,6 @@ import {
   applySpectralGate,
   denoiseAudio,
   createSpectralGateProcessor,
-  type NoiseProfile,
 } from '../audio/spectral-gate';
 
 const SR = 48000;

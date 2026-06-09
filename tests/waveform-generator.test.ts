@@ -8,7 +8,6 @@ import {
   computeWaveformMultichannel,
   normalizeWaveform,
   downsampleWaveform,
-  type WaveformOptions,
 } from '../media/waveform-generator';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

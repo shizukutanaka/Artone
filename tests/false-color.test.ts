@@ -149,7 +149,7 @@ describe('map() with simple preset', () => {
 
   it('midtone returns green', () => {
     // SIMPLE: 0.100 → green, 0.720 → red. At 0.4 (between green and red zones):
-    const [r, g, b] = fc.map(0.40);
+    const [, g, b] = fc.map(0.40);
     // At luminance 0.40, we're between green (0.100) and red (0.720)
     // t = (0.40 - 0.100) / (0.720 - 0.100) ≈ 0.484
     // r = round(0 + 0.484 * 255) = 123, g = round(255 + 0.484 * (-255)) = 131, b = 0
@@ -189,7 +189,7 @@ describe('custom stops', () => {
 
   it('createFalseColorMapper("custom", stops) uses custom stops', () => {
     const fc = createFalseColorMapper('custom', customStops);
-    const [r, g, b] = fc.map(0.0);
+    const [, , b] = fc.map(0.0);
     expect(b).toBe(255);
     expect(fc.map(1.0)).toEqual([255, 0, 0]);
   });

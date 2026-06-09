@@ -116,6 +116,12 @@ export class I18nManager {
    * 言語ファイル動的読み込み。
    */
   async loadLocale(locale: LocaleCode): Promise<void> {
+    // Validate the locale shape before it is interpolated into a fetch path,
+    // so a crafted value (e.g. '../../secret') cannot traverse outside the
+    // locale directory. BCP 47: language[-script][-region][-variant…].
+    if (!/^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/.test(locale)) {
+      throw new Error(`Invalid locale code: ${locale}`);
+    }
     if (this.translations.has(locale)) return;
     let promise = this.loadingPromises.get(locale);
     if (promise) return promise;

@@ -509,8 +509,7 @@ export function flattenPath(path: MotionPath, tolerance = 0.5): Vec2[] {
   const points: Vec2[] = [];
 
   function flattenSeg(seg: BezierSegment, depth: number): void {
-    // Chord: straight line from p0 to p3
-    const chordLen = vecLength(vecSub(seg.p3, seg.p0));
+    // Flatness test: distance from the curve midpoint to the chord midpoint.
     const mid = bezierPoint(seg, 0.5);
     const chordMid = vecLerp(seg.p0, seg.p3, 0.5);
     const err = vecLength(vecSub(mid, chordMid));

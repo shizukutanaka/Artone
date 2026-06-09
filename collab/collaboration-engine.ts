@@ -267,7 +267,17 @@ export class CollaborationEngine {
     const version = this.versions.find(v => v.id === versionId);
     if (!version) return false;
 
-    this.docState = new Map(Object.entries(JSON.parse(version.snapshot)));
+    // A corrupted/truncated snapshot must not crash the editor — fail safely
+    // so the caller can fall back to the current state or another version.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(version.snapshot);
+    } catch {
+      return false;
+    }
+    if (typeof parsed !== 'object' || parsed === null) return false;
+
+    this.docState = new Map(Object.entries(parsed as Record<string, unknown>));
     this.broadcastUpdate('version-restore', { versionId });
     this.notify();
     return true;

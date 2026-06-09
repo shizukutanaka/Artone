@@ -236,7 +236,6 @@ describe('overdamped spring (ζ > 1)', () => {
 
 describe('settling time ordering', () => {
   it('bouncy (ζ≈0.29) settles later than critical with same ωn', () => {
-    const wn = naturalFrequency(SPRING_PRESETS.bouncy);
     // Critical config: c = 2*sqrt(k*m), same k, m=1
     const critDamping = 2 * Math.sqrt(SPRING_PRESETS.bouncy.stiffness);
     const critConfig: SpringConfig = { stiffness: SPRING_PRESETS.bouncy.stiffness, damping: critDamping, mass: 1 };

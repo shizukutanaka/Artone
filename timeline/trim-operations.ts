@@ -78,26 +78,6 @@ function findById(clips: TrimClip[], id: string): number {
   return clips.findIndex((c) => c.id === id);
 }
 
-/**
- * Find the clip immediately to the right of `index` on the same implicit
- * track. "Immediately right" means the clip with the smallest `startTime`
- * that is ≥ the end of clip[index] (within a small epsilon).
- */
-function findNextAdjacent(clips: TrimClip[], index: number): number {
-  const end = clips[index].startTime + clips[index].duration;
-  let   best = -1;
-  for (let i = 0; i < clips.length; i++) {
-    if (i === index) continue;
-    if (clips[i].locked) continue;
-    if (clips[i].startTime >= end - 1e-9) {
-      if (best === -1 || clips[i].startTime < clips[best].startTime) {
-        best = i;
-      }
-    }
-  }
-  return best;
-}
-
 /** Return a failed TrimResult with a reason. */
 function fail(reason: string): TrimResult {
   return { clips: [], ok: false, reason };

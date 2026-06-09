@@ -285,6 +285,8 @@ export class MemoryProfiler {
     const recentAvg = recent.reduce((s, x) => s + x.used, 0) / recent.length;
     const olderAvg = older.reduce((s, x) => s + x.used, 0) / older.length;
     
+    // Guard: olderAvg===0 in non-Chrome environments where memory API is absent.
+    if (olderAvg === 0) return 'stable';
     const change = (recentAvg - olderAvg) / olderAvg;
     
     if (change > 0.05) return 'growing';
@@ -403,9 +405,11 @@ export class PerformanceMonitor {
       ? this.memoryProfiler.sample()
       : { used: 0, total: 0 };
     
+    // Guard: mean===0 before any frames are recorded; 1000/0 = Infinity.
+    const mean = this.frametimeStats.mean;
     return {
-      fps: 1000 / this.frametimeStats.mean,
-      frametime: this.frametimeStats.mean,
+      fps: mean > 0 ? 1000 / mean : 0,
+      frametime: mean,
       frametimeMin: this.frametimeStats.min,
       frametimeMax: this.frametimeStats.max,
       frametimeVariance: this.frametimeStats.variance,
@@ -427,7 +431,10 @@ export class PerformanceMonitor {
 
   // ----- パフォーマンスレベル判定 -----
   getPerformanceLevel(): PerformanceLevel {
-    const fps = 1000 / this.frametimeStats.mean;
+    const mean = this.frametimeStats.mean;
+    // Guard: no frames yet → treat as optimal (monitoring not started).
+    if (mean === 0) return 'optimal';
+    const fps = 1000 / mean;
     const target = this.config.fpsTarget;
     
     if (fps >= target - 2) return 'optimal';

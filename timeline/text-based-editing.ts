@@ -231,16 +231,23 @@ export class TextBasedEditor {
     const transcript = this.transcripts.get(transcriptId);
     if (!transcript) return;
 
+    // Only record actually-changed words in history; including already-deleted
+    // words would cause undo() to incorrectly restore them even though a prior
+    // delete operation owns that state.
+    const changedIds: string[] = [];
     for (const para of transcript.paragraphs) {
       for (const word of para.words) {
-        if (wordIds.includes(word.id)) {
+        if (wordIds.includes(word.id) && !word.deleted) {
           word.deleted = true;
+          changedIds.push(word.id);
         }
       }
     }
 
-    this.addToHistory({ type: 'delete', wordIds, timestamp: Date.now() });
-    this.notify();
+    if (changedIds.length > 0) {
+      this.addToHistory({ type: 'delete', wordIds: changedIds, timestamp: Date.now() });
+      this.notify();
+    }
   }
 
   restoreWord(transcriptId: string, wordId: string): void {

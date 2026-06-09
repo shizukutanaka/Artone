@@ -311,3 +311,214 @@ describe('HistoryManager — merge window', () => {
     expect(historyLen).toBeLessThanOrEqual(2);
   });
 });
+
+// ─── HistoryManager core execute/undo/redo ───────────────────────────────────
+
+function makeCmd(label: string, onExec: () => void, onUndo: () => void): Command {
+  return {
+    id: label, timestamp: Date.now(), description: label, type: 'test',
+    execute: onExec, undo: onUndo,
+    redo() { this.execute(); },
+    getDelta() { return { before: null, after: null, path: [] }; },
+  };
+}
+
+describe('HistoryManager — execute / undo / redo', () => {
+  let history: HistoryManager;
+
+  beforeEach(() => {
+    history = new HistoryManager({ autoPersist: false });
+  });
+
+  it('starts empty with canUndo=false and canRedo=false', () => {
+    expect(history.canUndo()).toBe(false);
+    expect(history.canRedo()).toBe(false);
+    expect(history.getStats()).toEqual({ count: 0, position: -1, branches: 0 });
+  });
+
+  it('execute runs the command and makes canUndo true', () => {
+    let ran = false;
+    history.execute(makeCmd('a', () => { ran = true; }, () => {}));
+    expect(ran).toBe(true);
+    expect(history.canUndo()).toBe(true);
+    expect(history.canRedo()).toBe(false);
+    expect(history.getStats().count).toBe(1);
+  });
+
+  it('undo reverses the last command, redo re-applies', () => {
+    let v = 0;
+    history.execute(makeCmd('inc', () => { v++; }, () => { v--; }));
+    expect(v).toBe(1);
+    expect(history.undo()).toBe(true);
+    expect(v).toBe(0);
+    expect(history.canRedo()).toBe(true);
+    expect(history.redo()).toBe(true);
+    expect(v).toBe(1);
+  });
+
+  it('undo/redo return false when nothing to undo/redo', () => {
+    expect(history.undo()).toBe(false);
+    expect(history.redo()).toBe(false);
+  });
+
+  it('executing after undo clears the redo branch', () => {
+    history.execute(makeCmd('a', () => {}, () => {}));
+    history.execute(makeCmd('b', () => {}, () => {}));
+    history.undo();         // position=0, redo=['b']
+    history.execute(makeCmd('c', () => {}, () => {}));
+    // 'b' was in the redo stack and should be discarded
+    expect(history.getStats().count).toBe(2); // ['a', 'c']
+    expect(history.canRedo()).toBe(false);
+  });
+
+  it('getHistory returns snapshots in order', () => {
+    history.execute(makeCmd('first', () => {}, () => {}));
+    history.execute(makeCmd('second', () => {}, () => {}));
+    const h = history.getHistory();
+    expect(h[0].description).toBe('first');
+    expect(h[1].description).toBe('second');
+  });
+
+  it('clear empties history', () => {
+    history.execute(makeCmd('x', () => {}, () => {}));
+    history.clear();
+    expect(history.canUndo()).toBe(false);
+    expect(history.getStats()).toEqual({ count: 0, position: -1, branches: 0 });
+  });
+});
+
+describe('HistoryManager — maxCommands', () => {
+  it('execute trims oldest commands when limit exceeded', () => {
+    const h = new HistoryManager({ autoPersist: false, maxCommands: 3 });
+    for (let i = 0; i < 5; i++) h.execute(makeCmd(`c${i}`, () => {}, () => {}));
+    expect(h.getStats().count).toBe(3);
+    // The 3 most recent should remain
+    const descs = h.getHistory().map(c => c.description);
+    expect(descs).toEqual(['c2', 'c3', 'c4']);
+  });
+});
+
+describe('HistoryManager — beginGroup / endGroup', () => {
+  let history: HistoryManager;
+
+  beforeEach(() => {
+    history = new HistoryManager({ autoPersist: false });
+  });
+
+  it('commands inside a group are batched into one undo step', () => {
+    const log: string[] = [];
+    history.beginGroup('multi');
+    history.execute(makeCmd('a', () => { log.push('exec-a'); }, () => { log.push('undo-a'); }));
+    history.execute(makeCmd('b', () => { log.push('exec-b'); }, () => { log.push('undo-b'); }));
+    history.endGroup('multi-op');
+    expect(log).toEqual(['exec-a', 'exec-b']); // both executed
+    expect(history.getStats().count).toBe(1);  // one composite command
+
+    history.undo();
+    expect(log).toContain('undo-b');
+    expect(log).toContain('undo-a');
+  });
+
+  it('endGroup with no commands (empty group) does not push a command', () => {
+    history.beginGroup();
+    history.endGroup();
+    expect(history.getStats().count).toBe(0);
+  });
+
+  it('REGRESSION: endGroup enforces maxCommands cap', () => {
+    const h = new HistoryManager({ autoPersist: false, maxCommands: 2 });
+    // Fill history to the limit
+    h.execute(makeCmd('p', () => {}, () => {}));
+    h.execute(makeCmd('q', () => {}, () => {}));
+    // endGroup would add a 3rd command — must trim to maxCommands=2
+    h.beginGroup();
+    h.execute(makeCmd('r', () => {}, () => {}));
+    h.endGroup('group-r');
+    expect(h.getStats().count).toBeLessThanOrEqual(2);
+  });
+});
+
+// ─── CommandFactory ───────────────────────────────────────────────────────────
+
+describe('CommandFactory.clipMove', () => {
+  it('execute moves clip, undo restores it', () => {
+    let clip = { id: 'c1', trackId: 'v1', startFrame: 0 };
+    const cmd = CommandFactory.clipMove(
+      'c1', 'v1', 'v2', 0, 100,
+      () => clip, (c) => { clip = c as typeof clip; }
+    );
+    cmd.execute();
+    expect(clip.trackId).toBe('v2');
+    expect(clip.startFrame).toBe(100);
+    cmd.undo();
+    expect(clip.trackId).toBe('v1');
+    expect(clip.startFrame).toBe(0);
+  });
+
+  it('getDelta reports before/after', () => {
+    const cmd = CommandFactory.clipMove('x', 'v1', 'v2', 0, 50, () => ({}), () => {});
+    const d = cmd.getDelta();
+    expect((d.before as { trackId: string }).trackId).toBe('v1');
+    expect((d.after as { startFrame: number }).startFrame).toBe(50);
+  });
+});
+
+describe('CommandFactory.clipAdd / clipDelete', () => {
+  it('clipAdd execute adds, undo removes, redo re-adds', () => {
+    const clips: { id?: string }[] = [];
+    const cmd = CommandFactory.clipAdd(
+      { id: 'c1' },
+      (c) => clips.push(c),
+      (id) => { const i = clips.findIndex(c => c.id === id); if (i >= 0) clips.splice(i, 1); }
+    );
+    cmd.execute();
+    expect(clips).toHaveLength(1);
+    cmd.undo();
+    expect(clips).toHaveLength(0);
+    cmd.redo();
+    expect(clips).toHaveLength(1);
+  });
+
+  it('clipDelete execute removes, undo restores', () => {
+    const clips: { id?: string }[] = [{ id: 'c1' }];
+    const cmd = CommandFactory.clipDelete(
+      { id: 'c1' },
+      (c) => clips.push(c),
+      (id) => { const i = clips.findIndex(c => c.id === id); if (i >= 0) clips.splice(i, 1); }
+    );
+    cmd.execute();
+    expect(clips).toHaveLength(0);
+    cmd.undo();
+    expect(clips).toHaveLength(1);
+  });
+});
+
+describe('CommandFactory.effectAdd', () => {
+  it('adds and removes effect on undo', () => {
+    let clip = { id: 'c1', effects: [] as { id?: string; type?: string }[] };
+    const cmd = CommandFactory.effectAdd(
+      'c1',
+      { id: 'fx1', type: 'blur' },
+      () => clip,
+      (c) => { clip = c as typeof clip; }
+    );
+    cmd.execute();
+    expect(clip.effects).toHaveLength(1);
+    cmd.undo();
+    expect(clip.effects).toHaveLength(0);
+  });
+});
+
+describe('CommandFactory.audioVolume', () => {
+  it('sets volume on execute, restores on undo', () => {
+    let clip = { audioVolume: 1.0 };
+    const cmd = CommandFactory.audioVolume(
+      'c1', 1.0, 0.5,
+      () => clip, (c) => { clip = c as typeof clip; }
+    );
+    cmd.execute();
+    expect(clip.audioVolume).toBeCloseTo(0.5);
+    cmd.undo();
+    expect(clip.audioVolume).toBeCloseTo(1.0);
+  });
+});

@@ -727,18 +727,30 @@ export class HistoryManager {
   endGroup(description?: string): void {
     const group = this.groupStack.pop();
     if (!group || group.length === 0) return;
-    
+
     const composite = CommandFactory.composite(...group);
     if (description) {
       (composite as Command & { description: string }).description = description;
     }
-    
+
     // グループをスタックの上に置く
     this.commands = this.commands.slice(0, this.position + 1);
     this.commands.push(composite);
     this.position++;
-    
+
+    // Apply the same maxCommands cap as execute() — endGroup was omitting this,
+    // allowing the history to grow beyond config.maxCommands when groups were used.
+    if (this.commands.length > this.config.maxCommands) {
+      const excess = this.commands.length - this.config.maxCommands;
+      this.commands = this.commands.slice(excess);
+      this.position -= excess;
+    }
+
     this.notifyListeners();
+
+    if (this.config.autoPersist) {
+      this.saveToDB();
+    }
   }
 
   // ----- ブランチ -----

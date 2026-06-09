@@ -110,8 +110,11 @@ export const CAPTION_PRESETS: CaptionPreset[] = [
   {
     id: 'default',
     name: 'Default',
-    style: DEFAULT_STYLE,
-    position: DEFAULT_POSITION
+    // Copy the shared constants: every other preset spreads them, and addCaption
+    // spreads DEFAULT_STYLE into each caption. Referencing the live objects here
+    // would let an edit to the "Default" preset mutate DEFAULT_STYLE globally.
+    style: { ...DEFAULT_STYLE },
+    position: { ...DEFAULT_POSITION }
   },
   {
     id: 'netflix',

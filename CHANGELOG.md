@@ -14,6 +14,18 @@ Artone v3 の全変更を記録。
 - `prepare` フックを husky v9 形式 + CI 安全ガード (`husky || true`) に変更。
 
 ### Fixed
+- **純ロジックモジュール連続監査で実バグ 10 件を発見・修正** (各モジュールに網羅的 Vitest を新規追加、計 +384 テスト)。誤検知は実コード照合で排除:
+  - `timeline/magnetic-timeline.ts`: `insertClip` が `shiftClipsAfter` を呼んだ上で `addClip` も呼ぶため後続クリップが尺の 2 倍ずれる二重リップル、および排他選択時に Set から外したクリップの `clip.selected=true` が残る不整合を修正 (40 テスト)。
+  - `perf/performance-monitor.ts`: フレーム未記録時に `getMetrics()` の `1000/mean` が Infinity を返す、`getMemoryTrend()` が `olderAvg=0` で NaN になる問題をガード (35 テスト)。
+  - `scopes/video-scopes.ts`: `ScopesManager.analyze()` がパレード解析後に波形モードを復元せず恒久的に parade に固定される不具合、ヒストグラムの `maxAll=0` 空フレームで NaN 座標を生む不具合を修正 (27 テスト)。
+  - `timeline/marker-manager.ts`: `copyMarkers()` が `tags`/`metadata` を浅いコピーし複製と原本が参照を共有する不具合を修正 (57 テスト)。
+  - `timeline/text-based-editing.ts`: `deleteWords()` が既削除語を履歴に記録し undo が誤って復元する不具合を変更分のみ記録へ修正 (44 テスト)。
+  - `timeline/multicam-editor.ts`: `removeAngle()` が最後のアングル削除時に `activeAngle` を更新せず無効 ID が残る不具合を修正 (48 テスト)。
+  - `export/export-engine.ts`: `encodeAudio()` が `f32-planar` 宣言下でインターリーブ配置を書き込み音声が乱れる不具合を planar 配置へ修正 (25 テスト)。
+  - `project/project-manager.ts`: `saveProjectAs()` が `timeline`/`media`/`markers` 等を浅いコピーし「名前を付けて保存」後の編集が原本も破壊する不具合を JSON deep clone で修正 (35 テスト)。
+  - `undo/history-manager.ts`: `CommandFactory.clipTrim` が任意 (optional) な `sourceIn`/`sourceOut` 未設定時に `undefined + n = NaN` でクリップを破壊する不具合を `?? 0` で修正 (7 テスト)。
+  - `media/media-browser.ts`: `generateAudioWaveform` が 100 サンプル未満の短尺音声で `blockSize=0` → `NaN` を canvas へ流す不具合をクランプと境界ガードで修正。
+  - `captions/readability.ts`: 実バグなし。回帰防止に 43 テストを追加 (折返し/CPS/プロファイル/監査)。
 - **未テストモジュール監査 (`security/osv-client.ts`) で堅牢性バグを発見・修正**。テストゼロだったセキュリティモジュールに 28 テストを新規追加:
   - `OfflineCVEStore.load()`: 兄弟の `OSVClient.loadCache()` は破損データを握り潰して起動を阻害しない設計なのに対し、本メソッドは `JSON.parse` が例外送出し、`data.cves` 欠落時に `this.db` が `undefined` となり以降の `query`/`all`/`size` がクラッシュする不具合を修正。オフライン fallback の本旨に反するため try-catch + 配列検証で堅牢化 (破損時は既存 db を保持)。
 - **未テストモジュール監査 (`timeline/nested-sequences.ts`) で実バグ 2 件を発見・修正**。573 行・テストゼロだった純ロジックモジュールに 29 テストを新規追加:

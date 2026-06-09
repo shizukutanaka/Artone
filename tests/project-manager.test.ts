@@ -9,39 +9,15 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ProjectManager, type Project, type ProjectSettings, type ClipData, type MediaReference } from '../project/project-manager';
+import { ProjectManager, type Project, type ClipData, type MediaReference } from '../project/project-manager';
 
 // ============================================================
 // Stub IndexedDB dependency
 // ============================================================
 
-// Stub indexedDB globally so ProjectDB.open() returns immediately.
-const fakeStore: Map<string, Project> = new Map();
-
-const fakeTx = {
-  objectStore: (name: string) => ({
-    put: (val: Project) => {
-      fakeStore.set(val.id, JSON.parse(JSON.stringify(val)));
-      return { onsuccess: null, onerror: null, result: val.id };
-    },
-    get: (id: string) => {
-      const val = fakeStore.get(id) ?? null;
-      return { onsuccess: null, onerror: null, result: val };
-    },
-    delete: (id: string) => {
-      fakeStore.delete(id);
-      return { onsuccess: null, onerror: null };
-    },
-    index: () => ({
-      getAll: () => ({ onsuccess: null, onerror: null, result: Array.from(fakeStore.values()) }),
-    }),
-  }),
-};
-
-// We can't easily stub IDBDatabase without a real implementation, so instead
-// we mock the entire ProjectDB class methods that ProjectManager calls.
-// The cleanest approach: override the private db's methods on each ProjectManager
-// instance by accessing the internal via type assertion.
+// ProjectDB uses IndexedDB, unavailable in jsdom. Rather than emulate
+// IDBDatabase, we override the private db's methods on each ProjectManager
+// instance with an in-memory implementation via type assertion.
 
 /** Patch the internal ProjectDB on a ProjectManager to avoid real IndexedDB. */
 async function patchDB(manager: ProjectManager): Promise<void> {

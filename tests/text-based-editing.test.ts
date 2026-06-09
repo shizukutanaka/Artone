@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { TextBasedEditor, type Word } from '../timeline/text-based-editing';
+import { TextBasedEditor } from '../timeline/text-based-editing';
 
 // ============================================================
 // Helpers

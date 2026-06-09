@@ -181,19 +181,25 @@ export class CommandFactory {
       
       execute() {
         const clip = getClip();
+        // Default source offsets to 0: ClipLike marks them optional, and
+        // `undefined + n` would silently corrupt the clip to NaN.
         if (edge === 'start') {
-          setClip({ ...clip, startFrame: toFrame, sourceIn: (clip.sourceIn as number) + (toFrame - fromFrame) });
+          const sourceIn = ((clip.sourceIn as number | undefined) ?? 0) + (toFrame - fromFrame);
+          setClip({ ...clip, startFrame: toFrame, sourceIn });
         } else {
-          setClip({ ...clip, endFrame: toFrame, sourceOut: (clip.sourceOut as number) + (toFrame - fromFrame) });
+          const sourceOut = ((clip.sourceOut as number | undefined) ?? 0) + (toFrame - fromFrame);
+          setClip({ ...clip, endFrame: toFrame, sourceOut });
         }
       },
 
       undo() {
         const clip = getClip();
         if (edge === 'start') {
-          setClip({ ...clip, startFrame: fromFrame, sourceIn: (clip.sourceIn as number) - (toFrame - fromFrame) });
+          const sourceIn = ((clip.sourceIn as number | undefined) ?? 0) - (toFrame - fromFrame);
+          setClip({ ...clip, startFrame: fromFrame, sourceIn });
         } else {
-          setClip({ ...clip, endFrame: fromFrame, sourceOut: (clip.sourceOut as number) - (toFrame - fromFrame) });
+          const sourceOut = ((clip.sourceOut as number | undefined) ?? 0) - (toFrame - fromFrame);
+          setClip({ ...clip, endFrame: fromFrame, sourceOut });
         }
       },
       

@@ -463,6 +463,84 @@ describe('CommandFactory.clipMove', () => {
   });
 });
 
+describe('CommandFactory.clipTrim', () => {
+  it('trim start: execute updates startFrame and sourceIn, undo restores', () => {
+    let clip: Record<string, unknown> = { id: 'c1', startFrame: 0, sourceIn: 100 };
+    const cmd = CommandFactory.clipTrim(
+      'c1', 'start', 0, 30,
+      () => clip, (c) => { clip = c as Record<string, unknown>; }
+    );
+    cmd.execute();
+    expect(clip.startFrame).toBe(30);
+    expect(clip.sourceIn).toBe(130); // 100 + (30 - 0)
+    cmd.undo();
+    expect(clip.startFrame).toBe(0);
+    expect(clip.sourceIn).toBe(100); // 130 - 30
+  });
+
+  it('trim end: execute updates endFrame and sourceOut, undo restores', () => {
+    let clip: Record<string, unknown> = { id: 'c1', endFrame: 100, sourceOut: 200 };
+    const cmd = CommandFactory.clipTrim(
+      'c1', 'end', 100, 80,
+      () => clip, (c) => { clip = c as Record<string, unknown>; }
+    );
+    cmd.execute();
+    expect(clip.endFrame).toBe(80);
+    expect(clip.sourceOut).toBe(180); // 200 + (80 - 100)
+    cmd.undo();
+    expect(clip.endFrame).toBe(100);
+    expect(clip.sourceOut).toBe(200);
+  });
+
+  it('REGRESSION: trim start without sourceIn defaults to 0 instead of NaN', () => {
+    // ClipLike marks sourceIn optional; a clip created without it must not
+    // corrupt to NaN via `undefined + n`.
+    let clip: Record<string, unknown> = { id: 'c1', startFrame: 0 };
+    const cmd = CommandFactory.clipTrim(
+      'c1', 'start', 0, 25,
+      () => clip, (c) => { clip = c as Record<string, unknown>; }
+    );
+    cmd.execute();
+    expect(clip.sourceIn).toBe(25); // 0 (default) + 25
+    expect(Number.isNaN(clip.sourceIn as number)).toBe(false);
+    cmd.undo();
+    expect(clip.sourceIn).toBe(0);
+    expect(Number.isNaN(clip.sourceIn as number)).toBe(false);
+  });
+
+  it('REGRESSION: trim end without sourceOut defaults to 0 instead of NaN', () => {
+    let clip: Record<string, unknown> = { id: 'c1', endFrame: 100 };
+    const cmd = CommandFactory.clipTrim(
+      'c1', 'end', 100, 120,
+      () => clip, (c) => { clip = c as Record<string, unknown>; }
+    );
+    cmd.execute();
+    expect(clip.sourceOut).toBe(20); // 0 (default) + (120 - 100)
+    expect(Number.isNaN(clip.sourceOut as number)).toBe(false);
+  });
+
+  it('redo re-applies the trim', () => {
+    let clip: Record<string, unknown> = { id: 'c1', startFrame: 0, sourceIn: 50 };
+    const cmd = CommandFactory.clipTrim(
+      'c1', 'start', 0, 10,
+      () => clip, (c) => { clip = c as Record<string, unknown>; }
+    );
+    cmd.execute();
+    cmd.undo();
+    cmd.redo();
+    expect(clip.startFrame).toBe(10);
+    expect(clip.sourceIn).toBe(60);
+  });
+
+  it('getDelta reports before/after frames and path', () => {
+    const cmd = CommandFactory.clipTrim('c1', 'start', 0, 30, () => ({}), () => {});
+    const d = cmd.getDelta();
+    expect((d.before as { frame: number }).frame).toBe(0);
+    expect((d.after as { frame: number }).frame).toBe(30);
+    expect((d.path as string[])).toEqual(['clips', 'c1', 'start']);
+  });
+});
+
 describe('CommandFactory.clipAdd / clipDelete', () => {
   it('clipAdd execute adds, undo removes, redo re-adds', () => {
     const clips: { id?: string }[] = [];

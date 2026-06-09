@@ -331,7 +331,8 @@ export class MediaBrowser {
 
       const data = audioBuffer.getChannelData(0);
       const samples = 100;
-      const blockSize = Math.floor(data.length / samples);
+      // Guard: short clips (data.length < samples) gave blockSize=0 → avg=NaN.
+      const blockSize = Math.max(1, Math.floor(data.length / samples));
 
       const canvas = document.createElement('canvas');
       canvas.width = 160;
@@ -345,7 +346,9 @@ export class MediaBrowser {
       for (let i = 0; i < samples; i++) {
         let sum = 0;
         for (let j = 0; j < blockSize; j++) {
-          sum += Math.abs(data[i * blockSize + j]);
+          const idx = i * blockSize + j;
+          // Guard out-of-bounds reads (Float32Array OOB → undefined → NaN).
+          if (idx < data.length) sum += Math.abs(data[idx]);
         }
         const avg = sum / blockSize;
         const barHeight = avg * canvas.height * 2;

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import MarkerManager, { type Marker, type MarkerType } from '../timeline/marker-manager';
+import MarkerManager from '../timeline/marker-manager';
 
 // ============================================================
 // Helpers

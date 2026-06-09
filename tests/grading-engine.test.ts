@@ -340,7 +340,6 @@ describe('ColorGradingEngine — applyWheels (CPU path)', () => {
   it('positive contrast increases midtone separation', () => {
     // Two midtone pixels on opposite sides of pivot=0.5
     const bright = pixel(200, 200, 200);
-    const dark   = pixel(50, 50, 50);
     const w = defaultWheels();
     w.contrast = 0.5; // (x - 0.5)*1.5 + 0.5
     applyWheels(engine, bright, w);

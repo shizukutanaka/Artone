@@ -10,7 +10,6 @@ import {
   MemoryProfiler,
   AutoQualityAdjuster,
   PerformanceOverlayUI,
-  type PerformanceConfig,
 } from '../perf/performance-monitor';
 
 // ============================================================

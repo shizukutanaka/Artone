@@ -124,8 +124,10 @@ export class MultiCamEditor {
 
     mcClip.angles = mcClip.angles.filter(a => a.id !== angleId);
     
-    if (mcClip.activeAngle === angleId && mcClip.angles.length > 0) {
-      mcClip.activeAngle = mcClip.angles[0].id;
+    // Guard: when the last angle is removed mcClip.angles.length is 0; the
+    // original condition skipped the update, leaving a stale angle ID.
+    if (mcClip.activeAngle === angleId) {
+      mcClip.activeAngle = mcClip.angles.length > 0 ? mcClip.angles[0].id : '';
     }
 
     // Remove switch points for this angle

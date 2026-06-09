@@ -165,9 +165,8 @@ export class MagneticTimeline {
   }
 
   insertClip(clip: Omit<Clip, 'id' | 'selected'>, insertTime: number): Clip {
-    // Insert and ripple all subsequent clips
-    this.shiftClipsAfter(clip.trackId, insertTime, clip.duration);
-    
+    // addClip handles the ripple internally; calling shiftClipsAfter here too
+    // would double-shift all subsequent clips by clip.duration.
     return this.addClip({ ...clip, startTime: insertTime });
   }
 
@@ -366,6 +365,13 @@ export class MagneticTimeline {
 
   selectClip(clipId: string, addToSelection = false): void {
     if (!addToSelection) {
+      // Reset clip.selected on all previously-selected clips so the flag stays
+      // consistent with the selection Set. Clearing only the Set left stale
+      // clip.selected = true values on deselected clips.
+      for (const id of this.state.selection) {
+        const c = this.state.clips.get(id);
+        if (c) c.selected = false;
+      }
       this.state.selection.clear();
     }
     this.state.selection.add(clipId);

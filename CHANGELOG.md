@@ -14,6 +14,9 @@ Artone v3 の全変更を記録。
 - `prepare` フックを husky v9 形式 + CI 安全ガード (`husky || true`) に変更。
 
 ### Fixed
+- **未テストモジュール監査 (`timeline/nested-sequences.ts`) で実バグ 2 件を発見・修正**。573 行・テストゼロだった純ロジックモジュールに 29 テストを新規追加:
+  - `unnestSequence()`: ネストクリップがトリム済み (`mediaIn > 0`) の場合、復元クリップ位置が `mediaIn` 分ずれる不具合を修正 (`renderNestedFrame` の `nestedTime = (t − startTime) + mediaIn` 写像の逆変換に整合)。
+  - `duplicateSequence()`: スプレッドで `settings` が複製されず元シーケンスと共有参照になり、複製側の解像度/fps 編集が原本を破壊する不具合を `settings: { ...original.settings }` で修正。
 - **全カテゴリ横断監査による実バグ・堅牢性修正** (並列カテゴリ監査 → 検証 → 修正)。誤検知を排除し確証あるもののみ修正:
   - `recovery/recovery-manager.ts`: クラッシュ検出リスナーが `init()` 毎に再登録され重複ハンドラ・多重 `saveSnapshot` を招く不具合を冪等ガードで修正 (データ損失リスクゾーン)。
   - `plugins/plugin-manager.ts`: サンドボックス Worker 生成時の Blob オブジェクト URL が revoke されずリークする不具合を修正 (セキュリティ境界ゾーン)。

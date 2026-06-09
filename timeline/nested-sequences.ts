@@ -184,6 +184,9 @@ export class NestedSequenceManager {
       ...original,
       id: crypto.randomUUID(),
       name: `${original.name} Copy`,
+      // Deep-copy settings so editing the duplicate's resolution/fps/etc. does
+      // not mutate the original (the spread above only shares the reference).
+      settings: { ...original.settings },
       tracks: original.tracks.map(t => ({ ...t, id: crypto.randomUUID() })),
       clips: original.clips.map(c => ({ ...c, id: crypto.randomUUID() })),
       markers: original.markers.map(m => ({ ...m, id: crypto.randomUUID() }))
@@ -287,7 +290,10 @@ export class NestedSequenceManager {
       const restoredClip: Clip = {
         ...clip,
         id: crypto.randomUUID(),
-        startTime: clip.startTime + nestedClip.startTime
+        // Map a nested-internal start back to the parent timeline. The nested
+        // clip may be trimmed (mediaIn > 0), so subtract that offset — mirroring
+        // renderNestedFrame's nestedTime = (t - startTime) + mediaIn mapping.
+        startTime: clip.startTime + nestedClip.startTime - nestedClip.mediaIn
       };
       sequence.clips.push(restoredClip);
     }

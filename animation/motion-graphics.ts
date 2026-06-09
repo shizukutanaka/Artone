@@ -435,10 +435,12 @@ export class MotionGraphicsEngine {
   private lerpColor(a: string, b: string, t: number): string {
     const parseHex = (hex: string) => {
       const h = hex.replace('#', '');
+      // Expand 3-digit shorthand (#rgb → #rrggbb) so substring indices are valid
+      const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
       return {
-        r: parseInt(h.substring(0, 2), 16),
-        g: parseInt(h.substring(2, 4), 16),
-        b: parseInt(h.substring(4, 6), 16)
+        r: parseInt(full.substring(0, 2), 16),
+        g: parseInt(full.substring(2, 4), 16),
+        b: parseInt(full.substring(4, 6), 16)
       };
     };
 

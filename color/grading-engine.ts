@@ -156,6 +156,35 @@ const DEFAULT_QUALIFIER: HSLQualifier = {
 };
 
 // ============================================================
+// Deep-clone helpers — prevent DEFAULT_* constant aliasing
+// ============================================================
+
+function deepCloneWheels(w: ColorWheels): ColorWheels {
+  return {
+    lift:   { ...w.lift },
+    gamma:  { ...w.gamma },
+    gain:   { ...w.gain },
+    offset: { ...w.offset },
+    contrast:   w.contrast,
+    pivot:      w.pivot,
+    saturation: w.saturation,
+    hue:        w.hue,
+  };
+}
+
+function deepCloneCurves(c: Curves): Curves {
+  return {
+    master:    c.master.map(p => ({ ...p })),
+    red:       c.red.map(p => ({ ...p })),
+    green:     c.green.map(p => ({ ...p })),
+    blue:      c.blue.map(p => ({ ...p })),
+    hueVsSat:  c.hueVsSat.map(p => ({ ...p })),
+    hueVsHue:  c.hueVsHue.map(p => ({ ...p })),
+    lumVsSat:  c.lumVsSat.map(p => ({ ...p })),
+  };
+}
+
+// ============================================================
 // Color Grading Engine
 // ============================================================
 
@@ -298,8 +327,8 @@ export class ColorGradingEngine {
       type: 'serial',
       label: 'Input',
       enabled: true,
-      wheels: { ...DEFAULT_WHEELS },
-      curves: { ...DEFAULT_CURVES },
+      wheels: deepCloneWheels(DEFAULT_WHEELS),
+      curves: deepCloneCurves(DEFAULT_CURVES),
       qualifier: { ...DEFAULT_QUALIFIER },
       windows: [],
       inputs: [],
@@ -313,8 +342,8 @@ export class ColorGradingEngine {
       type: 'corrector',
       label: '01',
       enabled: true,
-      wheels: { ...DEFAULT_WHEELS },
-      curves: { ...DEFAULT_CURVES },
+      wheels: deepCloneWheels(DEFAULT_WHEELS),
+      curves: deepCloneCurves(DEFAULT_CURVES),
       qualifier: { ...DEFAULT_QUALIFIER },
       windows: [],
       inputs: ['input'],
@@ -328,8 +357,8 @@ export class ColorGradingEngine {
       type: 'serial',
       label: 'Output',
       enabled: true,
-      wheels: { ...DEFAULT_WHEELS },
-      curves: { ...DEFAULT_CURVES },
+      wheels: deepCloneWheels(DEFAULT_WHEELS),
+      curves: deepCloneCurves(DEFAULT_CURVES),
       qualifier: { ...DEFAULT_QUALIFIER },
       windows: [],
       inputs: ['node1'],
@@ -439,7 +468,8 @@ export class ColorGradingEngine {
       }
     }
 
-    if (size === 0) return null;
+    // Guard: parseInt(undefined) = NaN when the size token is missing.
+    if (size === 0 || isNaN(size)) return null;
 
     const lut: LUTData = {
       name: file.name.replace(/\.cube$/i, ''),

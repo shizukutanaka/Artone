@@ -117,11 +117,17 @@ export class ProxyManager {
     _sourceVideo: HTMLVideoElement | Blob,
     _onProgress?: (progress: number) => void
   ): Promise<ProxyFile | null> {
-    // Check if already exists
+    // Return ready proxy immediately
     const existing = this.getProxyForMedia(mediaId);
     if (existing?.status === 'ready') {
       return existing;
     }
+
+    // Prevent duplicate jobs for the same media
+    const activeJob = Array.from(this.jobs.values()).find(
+      j => j.mediaId === mediaId && (j.status === 'queued' || j.status === 'processing')
+    );
+    if (activeJob) return null;
 
     // Create job
     const job: ProxyJob = {
@@ -283,6 +289,7 @@ export class ProxyManager {
     originalHeight: number,
     resolution: ProxyResolution
   ): { width: number; height: number } {
+    if (originalHeight <= 0) return { width: 0, height: 0 };
     const scale = RESOLUTION_SCALES[resolution];
 
     if (scale < 1) {

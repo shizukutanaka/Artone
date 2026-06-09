@@ -477,7 +477,13 @@ export class HistogramScope {
     
     // Draw histogram
     const scaleX = width / 256;
-    
+
+    // Guard: zero-pixel frame → all histogram bins are 0 → maxAll = 0 → NaN.
+    // Return background-only bitmap instead of producing NaN canvas paths.
+    if (maxAll === 0) {
+      return this.canvas.transferToImageBitmap();
+    }
+
     if (this.showRGB) {
       // RGB overlay
       this.ctx.globalCompositeOperation = 'screen';
@@ -520,12 +526,12 @@ export class HistogramScope {
       
       this.ctx.globalCompositeOperation = 'source-over';
     } else {
-      // Luma only
+      // Luma only — use maxY; maxAll > 0 is already guaranteed above.
       this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
       this.ctx.beginPath();
       this.ctx.moveTo(0, height);
       for (let i = 0; i < 256; i++) {
-        const h = (histY[i] / maxY) * height * this.config.scale;
+        const h = maxY > 0 ? (histY[i] / maxY) * height * this.config.scale : 0;
         this.ctx.lineTo(i * scaleX, height - h);
       }
       this.ctx.lineTo(width, height);
@@ -656,6 +662,8 @@ export class ScopesManager {
   private histogram: HistogramScope;
   private enabled = new Set<ScopeType>();
   private rafId: number | null = null;
+  // Track user-configured waveform mode so parade analysis doesn't clobber it.
+  private waveformMode: WaveformMode = 'luma';
 
   constructor() {
     this.waveform = new WaveformScope();
@@ -686,6 +694,7 @@ export class ScopesManager {
   }
 
   setWaveformMode(mode: WaveformMode): void {
+    this.waveformMode = mode;
     this.waveform.setMode(mode);
   }
 
@@ -708,10 +717,13 @@ export class ScopesManager {
       results.set('histogram', this.histogram.analyze(frame));
     }
     
-    // Parade is handled by waveform with parade mode
+    // Parade is handled by waveform with parade mode.
+    // REGRESSION fix: restore the user-configured mode after parade analysis so
+    // subsequent waveform renders are not permanently stuck in parade mode.
     if (this.enabled.has('parade')) {
       this.waveform.setMode('parade');
       results.set('parade', this.waveform.analyze(frame));
+      this.waveform.setMode(this.waveformMode);
     }
     
     return results;

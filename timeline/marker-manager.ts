@@ -260,7 +260,10 @@ export class MarkerManager {
           ...original,
           id: crypto.randomUUID(),
           time: original.time + offset,
-          name: `${original.name} (Copy)`
+          name: `${original.name} (Copy)`,
+          // Deep copy mutable collections to prevent aliasing between original and copy.
+          tags: [...original.tags],
+          metadata: { ...original.metadata },
         };
         this.markers.set(copy.id, copy);
         newMarkers.push(copy);

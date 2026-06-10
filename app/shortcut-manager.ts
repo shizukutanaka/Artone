@@ -1,12 +1,12 @@
 /**
  * Artone v3 — Shortcut Manager
- * 
+ *
  * キーボードショートカット管理
  * - カスタマイズ可能
  * - プリセット (Premiere/FCP/DaVinci)
  * - コンフリクト検出
  * - コンテキスト別ショートカット
- * 
+ *
  * @version 1.0.0
  */
 
@@ -14,14 +14,29 @@
 // Types
 // ============================================================
 
+/** i18n key constants for shortcut categories. */
+export const SHORTCUT_CATEGORY_KEYS = {
+  playback: 'shortcut.category.playback',
+  edit:     'shortcut.category.edit',
+  timeline: 'shortcut.category.timeline',
+  tools:    'shortcut.category.tools',
+  file:     'shortcut.category.file',
+  view:     'shortcut.category.view',
+  multicam: 'shortcut.category.multicam',
+} as const;
+
+export type ShortcutCategoryKey = typeof SHORTCUT_CATEGORY_KEYS[keyof typeof SHORTCUT_CATEGORY_KEYS];
+
 export interface Shortcut {
   id: string;
   action: string;
   key: string;
   modifiers: ShortcutModifiers;
   context: ShortcutContext;
+  /** i18n key, e.g. `shortcut.action.play` — call `t(shortcut.description)` to display. */
   description: string;
-  category: string;
+  /** i18n key for category, e.g. `shortcut.category.playback` — call `t(shortcut.category)` to display. */
+  category: ShortcutCategoryKey;
   customized: boolean;
 }
 
@@ -53,78 +68,80 @@ export interface ShortcutConflict {
 // Default Shortcuts
 // ============================================================
 
+const C = SHORTCUT_CATEGORY_KEYS;
+
 const DEFAULT_SHORTCUTS: Omit<Shortcut, 'id' | 'customized'>[] = [
   // Playback
-  { action: 'play', key: 'Space', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Play/Pause', category: 'Playback' },
-  { action: 'stop', key: 'KeyK', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Stop', category: 'Playback' },
-  { action: 'frameForward', key: 'ArrowRight', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Forward 1 Frame', category: 'Playback' },
-  { action: 'frameBack', key: 'ArrowLeft', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Back 1 Frame', category: 'Playback' },
-  { action: 'forward10', key: 'ArrowRight', modifiers: { ctrl: false, shift: true, alt: false, meta: false }, context: 'global', description: 'Forward 10 Frames', category: 'Playback' },
-  { action: 'back10', key: 'ArrowLeft', modifiers: { ctrl: false, shift: true, alt: false, meta: false }, context: 'global', description: 'Back 10 Frames', category: 'Playback' },
-  { action: 'jklJ', key: 'KeyJ', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Reverse Play', category: 'Playback' },
-  { action: 'jklK', key: 'KeyK', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Pause', category: 'Playback' },
-  { action: 'jklL', key: 'KeyL', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Forward Play', category: 'Playback' },
-  { action: 'goToStart', key: 'Home', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Go to Start', category: 'Playback' },
-  { action: 'goToEnd', key: 'End', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Go to End', category: 'Playback' },
+  { action: 'play',         key: 'Space',      modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.play',          category: C.playback },
+  { action: 'stop',         key: 'KeyK',       modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.stop',          category: C.playback },
+  { action: 'frameForward', key: 'ArrowRight', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.frameForward',  category: C.playback },
+  { action: 'frameBack',    key: 'ArrowLeft',  modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.frameBack',     category: C.playback },
+  { action: 'forward10',    key: 'ArrowRight', modifiers: { ctrl: false, shift: true,  alt: false, meta: false }, context: 'global',   description: 'shortcut.action.forward10',     category: C.playback },
+  { action: 'back10',       key: 'ArrowLeft',  modifiers: { ctrl: false, shift: true,  alt: false, meta: false }, context: 'global',   description: 'shortcut.action.back10',        category: C.playback },
+  { action: 'jklJ',         key: 'KeyJ',       modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.jklJ',          category: C.playback },
+  { action: 'jklK',         key: 'KeyK',       modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.jklK',          category: C.playback },
+  { action: 'jklL',         key: 'KeyL',       modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.jklL',          category: C.playback },
+  { action: 'goToStart',    key: 'Home',       modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.goToStart',     category: C.playback },
+  { action: 'goToEnd',      key: 'End',        modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.goToEnd',       category: C.playback },
 
   // Editing
-  { action: 'cut', key: 'KeyX', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'Cut', category: 'Edit' },
-  { action: 'copy', key: 'KeyC', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'Copy', category: 'Edit' },
-  { action: 'paste', key: 'KeyV', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'Paste', category: 'Edit' },
-  { action: 'delete', key: 'Delete', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Delete', category: 'Edit' },
-  { action: 'rippleDelete', key: 'Delete', modifiers: { ctrl: false, shift: true, alt: false, meta: false }, context: 'timeline', description: 'Ripple Delete', category: 'Edit' },
-  { action: 'undo', key: 'KeyZ', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'Undo', category: 'Edit' },
-  { action: 'redo', key: 'KeyZ', modifiers: { ctrl: true, shift: true, alt: false, meta: false }, context: 'global', description: 'Redo', category: 'Edit' },
-  { action: 'selectAll', key: 'KeyA', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'Select All', category: 'Edit' },
-  { action: 'deselect', key: 'Escape', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Deselect All', category: 'Edit' },
-  { action: 'split', key: 'KeyB', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Split Clip', category: 'Edit' },
-  { action: 'duplicate', key: 'KeyD', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'Duplicate', category: 'Edit' },
+  { action: 'cut',          key: 'KeyX',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.cut',          category: C.edit },
+  { action: 'copy',         key: 'KeyC',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.copy',         category: C.edit },
+  { action: 'paste',        key: 'KeyV',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.paste',        category: C.edit },
+  { action: 'delete',       key: 'Delete', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.delete',       category: C.edit },
+  { action: 'rippleDelete', key: 'Delete', modifiers: { ctrl: false, shift: true,  alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.rippleDelete', category: C.edit },
+  { action: 'undo',         key: 'KeyZ',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.undo',         category: C.edit },
+  { action: 'redo',         key: 'KeyZ',   modifiers: { ctrl: true,  shift: true,  alt: false, meta: false }, context: 'global',   description: 'shortcut.action.redo',         category: C.edit },
+  { action: 'selectAll',    key: 'KeyA',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.selectAll',    category: C.edit },
+  { action: 'deselect',     key: 'Escape', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.deselect',     category: C.edit },
+  { action: 'split',        key: 'KeyB',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.split',        category: C.edit },
+  { action: 'duplicate',    key: 'KeyD',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.duplicate',    category: C.edit },
 
   // Timeline
-  { action: 'setInPoint', key: 'KeyI', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Set In Point', category: 'Timeline' },
-  { action: 'setOutPoint', key: 'KeyO', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Set Out Point', category: 'Timeline' },
-  { action: 'clearInOut', key: 'KeyG', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Clear In/Out', category: 'Timeline' },
-  { action: 'zoomIn', key: 'Equal', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Zoom In', category: 'Timeline' },
-  { action: 'zoomOut', key: 'Minus', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Zoom Out', category: 'Timeline' },
-  { action: 'zoomFit', key: 'Digit0', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Zoom to Fit', category: 'Timeline' },
-  { action: 'addMarker', key: 'KeyM', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Add Marker', category: 'Timeline' },
-  { action: 'nextMarker', key: 'KeyM', modifiers: { ctrl: false, shift: true, alt: false, meta: false }, context: 'timeline', description: 'Next Marker', category: 'Timeline' },
-  { action: 'prevMarker', key: 'KeyM', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Previous Marker', category: 'Timeline' },
-  { action: 'snapToggle', key: 'KeyS', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Toggle Snap', category: 'Timeline' },
+  { action: 'setInPoint',  key: 'KeyI',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.setInPoint',  category: C.timeline },
+  { action: 'setOutPoint', key: 'KeyO',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.setOutPoint', category: C.timeline },
+  { action: 'clearInOut',  key: 'KeyG',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.clearInOut',  category: C.timeline },
+  { action: 'zoomIn',      key: 'Equal',  modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.zoomIn',      category: C.timeline },
+  { action: 'zoomOut',     key: 'Minus',  modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.zoomOut',     category: C.timeline },
+  { action: 'zoomFit',     key: 'Digit0', modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.zoomFit',     category: C.timeline },
+  { action: 'addMarker',   key: 'KeyM',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.addMarker',   category: C.timeline },
+  { action: 'nextMarker',  key: 'KeyM',   modifiers: { ctrl: false, shift: true,  alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.nextMarker',  category: C.timeline },
+  { action: 'prevMarker',  key: 'KeyM',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.prevMarker',  category: C.timeline },
+  { action: 'snapToggle',  key: 'KeyS',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.snapToggle',  category: C.timeline },
 
   // Tools
-  { action: 'toolSelect', key: 'KeyV', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Selection Tool', category: 'Tools' },
-  { action: 'toolRazor', key: 'KeyC', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Razor Tool', category: 'Tools' },
-  { action: 'toolSlip', key: 'KeyY', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Slip Tool', category: 'Tools' },
-  { action: 'toolSlide', key: 'KeyU', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Slide Tool', category: 'Tools' },
-  { action: 'toolRoll', key: 'KeyN', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Roll Tool', category: 'Tools' },
-  { action: 'toolRipple', key: 'KeyB', modifiers: { ctrl: false, shift: true, alt: false, meta: false }, context: 'timeline', description: 'Ripple Tool', category: 'Tools' },
+  { action: 'toolSelect', key: 'KeyV', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.toolSelect', category: C.tools },
+  { action: 'toolRazor',  key: 'KeyC', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.toolRazor',  category: C.tools },
+  { action: 'toolSlip',   key: 'KeyY', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.toolSlip',   category: C.tools },
+  { action: 'toolSlide',  key: 'KeyU', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.toolSlide',  category: C.tools },
+  { action: 'toolRoll',   key: 'KeyN', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.toolRoll',   category: C.tools },
+  { action: 'toolRipple', key: 'KeyB', modifiers: { ctrl: false, shift: true,  alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.toolRipple', category: C.tools },
 
   // File
-  { action: 'newProject', key: 'KeyN', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'New Project', category: 'File' },
-  { action: 'open', key: 'KeyO', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'Open', category: 'File' },
-  { action: 'save', key: 'KeyS', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'Save', category: 'File' },
-  { action: 'saveAs', key: 'KeyS', modifiers: { ctrl: true, shift: true, alt: false, meta: false }, context: 'global', description: 'Save As', category: 'File' },
-  { action: 'import', key: 'KeyI', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'Import Media', category: 'File' },
-  { action: 'export', key: 'KeyE', modifiers: { ctrl: true, shift: true, alt: false, meta: false }, context: 'global', description: 'Export', category: 'File' },
+  { action: 'newProject', key: 'KeyN', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'shortcut.action.newProject', category: C.file },
+  { action: 'open',       key: 'KeyO', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'shortcut.action.open',       category: C.file },
+  { action: 'save',       key: 'KeyS', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'shortcut.action.save',       category: C.file },
+  { action: 'saveAs',     key: 'KeyS', modifiers: { ctrl: true, shift: true,  alt: false, meta: false }, context: 'global', description: 'shortcut.action.saveAs',     category: C.file },
+  { action: 'import',     key: 'KeyI', modifiers: { ctrl: true, shift: false, alt: false, meta: false }, context: 'global', description: 'shortcut.action.import',     category: C.file },
+  { action: 'export',     key: 'KeyE', modifiers: { ctrl: true, shift: true,  alt: false, meta: false }, context: 'global', description: 'shortcut.action.export',     category: C.file },
 
   // View
-  { action: 'fullscreen', key: 'KeyF', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'preview', description: 'Fullscreen Preview', category: 'View' },
-  { action: 'toggleTimeline', key: 'F5', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Toggle Timeline', category: 'View' },
-  { action: 'toggleMedia', key: 'F6', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Toggle Media Browser', category: 'View' },
-  { action: 'toggleInspector', key: 'F7', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Toggle Inspector', category: 'View' },
-  { action: 'toggleEffects', key: 'F8', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global', description: 'Toggle Effects', category: 'View' },
+  { action: 'fullscreen',      key: 'KeyF', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'preview', description: 'shortcut.action.fullscreen',      category: C.view },
+  { action: 'toggleTimeline',  key: 'F5',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',  description: 'shortcut.action.toggleTimeline',  category: C.view },
+  { action: 'toggleMedia',     key: 'F6',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',  description: 'shortcut.action.toggleMedia',     category: C.view },
+  { action: 'toggleInspector', key: 'F7',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',  description: 'shortcut.action.toggleInspector', category: C.view },
+  { action: 'toggleEffects',   key: 'F8',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',  description: 'shortcut.action.toggleEffects',   category: C.view },
 
   // Multi-cam
-  { action: 'cam1', key: 'Digit1', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Camera 1', category: 'Multi-cam' },
-  { action: 'cam2', key: 'Digit2', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Camera 2', category: 'Multi-cam' },
-  { action: 'cam3', key: 'Digit3', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Camera 3', category: 'Multi-cam' },
-  { action: 'cam4', key: 'Digit4', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Camera 4', category: 'Multi-cam' },
-  { action: 'cam5', key: 'Digit5', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Camera 5', category: 'Multi-cam' },
-  { action: 'cam6', key: 'Digit6', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Camera 6', category: 'Multi-cam' },
-  { action: 'cam7', key: 'Digit7', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Camera 7', category: 'Multi-cam' },
-  { action: 'cam8', key: 'Digit8', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Camera 8', category: 'Multi-cam' },
-  { action: 'cam9', key: 'Digit9', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'Camera 9', category: 'Multi-cam' },
+  { action: 'cam1', key: 'Digit1', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.cam1', category: C.multicam },
+  { action: 'cam2', key: 'Digit2', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.cam2', category: C.multicam },
+  { action: 'cam3', key: 'Digit3', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.cam3', category: C.multicam },
+  { action: 'cam4', key: 'Digit4', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.cam4', category: C.multicam },
+  { action: 'cam5', key: 'Digit5', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.cam5', category: C.multicam },
+  { action: 'cam6', key: 'Digit6', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.cam6', category: C.multicam },
+  { action: 'cam7', key: 'Digit7', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.cam7', category: C.multicam },
+  { action: 'cam8', key: 'Digit8', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.cam8', category: C.multicam },
+  { action: 'cam9', key: 'Digit9', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.cam9', category: C.multicam },
 ];
 
 // ============================================================

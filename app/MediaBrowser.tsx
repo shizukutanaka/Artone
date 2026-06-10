@@ -288,7 +288,7 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = ({
 
         <input
           type="text"
-          placeholder="検索..."
+          placeholder={t('media.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{

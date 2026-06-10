@@ -81,6 +81,11 @@ class FakeObjectStore {
     return makeRequest(undefined);
   }
 
+  clear() {
+    this.records.clear();
+    return makeRequest(undefined);
+  }
+
   getAll(query?: unknown) {
     const all = Array.from(this.records.values());
     return makeRequest(query === undefined ? all : all);

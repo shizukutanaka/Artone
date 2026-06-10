@@ -54,6 +54,7 @@ Artone v3 の全変更を記録。
     - `setMute(id, false)` がゲインを `1.0` 固定で復元するため、`setVolume(0.5)` 後の mute→unmute でトラック音量が失われるバグを `state.track.volume` 復元へ修正。
     - `setVolume()` が mute 中でもゲインノードを直接更新し可聴的に unmute してしまうバグを、mute 中はストア値のみ更新するよう修正。
     - `destroy()` が閉じた context のノード参照 (`masterGain`/`masterAnalyser`) を残しメータ getter が dead node を触る問題を null クリアで修正。
+  - `media/media-browser.ts`: `importFile()` が冒頭で生成する `URL.createObjectURL` を、メタデータ抽出/サムネイル生成が失敗した場合に revoke せずリークするバグを try-catch + `revokeObjectURL` で修正。33 テスト新規追加 (フィルタ/ソート/アイテム操作/統計/インポート、URL リーク回帰含む)。
 - **`npm run typecheck` / `npm run build` を再 green 化** (`tsc --noEmit` エラー 27 → 0)。`strict`/`noUnusedLocals` 下の実型エラーを behavior-preserving に解消 (`any` 不使用):
   - `export/export-queue.ts`: await 中に `cancel()` が `job.status` を変更しうるがフロー解析が `'active'` リテラルに絞り込むためキャンセルガードが型エラーになる問題を、意図をコメント明記の上で型ワイドニングして解消。
   - `color/noise-reduction.ts` の `Float32Array` ジェネリック不整合、`timeline/trim-operations.ts` の未使用 `findNextAdjacent`、`animation/motion-path.ts` の未使用 `chordLen` を除去。

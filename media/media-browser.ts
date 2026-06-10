@@ -154,72 +154,78 @@ export class MediaBrowser {
     const id = crypto.randomUUID();
     const url = URL.createObjectURL(file);
 
-    let width: number | undefined;
-    let height: number | undefined;
-    let duration = 0;
-    let fps: number | undefined;
-    let sampleRate: number | undefined;
-    let channels: number | undefined;
-    let thumbnail = '';
+    try {
+      let width: number | undefined;
+      let height: number | undefined;
+      let duration = 0;
+      let fps: number | undefined;
+      let sampleRate: number | undefined;
+      let channels: number | undefined;
+      let thumbnail = '';
 
-    onProgress?.(0.2);
+      onProgress?.(0.2);
 
-    // Extract metadata based on type
-    switch (type) {
-      case 'video':
-        const videoMeta = await this.extractVideoMetadata(url);
-        width = videoMeta.width;
-        height = videoMeta.height;
-        duration = videoMeta.duration;
-        fps = videoMeta.fps;
-        thumbnail = await this.generateVideoThumbnail(url, videoMeta.width, videoMeta.height);
-        break;
+      // Extract metadata based on type
+      switch (type) {
+        case 'video':
+          const videoMeta = await this.extractVideoMetadata(url);
+          width = videoMeta.width;
+          height = videoMeta.height;
+          duration = videoMeta.duration;
+          fps = videoMeta.fps;
+          thumbnail = await this.generateVideoThumbnail(url, videoMeta.width, videoMeta.height);
+          break;
 
-      case 'audio':
-        const audioMeta = await this.extractAudioMetadata(url);
-        duration = audioMeta.duration;
-        sampleRate = audioMeta.sampleRate;
-        channels = audioMeta.channels;
-        thumbnail = await this.generateAudioWaveform(url);
-        break;
+        case 'audio':
+          const audioMeta = await this.extractAudioMetadata(url);
+          duration = audioMeta.duration;
+          sampleRate = audioMeta.sampleRate;
+          channels = audioMeta.channels;
+          thumbnail = await this.generateAudioWaveform(url);
+          break;
 
-      case 'image':
-        const imageMeta = await this.extractImageMetadata(url);
-        width = imageMeta.width;
-        height = imageMeta.height;
-        thumbnail = await this.generateImageThumbnail(url);
-        break;
+        case 'image':
+          const imageMeta = await this.extractImageMetadata(url);
+          width = imageMeta.width;
+          height = imageMeta.height;
+          thumbnail = await this.generateImageThumbnail(url);
+          break;
+      }
+
+      onProgress?.(0.9);
+
+      const item: MediaItem = {
+        id,
+        name: file.name,
+        type,
+        file,
+        url,
+        thumbnail,
+        width,
+        height,
+        fps,
+        sampleRate,
+        channels,
+        duration,
+        size: file.size,
+        created: file.lastModified,
+        imported: Date.now(),
+        tags: [],
+        rating: 0,
+        favorite: false,
+        usageCount: 0
+      };
+
+      this.items.set(id, item);
+      this.thumbnailCache.set(id, thumbnail);
+
+      onProgress?.(1);
+      return item;
+    } catch (e) {
+      // A failed import must not leak the object URL created above.
+      URL.revokeObjectURL(url);
+      throw e;
     }
-
-    onProgress?.(0.9);
-
-    const item: MediaItem = {
-      id,
-      name: file.name,
-      type,
-      file,
-      url,
-      thumbnail,
-      width,
-      height,
-      fps,
-      sampleRate,
-      channels,
-      duration,
-      size: file.size,
-      created: file.lastModified,
-      imported: Date.now(),
-      tags: [],
-      rating: 0,
-      favorite: false,
-      usageCount: 0
-    };
-
-    this.items.set(id, item);
-    this.thumbnailCache.set(id, thumbnail);
-
-    onProgress?.(1);
-    return item;
   }
 
   // ============================================================

@@ -326,3 +326,9 @@ if (!(performance as unknown as Record<string, unknown>).memory) {
   });
 }
 
+// === URL.createObjectURL / revokeObjectURL ===
+if (typeof URL.createObjectURL === 'undefined') {
+  URL.createObjectURL = vi.fn(() => 'blob:fake-url');
+  URL.revokeObjectURL = vi.fn();
+}
+

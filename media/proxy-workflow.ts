@@ -391,6 +391,9 @@ export class ProxyWorkflow {
       await this.storage.save(mapping, blob);
       this.mappingCache.set(job.sourceId, mapping);
 
+      // REGRESSION: cancel() removes the job from active while encode runs.
+      // If it fired during the awaits above, bail out without overwriting status.
+      if (!this.active.has(job.id)) return;
       job.status = 'completed';
       job.completedAt = Date.now();
       job.progress = 1;
@@ -398,6 +401,7 @@ export class ProxyWorkflow {
       job.outputUrl = URL.createObjectURL(blob);
       this.notifyListeners(job);
     } catch (e) {
+      if (!this.active.has(job.id)) return;
       job.status = 'failed';
       job.error = e instanceof Error ? e.message : String(e);
       this.notifyListeners(job);

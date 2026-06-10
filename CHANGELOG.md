@@ -42,6 +42,7 @@ Artone v3 の全変更を記録。
   - `color/hdr-engine.ts`: `Math.smoothstep` の edge0===edge1 でゼロ除算→NaN になるガードを追加。
   - `i18n/i18n-manager.ts`: `loadLocale()` が locale を検証せず fetch パスへ補間していた問題に BCP 47 形式バリデーションを追加 (パストラバーサル防止)。新規 6 テスト。
   - `collab/collaboration-engine.ts`: `restoreVersion()` の `JSON.parse` が破損スナップショットでクラッシュする問題を try-catch で安全に false 返却へ。`broadcastUpdate()` が `localUser` null 時に `requireLocalUser()` で予期しない例外を送出する不具合を null ガードで修正 (`deleteComment`/`deleteAnnotation` が connect 前に throw していた)。61 テスト新規追加。
+  - `media/proxy-workflow.ts`: `cancel()` がアクティブジョブを `active` Map から削除した後も `runJob` の成功/失敗パスが status を `'completed'`/`'failed'` で上書きするレースコンディションを修正。`!this.active.has(job.id)` ガードで中断。`URL.createObjectURL` グローバルスタブを `tests/setup.ts` に追加。34 テスト新規追加。
 - **`npm run typecheck` / `npm run build` を再 green 化** (`tsc --noEmit` エラー 27 → 0)。`strict`/`noUnusedLocals` 下の実型エラーを behavior-preserving に解消 (`any` 不使用):
   - `export/export-queue.ts`: await 中に `cancel()` が `job.status` を変更しうるがフロー解析が `'active'` リテラルに絞り込むためキャンセルガードが型エラーになる問題を、意図をコメント明記の上で型ワイドニングして解消。
   - `color/noise-reduction.ts` の `Float32Array` ジェネリック不整合、`timeline/trim-operations.ts` の未使用 `findNextAdjacent`、`animation/motion-path.ts` の未使用 `chordLen` を除去。

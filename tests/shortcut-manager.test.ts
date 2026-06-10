@@ -11,8 +11,6 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
   ShortcutManager,
   SHORTCUT_CATEGORY_KEYS,
-  type Shortcut,
-  type ShortcutContext,
 } from '../app/shortcut-manager';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

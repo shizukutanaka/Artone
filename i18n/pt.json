@@ -45,7 +45,8 @@
     "saveAs": "Salvar como",
     "import": "Importar",
     "export": "Exportar",
-    "recent": "Projetos recentes"
+    "recent": "Projetos recentes",
+    "untitled": "Projeto sem título"
   },
   "edit": {
     "undo": "Desfazer",
@@ -91,7 +92,8 @@
       "in": "Aumentar",
       "out": "Diminuir",
       "fit": "Ajustar"
-    }
+    },
+    "dragHint": "Arraste mídia para a linha do tempo"
   },
   "color": {
     "title": "Correção de cor",
@@ -180,7 +182,15 @@
     "createdAt": "Criado",
     "dropTitle": "Soltar mídia",
     "acceptedTypes": "Vídeo, Áudio, Imagens",
-    "dropHint": "Soltar arquivos aqui"
+    "dropHint": "Soltar arquivos aqui",
+    "all": "Tudo",
+    "empty": "Solte ou importe mídia",
+    "noMatch": "Sem correspondências",
+    "status": {
+      "pending": "Pendente",
+      "proxy": "Proxy",
+      "error": "Falhou"
+    }
   },
   "error": {
     "network": {
@@ -204,6 +214,12 @@
     "generic": "Erro: {message}",
     "init": {
       "title": "Erro de inicialização"
+    },
+    "details": "Detalhes do erro",
+    "restart": "Reiniciar",
+    "unexpected": {
+      "title": "Erro inesperado",
+      "body": "Algo deu errado. Seu projeto atual foi salvo automaticamente."
     }
   },
   "recovery": {
@@ -327,13 +343,57 @@
     "title": "Monitores"
   },
   "inspector": {
-    "title": "Inspetor"
+    "title": "Inspetor",
+    "selectHint": "Selecione um elemento",
+    "section": {
+      "basic": "Básico",
+      "transform": "Transformar",
+      "opacity": "Opacidade",
+      "project": "Projeto"
+    },
+    "label": {
+      "name": "Nome",
+      "start": "Início",
+      "scale": "Escala",
+      "rotation": "Rotação",
+      "alpha": "α",
+      "enabled": "Ativado"
+    }
   },
   "captions": {
     "title": "Legendas"
   },
   "text": {
     "title": "Texto"
+  },
+  "preview": {
+    "webgpu": "Pré-visualização (WebGPU)"
+  },
+  "palette": {
+    "placeholder": "Pesquisar comandos, efeitos, configurações...",
+    "hint": "↑↓ Navegar · Enter Executar · Esc Fechar",
+    "count": "{count} resultados",
+    "cmd": {
+      "cut": "Recortar",
+      "copy": "Copiar",
+      "paste": "Colar",
+      "undo": "Desfazer",
+      "redo": "Refazer",
+      "save": "Salvar",
+      "export": "Exportar",
+      "import": "Importar",
+      "play": "Reproduzir / Parar",
+      "colorGrade": "Correção de cor",
+      "audioMix": "Mixer de áudio",
+      "captions": "Legendas",
+      "textEdit": "Editar texto",
+      "multicam": "Multi-câmera",
+      "videoScopes": "Monitores",
+      "otioExport": "Exportar OTIO",
+      "toggleTheme": "Alternar tema",
+      "shortcuts": "Atalhos do teclado",
+      "about": "Sobre o Artone"
+    }
   },
   "plurals": {
     "items": "{count, plural, one {# item} other {# itens}}",

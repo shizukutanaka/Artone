@@ -45,7 +45,8 @@
     "saveAs": "Guardar como",
     "import": "Importar",
     "export": "Exportar",
-    "recent": "Proyectos recientes"
+    "recent": "Proyectos recientes",
+    "untitled": "Proyecto sin título"
   },
   "edit": {
     "undo": "Deshacer",
@@ -91,7 +92,8 @@
       "in": "Acercar",
       "out": "Alejar",
       "fit": "Ajustar a ventana"
-    }
+    },
+    "dragHint": "Arrastra medios a la línea de tiempo"
   },
   "color": {
     "title": "Etalonaje",
@@ -180,7 +182,15 @@
     "createdAt": "Creado",
     "dropTitle": "Soltar medios",
     "acceptedTypes": "Vídeo, Audio, Imágenes",
-    "dropHint": "Soltar archivos aquí"
+    "dropHint": "Soltar archivos aquí",
+    "all": "Todo",
+    "empty": "Suelta o importa medios",
+    "noMatch": "Sin resultados",
+    "status": {
+      "pending": "Pendiente",
+      "proxy": "Proxy",
+      "error": "Error"
+    }
   },
   "error": {
     "network": {
@@ -204,6 +214,12 @@
     "generic": "Error: {message}",
     "init": {
       "title": "Error de inicialización"
+    },
+    "details": "Detalles del error",
+    "restart": "Reiniciar",
+    "unexpected": {
+      "title": "Error inesperado",
+      "body": "Algo salió mal. Tu proyecto actual ha sido guardado automáticamente."
     }
   },
   "recovery": {
@@ -327,13 +343,57 @@
     "title": "Scopes"
   },
   "inspector": {
-    "title": "Inspector"
+    "title": "Inspector",
+    "selectHint": "Selecciona un elemento",
+    "section": {
+      "basic": "Básico",
+      "transform": "Transformar",
+      "opacity": "Opacidad",
+      "project": "Proyecto"
+    },
+    "label": {
+      "name": "Nombre",
+      "start": "Inicio",
+      "scale": "Escala",
+      "rotation": "Rotación",
+      "alpha": "α",
+      "enabled": "Activado"
+    }
   },
   "captions": {
     "title": "Subtítulos"
   },
   "text": {
     "title": "Texto"
+  },
+  "preview": {
+    "webgpu": "Vista previa (WebGPU)"
+  },
+  "palette": {
+    "placeholder": "Buscar comandos, efectos, ajustes...",
+    "hint": "↑↓ Navegar · Enter Ejecutar · Esc Cerrar",
+    "count": "{count} resultados",
+    "cmd": {
+      "cut": "Cortar",
+      "copy": "Copiar",
+      "paste": "Pegar",
+      "undo": "Deshacer",
+      "redo": "Rehacer",
+      "save": "Guardar",
+      "export": "Exportar",
+      "import": "Importar",
+      "play": "Reproducir / Detener",
+      "colorGrade": "Corrección de color",
+      "audioMix": "Mezclador de audio",
+      "captions": "Subtítulos",
+      "textEdit": "Editar texto",
+      "multicam": "Multicámara",
+      "videoScopes": "Monitores",
+      "otioExport": "Exportar OTIO",
+      "toggleTheme": "Cambiar tema",
+      "shortcuts": "Atajos de teclado",
+      "about": "Acerca de Artone"
+    }
   },
   "plurals": {
     "items": "{count, plural, one {# elemento} other {# elementos}}",

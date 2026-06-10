@@ -45,7 +45,8 @@
     "saveAs": "Speichern unter",
     "import": "Importieren",
     "export": "Exportieren",
-    "recent": "Zuletzt verwendet"
+    "recent": "Zuletzt verwendet",
+    "untitled": "Unbenanntes Projekt"
   },
   "edit": {
     "undo": "Rückgängig",
@@ -91,7 +92,8 @@
       "in": "Vergrößern",
       "out": "Verkleinern",
       "fit": "Einpassen"
-    }
+    },
+    "dragHint": "Medien auf die Timeline ziehen"
   },
   "color": {
     "title": "Farbkorrektur",
@@ -180,7 +182,15 @@
     "createdAt": "Erstellt",
     "dropTitle": "Medien ablegen",
     "acceptedTypes": "Video, Audio, Bilder",
-    "dropHint": "Dateien hier ablegen"
+    "dropHint": "Dateien hier ablegen",
+    "all": "Alle",
+    "empty": "Medien ablegen oder importieren",
+    "noMatch": "Keine Treffer",
+    "status": {
+      "pending": "Ausstehend",
+      "proxy": "Proxy",
+      "error": "Fehlgeschlagen"
+    }
   },
   "error": {
     "network": {
@@ -204,6 +214,12 @@
     "generic": "Fehler: {message}",
     "init": {
       "title": "Initialisierungsfehler"
+    },
+    "details": "Fehlerdetails",
+    "restart": "Neu starten",
+    "unexpected": {
+      "title": "Unerwarteter Fehler",
+      "body": "Etwas ist schiefgelaufen. Dein aktuelles Projekt wurde automatisch gespeichert."
     }
   },
   "recovery": {
@@ -327,13 +343,57 @@
     "title": "Scopes"
   },
   "inspector": {
-    "title": "Inspektor"
+    "title": "Inspektor",
+    "selectHint": "Element auswählen",
+    "section": {
+      "basic": "Grundlegend",
+      "transform": "Transformieren",
+      "opacity": "Deckkraft",
+      "project": "Projekt"
+    },
+    "label": {
+      "name": "Name",
+      "start": "Start",
+      "scale": "Skalierung",
+      "rotation": "Drehung",
+      "alpha": "α",
+      "enabled": "Aktiviert"
+    }
   },
   "captions": {
     "title": "Untertitel"
   },
   "text": {
     "title": "Text"
+  },
+  "preview": {
+    "webgpu": "Vorschau (WebGPU)"
+  },
+  "palette": {
+    "placeholder": "Befehle, Effekte, Einstellungen suchen...",
+    "hint": "↑↓ Navigieren · Enter Ausführen · Esc Schließen",
+    "count": "{count} Ergebnisse",
+    "cmd": {
+      "cut": "Ausschneiden",
+      "copy": "Kopieren",
+      "paste": "Einfügen",
+      "undo": "Rückgängig",
+      "redo": "Wiederholen",
+      "save": "Speichern",
+      "export": "Exportieren",
+      "import": "Importieren",
+      "play": "Wiedergabe / Stopp",
+      "colorGrade": "Farbkorrektur",
+      "audioMix": "Audio-Mixer",
+      "captions": "Untertitel",
+      "textEdit": "Text bearbeiten",
+      "multicam": "Multi-Kamera",
+      "videoScopes": "Scopes",
+      "otioExport": "OTIO exportieren",
+      "toggleTheme": "Design umschalten",
+      "shortcuts": "Tastenkürzel",
+      "about": "Über Artone"
+    }
   },
   "plurals": {
     "items": "{count, plural, one {# Element} other {# Elemente}}",

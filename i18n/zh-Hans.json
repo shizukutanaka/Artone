@@ -45,7 +45,8 @@
     "saveAs": "另存为",
     "import": "导入",
     "export": "导出",
-    "recent": "最近的项目"
+    "recent": "最近的项目",
+    "untitled": "未命名项目"
   },
   "edit": {
     "undo": "撤销",
@@ -91,7 +92,8 @@
       "in": "放大",
       "out": "缩小",
       "fit": "适应窗口"
-    }
+    },
+    "dragHint": "将媒体拖到时间线"
   },
   "color": {
     "title": "调色",
@@ -180,7 +182,15 @@
     "createdAt": "创建时间",
     "dropTitle": "拖放媒体",
     "acceptedTypes": "视频、音频、图片",
-    "dropHint": "将文件拖放到此处"
+    "dropHint": "将文件拖放到此处",
+    "all": "全部",
+    "empty": "拖放或导入媒体",
+    "noMatch": "无匹配结果",
+    "status": {
+      "pending": "待处理",
+      "proxy": "代理",
+      "error": "失败"
+    }
   },
   "error": {
     "network": {
@@ -204,6 +214,12 @@
     "generic": "错误：{message}",
     "init": {
       "title": "初始化错误"
+    },
+    "details": "错误详情",
+    "restart": "重新启动",
+    "unexpected": {
+      "title": "意外错误",
+      "body": "出了点问题。您当前的项目已自动保存。"
     }
   },
   "recovery": {
@@ -327,13 +343,57 @@
     "title": "监视器"
   },
   "inspector": {
-    "title": "检查器"
+    "title": "检查器",
+    "selectHint": "选择一个元素",
+    "section": {
+      "basic": "基本",
+      "transform": "变换",
+      "opacity": "不透明度",
+      "project": "项目"
+    },
+    "label": {
+      "name": "名称",
+      "start": "开始",
+      "scale": "缩放",
+      "rotation": "旋转",
+      "alpha": "α",
+      "enabled": "启用"
+    }
   },
   "captions": {
     "title": "字幕"
   },
   "text": {
     "title": "文本"
+  },
+  "preview": {
+    "webgpu": "预览 (WebGPU)"
+  },
+  "palette": {
+    "placeholder": "搜索命令、效果、设置...",
+    "hint": "↑↓ 导航 · Enter 执行 · Esc 关闭",
+    "count": "{count} 个结果",
+    "cmd": {
+      "cut": "剪切",
+      "copy": "复制",
+      "paste": "粘贴",
+      "undo": "撤销",
+      "redo": "重做",
+      "save": "保存",
+      "export": "导出",
+      "import": "导入",
+      "play": "播放 / 停止",
+      "colorGrade": "色彩校正",
+      "audioMix": "音频混合器",
+      "captions": "字幕",
+      "textEdit": "文本编辑",
+      "multicam": "多机位",
+      "videoScopes": "监视器",
+      "otioExport": "导出 OTIO",
+      "toggleTheme": "切换主题",
+      "shortcuts": "键盘快捷键",
+      "about": "关于 Artone"
+    }
   },
   "plurals": {
     "items": "{count} 项",

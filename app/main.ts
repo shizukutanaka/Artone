@@ -37,6 +37,7 @@ import { ProxyWorkflow } from '../media/proxy-workflow';
 import { KeyframeAnimator } from '../animation/keyframe-animator';
 import { MotionGraphicsEngine } from '../animation/motion-graphics';
 import { CaptionManager } from '../captions/caption-manager';
+import { ShortcutManager } from './shortcut-manager';
 
 // ============================================================
 // Types
@@ -83,36 +84,6 @@ const DEFAULT_CONFIG: AppConfig = {
   defaultResolution: { width: 1920, height: 1080 }
 };
 
-// ============================================================
-// Keyboard Shortcuts
-// ============================================================
-
-const SHORTCUTS: Record<string, { key: string; ctrl?: boolean; shift?: boolean; alt?: boolean; action: string }> = {
-  'play': { key: 'Space', action: 'togglePlay' },
-  'save': { key: 's', ctrl: true, action: 'save' },
-  'saveAs': { key: 's', ctrl: true, shift: true, action: 'saveAs' },
-  'undo': { key: 'z', ctrl: true, action: 'undo' },
-  'redo': { key: 'z', ctrl: true, shift: true, action: 'redo' },
-  'cut': { key: 'x', ctrl: true, action: 'cut' },
-  'copy': { key: 'c', ctrl: true, action: 'copy' },
-  'paste': { key: 'v', ctrl: true, action: 'paste' },
-  'delete': { key: 'Delete', action: 'delete' },
-  'split': { key: 'b', action: 'split' },
-  'export': { key: 'e', ctrl: true, shift: true, action: 'export' },
-  'import': { key: 'i', ctrl: true, action: 'import' },
-  'frameBack': { key: 'ArrowLeft', action: 'frameBack' },
-  'frameForward': { key: 'ArrowRight', action: 'frameForward' },
-  'selectAll': { key: 'a', ctrl: true, action: 'selectAll' },
-  'deselect': { key: 'Escape', action: 'deselect' },
-  'j': { key: 'j', action: 'jklJ' },
-  'k': { key: 'k', action: 'jklK' },
-  'l': { key: 'l', action: 'jklL' },
-  'inPoint': { key: 'i', action: 'setInPoint' },
-  'outPoint': { key: 'o', action: 'setOutPoint' },
-  'fullscreen': { key: 'f', action: 'fullscreen' },
-  'zoom100': { key: '1', ctrl: true, action: 'zoom100' },
-  'zoomFit': { key: '0', ctrl: true, action: 'zoomFit' },
-};
 
 // ============================================================
 // Artone Application
@@ -158,6 +129,7 @@ export class ArtoneApp {
   public keyframes: KeyframeAnimator;
   public motionGfx: MotionGraphicsEngine;
   public captions: CaptionManager;
+  public shortcuts: ShortcutManager;
 
   // State
   public readonly config: AppConfig;
@@ -200,6 +172,7 @@ export class ArtoneApp {
     this.keyframes = new KeyframeAnimator();
     this.motionGfx = new MotionGraphicsEngine();
     this.captions = new CaptionManager();
+    this.shortcuts = new ShortcutManager();
   }
 
   // ============================================================
@@ -261,71 +234,53 @@ export class ArtoneApp {
   }
 
   private setupKeyboardShortcuts(): void {
-    document.addEventListener('keydown', (e) => {
-      // Check if in input field
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
+    const sm = this.shortcuts;
+    const tl = this.timeline;
 
-      for (const [, shortcut] of Object.entries(SHORTCUTS)) {
-        const keyMatch = e.key === shortcut.key || e.code === shortcut.key;
-        const ctrlMatch = !shortcut.ctrl || e.ctrlKey || e.metaKey;
-        const shiftMatch = !shortcut.shift || e.shiftKey;
-        const altMatch = !shortcut.alt || e.altKey;
-
-        if (keyMatch && ctrlMatch && shiftMatch && altMatch) {
-          e.preventDefault();
-          this.executeAction(shortcut.action);
-          return;
-        }
-      }
+    sm.registerCallback('play',         () => this.togglePlayback());
+    sm.registerCallback('stop',         () => this.pause());
+    sm.registerCallback('frameForward', () => tl.stepFrame(true));
+    sm.registerCallback('frameBack',    () => tl.stepFrame(false));
+    // step 10 frames: call stepFrame 10 times (no bulk API)
+    sm.registerCallback('forward10', () => { for (let i = 0; i < 10; i++) tl.stepFrame(true); });
+    sm.registerCallback('back10',    () => { for (let i = 0; i < 10; i++) tl.stepFrame(false); });
+    sm.registerCallback('jklJ',         () => tl.jklControl('j'));
+    sm.registerCallback('jklK',         () => tl.jklControl('k'));
+    sm.registerCallback('jklL',         () => tl.jklControl('l'));
+    sm.registerCallback('goToStart',    () => tl.setPlayhead(0));
+    sm.registerCallback('goToEnd',      () => {
+      const allClips = Array.from(tl.getState().clips.values());
+      const end = allClips.reduce((m, c) => Math.max(m, c.startTime + c.duration), 0);
+      tl.setPlayhead(end);
     });
-  }
-
-  private executeAction(action: string): void {
-    switch (action) {
-      case 'togglePlay':
-        this.togglePlayback();
-        break;
-      case 'save':
-        this.project.saveProject();
-        break;
-      case 'undo':
-        this.history.undo();
-        break;
-      case 'redo':
-        this.history.redo();
-        break;
-      case 'split':
-        this.splitAtPlayhead();
-        break;
-      case 'export':
-        // Show export dialog
-        break;
-      case 'frameBack':
-        this.timeline.stepFrame(false);
-        break;
-      case 'frameForward':
-        this.timeline.stepFrame(true);
-        break;
-      case 'jklJ':
-        this.timeline.jklControl('j');
-        break;
-      case 'jklK':
-        this.timeline.jklControl('k');
-        break;
-      case 'jklL':
-        this.timeline.jklControl('l');
-        break;
-      case 'setInPoint':
-        this.timeline.setInPoint();
-        break;
-      case 'setOutPoint':
-        this.timeline.setOutPoint();
-        break;
-      case 'deselect':
-        this.timeline.deselectAll();
-        break;
+    sm.registerCallback('undo',         () => this.history.undo());
+    sm.registerCallback('redo',         () => this.history.redo());
+    sm.registerCallback('split',        () => this.splitAtPlayhead());
+    sm.registerCallback('selectAll',    () => tl.selectRange(0, Infinity));
+    sm.registerCallback('deselect',     () => tl.deselectAll());
+    sm.registerCallback('setInPoint',   () => tl.setInPoint());
+    sm.registerCallback('setOutPoint',  () => tl.setOutPoint());
+    sm.registerCallback('save',         () => this.project.saveProject());
+    sm.registerCallback('saveAs',       () => this.emit?.('saveAs'));
+    sm.registerCallback('export',       () => this.emit?.('showExport'));
+    sm.registerCallback('import',       () => this.emit?.('showImport'));
+    sm.registerCallback('newProject',   () => this.emit?.('newProject'));
+    sm.registerCallback('open',         () => this.emit?.('openProject'));
+    sm.registerCallback('fullscreen',   () => this.emit?.('toggleFullscreen'));
+    sm.registerCallback('toggleTimeline',  () => this.emit?.('togglePanel', 'timeline'));
+    sm.registerCallback('toggleMedia',     () => this.emit?.('togglePanel', 'media'));
+    sm.registerCallback('toggleInspector', () => this.emit?.('togglePanel', 'inspector'));
+    sm.registerCallback('toggleEffects',   () => this.emit?.('togglePanel', 'effects'));
+    sm.registerCallback('zoomIn',  () => this.emit?.('zoomTimeline', 1.25));
+    sm.registerCallback('zoomOut', () => this.emit?.('zoomTimeline', 0.8));
+    sm.registerCallback('zoomFit', () => this.emit?.('zoomTimelineFit'));
+    sm.registerCallback('addMarker',  () => this.emit?.('addMarker'));
+    sm.registerCallback('nextMarker', () => this.emit?.('nextMarker'));
+    sm.registerCallback('prevMarker', () => this.emit?.('prevMarker'));
+    sm.registerCallback('snapToggle', () => this.emit?.('toggleSnap'));
+    // Multi-cam camera switches: delegate to React layer with angle index
+    for (let i = 1; i <= 9; i++) {
+      sm.registerCallback(`cam${i}`, () => this.emit?.('switchCamera', i - 1));
     }
   }
 

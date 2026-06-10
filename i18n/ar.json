@@ -45,7 +45,8 @@
     "saveAs": "حفظ باسم",
     "import": "استيراد",
     "export": "تصدير",
-    "recent": "المشاريع الأخيرة"
+    "recent": "المشاريع الأخيرة",
+    "untitled": "مشروع بدون عنوان"
   },
   "edit": {
     "undo": "تراجع",
@@ -91,7 +92,8 @@
       "in": "تكبير",
       "out": "تصغير",
       "fit": "ملاءمة"
-    }
+    },
+    "dragHint": "اسحب الوسائط إلى الخط الزمني"
   },
   "color": {
     "title": "تدرج الألوان",
@@ -180,7 +182,15 @@
     "createdAt": "تاريخ الإنشاء",
     "dropTitle": "إسقاط الوسائط",
     "acceptedTypes": "فيديو، صوت، صور",
-    "dropHint": "إسقاط الملفات هنا"
+    "dropHint": "إسقاط الملفات هنا",
+    "all": "الكل",
+    "empty": "أفلت الوسائط أو استوردها",
+    "noMatch": "لا توجد نتائج",
+    "status": {
+      "pending": "قيد الانتظار",
+      "proxy": "بروكسي",
+      "error": "فشل"
+    }
   },
   "error": {
     "network": {
@@ -204,6 +214,12 @@
     "generic": "خطأ: {message}",
     "init": {
       "title": "خطأ في التهيئة"
+    },
+    "details": "تفاصيل الخطأ",
+    "restart": "إعادة تشغيل",
+    "unexpected": {
+      "title": "خطأ غير متوقع",
+      "body": "حدث خطأ ما. تم حفظ مشروعك الحالي تلقائيًا."
     }
   },
   "recovery": {
@@ -327,13 +343,57 @@
     "title": "أدوات القياس"
   },
   "inspector": {
-    "title": "المفتش"
+    "title": "المفتش",
+    "selectHint": "حدد عنصرًا",
+    "section": {
+      "basic": "أساسي",
+      "transform": "تحويل",
+      "opacity": "عتامة",
+      "project": "مشروع"
+    },
+    "label": {
+      "name": "الاسم",
+      "start": "البداية",
+      "scale": "مقياس",
+      "rotation": "دوران",
+      "alpha": "α",
+      "enabled": "مفعّل"
+    }
   },
   "captions": {
     "title": "الترجمات"
   },
   "text": {
     "title": "نص"
+  },
+  "preview": {
+    "webgpu": "معاينة (WebGPU)"
+  },
+  "palette": {
+    "placeholder": "ابحث عن الأوامر والتأثيرات والإعدادات...",
+    "hint": "↑↓ التنقل · Enter تنفيذ · Esc إغلاق",
+    "count": "{count} نتيجة",
+    "cmd": {
+      "cut": "قص",
+      "copy": "نسخ",
+      "paste": "لصق",
+      "undo": "تراجع",
+      "redo": "إعادة",
+      "save": "حفظ",
+      "export": "تصدير",
+      "import": "استيراد",
+      "play": "تشغيل / إيقاف",
+      "colorGrade": "تصحيح الألوان",
+      "audioMix": "خلاط الصوت",
+      "captions": "ترجمات",
+      "textEdit": "تحرير النص",
+      "multicam": "متعدد الكاميرات",
+      "videoScopes": "مؤشرات الفيديو",
+      "otioExport": "تصدير OTIO",
+      "toggleTheme": "تبديل السمة",
+      "shortcuts": "اختصارات لوحة المفاتيح",
+      "about": "حول Artone"
+    }
   },
   "plurals": {
     "items": "{count, plural, zero {لا عناصر} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}",

@@ -45,7 +45,8 @@
     "saveAs": "另存新檔",
     "import": "匯入",
     "export": "匯出",
-    "recent": "最近的專案"
+    "recent": "最近的專案",
+    "untitled": "未命名專案"
   },
   "edit": {
     "undo": "復原",
@@ -91,7 +92,8 @@
       "in": "放大",
       "out": "縮小",
       "fit": "符合視窗"
-    }
+    },
+    "dragHint": "將媒體拖到時間軸"
   },
   "color": {
     "title": "調色",
@@ -180,7 +182,15 @@
     "createdAt": "建立時間",
     "dropTitle": "拖放媒體",
     "acceptedTypes": "視頻、音頻、圖片",
-    "dropHint": "將檔案拖放到此處"
+    "dropHint": "將檔案拖放到此處",
+    "all": "全部",
+    "empty": "拖放或匯入媒體",
+    "noMatch": "無符合結果",
+    "status": {
+      "pending": "待處理",
+      "proxy": "代理",
+      "error": "失敗"
+    }
   },
   "error": {
     "network": {
@@ -204,6 +214,12 @@
     "generic": "錯誤：{message}",
     "init": {
       "title": "初始化錯誤"
+    },
+    "details": "錯誤詳情",
+    "restart": "重新啟動",
+    "unexpected": {
+      "title": "意外錯誤",
+      "body": "發生了問題。您目前的專案已自動儲存。"
     }
   },
   "recovery": {
@@ -327,13 +343,57 @@
     "title": "監視器"
   },
   "inspector": {
-    "title": "檢查器"
+    "title": "檢查器",
+    "selectHint": "選取一個元素",
+    "section": {
+      "basic": "基本",
+      "transform": "變換",
+      "opacity": "不透明度",
+      "project": "專案"
+    },
+    "label": {
+      "name": "名稱",
+      "start": "開始",
+      "scale": "縮放",
+      "rotation": "旋轉",
+      "alpha": "α",
+      "enabled": "啟用"
+    }
   },
   "captions": {
     "title": "字幕"
   },
   "text": {
     "title": "文字"
+  },
+  "preview": {
+    "webgpu": "預覽 (WebGPU)"
+  },
+  "palette": {
+    "placeholder": "搜尋指令、效果、設定...",
+    "hint": "↑↓ 導覽 · Enter 執行 · Esc 關閉",
+    "count": "{count} 個結果",
+    "cmd": {
+      "cut": "剪下",
+      "copy": "複製",
+      "paste": "貼上",
+      "undo": "復原",
+      "redo": "重做",
+      "save": "儲存",
+      "export": "匯出",
+      "import": "匯入",
+      "play": "播放 / 停止",
+      "colorGrade": "色彩校正",
+      "audioMix": "音訊混音器",
+      "captions": "字幕",
+      "textEdit": "文字編輯",
+      "multicam": "多機位",
+      "videoScopes": "監視器",
+      "otioExport": "匯出 OTIO",
+      "toggleTheme": "切換佈景主題",
+      "shortcuts": "鍵盤快速鍵",
+      "about": "關於 Artone"
+    }
   },
   "plurals": {
     "items": "{count} 項",

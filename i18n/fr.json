@@ -45,7 +45,8 @@
     "saveAs": "Enregistrer sous",
     "import": "Importer",
     "export": "Exporter",
-    "recent": "Projets récents"
+    "recent": "Projets récents",
+    "untitled": "Projet sans titre"
   },
   "edit": {
     "undo": "Annuler",
@@ -91,7 +92,8 @@
       "in": "Agrandir",
       "out": "Réduire",
       "fit": "Ajuster"
-    }
+    },
+    "dragHint": "Faites glisser des médias sur la timeline"
   },
   "color": {
     "title": "Étalonnage",
@@ -180,7 +182,15 @@
     "createdAt": "Créé",
     "dropTitle": "Déposer des médias",
     "acceptedTypes": "Vidéo, Audio, Images",
-    "dropHint": "Déposer les fichiers ici"
+    "dropHint": "Déposer les fichiers ici",
+    "all": "Tout",
+    "empty": "Déposez ou importez des médias",
+    "noMatch": "Aucun résultat",
+    "status": {
+      "pending": "En attente",
+      "proxy": "Proxy",
+      "error": "Échec"
+    }
   },
   "error": {
     "network": {
@@ -204,6 +214,12 @@
     "generic": "Erreur : {message}",
     "init": {
       "title": "Erreur d'initialisation"
+    },
+    "details": "Détails de l'erreur",
+    "restart": "Redémarrer",
+    "unexpected": {
+      "title": "Erreur inattendue",
+      "body": "Quelque chose s'est mal passé. Votre projet actuel a été sauvegardé automatiquement."
     }
   },
   "recovery": {
@@ -327,13 +343,57 @@
     "title": "Moniteurs"
   },
   "inspector": {
-    "title": "Inspecteur"
+    "title": "Inspecteur",
+    "selectHint": "Sélectionnez un élément",
+    "section": {
+      "basic": "Basique",
+      "transform": "Transformer",
+      "opacity": "Opacité",
+      "project": "Projet"
+    },
+    "label": {
+      "name": "Nom",
+      "start": "Début",
+      "scale": "Échelle",
+      "rotation": "Rotation",
+      "alpha": "α",
+      "enabled": "Activé"
+    }
   },
   "captions": {
     "title": "Sous-titres"
   },
   "text": {
     "title": "Texte"
+  },
+  "preview": {
+    "webgpu": "Aperçu (WebGPU)"
+  },
+  "palette": {
+    "placeholder": "Rechercher commandes, effets, paramètres...",
+    "hint": "↑↓ Naviguer · Enter Exécuter · Esc Fermer",
+    "count": "{count} résultats",
+    "cmd": {
+      "cut": "Couper",
+      "copy": "Copier",
+      "paste": "Coller",
+      "undo": "Annuler",
+      "redo": "Rétablir",
+      "save": "Enregistrer",
+      "export": "Exporter",
+      "import": "Importer",
+      "play": "Lecture / Arrêt",
+      "colorGrade": "Étalonnage des couleurs",
+      "audioMix": "Mixeur audio",
+      "captions": "Sous-titres",
+      "textEdit": "Édition de texte",
+      "multicam": "Multi-caméra",
+      "videoScopes": "Moniteurs",
+      "otioExport": "Exporter OTIO",
+      "toggleTheme": "Changer de thème",
+      "shortcuts": "Raccourcis clavier",
+      "about": "À propos d'Artone"
+    }
   },
   "plurals": {
     "items": "{count, plural, one {# élément} other {# éléments}}",

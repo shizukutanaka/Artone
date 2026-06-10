@@ -323,6 +323,7 @@ export class PerformanceMonitor {
   private totalFrames = 0;
   private droppedFrames = 0;
   private lastFrameTime = 0;
+  private lastGPUTime = 0;
   private targetFrametime: number;
   
   private listeners: Set<(metrics: PerformanceMetrics) => void> = new Set();
@@ -399,6 +400,16 @@ export class PerformanceMonitor {
     return this.gpuProfiler.getGPUTime(queryId);
   }
 
+  /**
+   * Reads back GPU timestamp data for the given query and caches it so that
+   * the next `getMetrics()` call returns an accurate `gpuTime`.
+   * Call this after `device.queue.submit()` completes.
+   */
+  async recordGPUTime(queryId: number): Promise<void> {
+    if (queryId < 0 || !this.config.enableGPUProfiling) return;
+    this.lastGPUTime = await this.gpuProfiler.getGPUTime(queryId);
+  }
+
   // ----- メトリクス取得 -----
   getMetrics(): PerformanceMetrics {
     const memory = this.config.enableMemoryProfiling 
@@ -415,7 +426,7 @@ export class PerformanceMonitor {
       frametimeVariance: this.frametimeStats.variance,
       droppedFrames: this.droppedFrames,
       totalFrames: this.totalFrames,
-      gpuTime: 0, // Updated async
+      gpuTime: this.lastGPUTime,
       memoryUsed: memory.used,
       memoryTotal: memory.total,
       cpuUsage: this.estimateCPUUsage(),

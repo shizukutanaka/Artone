@@ -11,6 +11,7 @@
  * @version 1.0.0
  */
 import { encodeWAVBlob, type WavBitDepth } from './wav-encoder';
+import { encodeGif, type GifFrameInput } from './gif-encoder';
 
 // ============================================================
 // Types
@@ -253,6 +254,11 @@ export class ExportEngine {
     job.startTime = Date.now();
     job.totalFrames = Math.ceil(duration * job.config.fps);
 
+    // GIF uses a raw-frame path — no WebCodecs encoding needed
+    if (job.config.format === 'gif') {
+      return this.exportGif(job, renderFrame, onProgress);
+    }
+
     try {
       // Phase 1: Encode video
       job.status = 'encoding';
@@ -268,9 +274,9 @@ export class ExportEngine {
         }
       );
 
-      // Phase 2: Encode audio
+      // Phase 2: Encode audio (GIF is already handled above; this path is mp4/webm only)
       let audioData: Uint8Array | null = null;
-      if (audioBuffer && job.config.format !== 'gif') {
+      if (audioBuffer) {
         onProgress?.(0.8, 'Encoding audio...');
         audioData = await this.encodeAudio(audioBuffer, job.config.audioBitrate);
         job.progress = 0.9;
@@ -492,10 +498,6 @@ export class ExportEngine {
     // Simple MP4/WebM container generation
     // In production, use mp4-muxer or similar library
     
-    if (config.format === 'gif') {
-      return this.createGif(videoChunks, config);
-    }
-
     // Build basic container
     const videoSize = videoChunks.reduce((sum, c) => sum + c.byteLength, 0);
     const audioSize = audioData?.length || 0;
@@ -525,13 +527,60 @@ export class ExportEngine {
     return new Blob([buffer.slice(0, offset)], { type: mimeType });
   }
 
-  private async createGif(
-    _videoChunks: EncodedVideoChunk[],
-    _config: ExportConfig
+  /** GIF export path: captures raw frames and encodes with the built-in GIF encoder. */
+  private async exportGif(
+    job: ExportJob,
+    renderFrame: (frameIndex: number) => Promise<VideoFrame>,
+    onProgress?: ProgressCallback
   ): Promise<Blob> {
-    // GIF generation would use gifenc or similar
-    // Placeholder: return empty blob
-    return new Blob([], { type: 'image/gif' });
+    const { config } = job;
+    job.status = 'encoding';
+    this.notifyListeners(job);
+
+    const frames: GifFrameInput[] = [];
+    const delayMs = Math.round(1000 / config.fps);
+
+    for (let i = 0; i < job.totalFrames; i++) {
+      if (this.abortController?.signal.aborted) {
+        job.status = 'cancelled';
+        this.notifyListeners(job);
+        throw new Error('Export cancelled');
+      }
+
+      const videoFrame = await renderFrame(i);
+      const imageData = await this.videoFrameToImageData(videoFrame);
+      videoFrame.close();
+      frames.push({ imageData, delayMs });
+
+      job.currentFrame = i + 1;
+      job.progress = (i + 1) / job.totalFrames * 0.9;
+      const elapsed = Date.now() - job.startTime;
+      job.estimatedTimeRemaining = (elapsed / (i + 1)) * (job.totalFrames - i - 1);
+      onProgress?.(job.progress, 'Encoding GIF...');
+      this.notifyListeners(job);
+    }
+
+    job.status = 'muxing';
+    onProgress?.(0.95, 'Building GIF...');
+    this.notifyListeners(job);
+
+    const gifBytes = encodeGif(frames, { numColors: 256, dither: true, loopCount: 0 });
+
+    job.status = 'complete';
+    job.progress = 1;
+    const blob = new Blob([gifBytes.buffer as ArrayBuffer], { type: 'image/gif' });
+    job.outputPath = URL.createObjectURL(blob);
+    onProgress?.(1, 'Complete');
+    this.notifyListeners(job);
+    return blob;
+  }
+
+  private async videoFrameToImageData(frame: VideoFrame): Promise<ImageData> {
+    const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Failed to obtain 2D context from OffscreenCanvas');
+    ctx.drawImage(frame as unknown as CanvasImageSource, 0, 0);
+    return ctx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
   }
 
   // ============================================================

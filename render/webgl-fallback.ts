@@ -112,15 +112,30 @@ export class WebGLFallbackRenderer {
     const gl = this.gl!;
     const vs = this.createShader(gl.VERTEX_SHADER, vsSource);
     const fs = this.createShader(gl.FRAGMENT_SHADER, fsSource);
-    if (!vs || !fs) return null;
+    if (!vs || !fs) {
+      // REGRESSION: free whichever shader succeeded to avoid a resource leak.
+      if (vs) gl.deleteShader(vs);
+      if (fs) gl.deleteShader(fs);
+      return null;
+    }
 
     const program = gl.createProgram();
-    if (!program) return null;
+    if (!program) {
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      return null;
+    }
     gl.attachShader(program, vs);
     gl.attachShader(program, fs);
     gl.linkProgram(program);
+    // Shaders are no longer needed once the program is linked.
+    gl.detachShader(program, vs);
+    gl.detachShader(program, fs);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
       log.error('Program link failed', gl.getProgramInfoLog(program));
+      gl.deleteProgram(program);
       return null;
     }
     return program;

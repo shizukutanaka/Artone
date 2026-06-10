@@ -212,8 +212,11 @@ if (typeof globalThis.OffscreenCanvas === 'undefined') {
     const ctx2d = {
       fillRect: vi.fn(), clearRect: vi.fn(), drawImage: vi.fn(),
       beginPath: vi.fn(), closePath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(),
-      arc: vi.fn(), fill: vi.fn(), stroke: vi.fn(), fillText: vi.fn(),
+      arc: vi.fn(), fill: vi.fn(), stroke: vi.fn(), fillText: vi.fn(), strokeText: vi.fn(),
       setLineDash: vi.fn(),
+      translate: vi.fn(), rotate: vi.fn(), scale: vi.fn(), save: vi.fn(), restore: vi.fn(),
+      transform: vi.fn(), setTransform: vi.fn(), resetTransform: vi.fn(),
+      measureText: vi.fn((t: string) => ({ width: t.length * 8 })),
       putImageData: vi.fn(),
       getImageData: vi.fn((_x: number, _y: number, iw: number, ih: number) => ({
         data: new Uint8ClampedArray((iw || w) * (ih || h) * 4), width: iw || w, height: ih || h,
@@ -221,7 +224,7 @@ if (typeof globalThis.OffscreenCanvas === 'undefined') {
       createImageData: vi.fn((iw: number, ih: number) => ({ data: new Uint8ClampedArray(iw * ih * 4), width: iw, height: ih })),
       canvas: { width: w, height: h },
       fillStyle: '', strokeStyle: '', lineWidth: 1, font: '', textAlign: '',
-      globalAlpha: 1, globalCompositeOperation: '',
+      globalAlpha: 1, globalCompositeOperation: '', filter: '',
     };
     return {
       width: w, height: h,

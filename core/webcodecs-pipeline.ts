@@ -598,8 +598,13 @@ export class VideoPipeline {
       throw new Error('Decoder not configured');
     }
 
+    // Empty input would index chunks[-1] below; nothing to extract.
+    if (chunks.length === 0 || count <= 0) return [];
+
     const thumbnails: ImageBitmap[] = [];
-    const interval = Math.floor(chunks.length / count);
+    // Clamp to >=1: for short clips floor(length/count) is 0, which collapses
+    // every thumbnail onto chunk 0 instead of spreading across the timeline.
+    const interval = Math.max(1, Math.floor(chunks.length / count));
 
     for (let i = 0; i < count; i++) {
       const chunkIndex = Math.min(i * interval, chunks.length - 1);

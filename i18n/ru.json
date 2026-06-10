@@ -22,7 +22,10 @@
     "settings": "Настройки",
     "help": "Справка",
     "about": "О программе",
-    "exit": "Выход"
+    "exit": "Выход",
+    "skip": "Пропустить",
+    "retry": "Повторить",
+    "back": "Назад"
   },
   "menu": {
     "file": "Файл",
@@ -174,7 +177,10 @@
     "search": "Поиск медиа",
     "duration": "Длительность",
     "size": "Размер файла",
-    "createdAt": "Создано"
+    "createdAt": "Создано",
+    "dropTitle": "Перетащить медиа",
+    "acceptedTypes": "Видео, Аудио, Изображения",
+    "dropHint": "Перетащите файлы сюда"
   },
   "error": {
     "network": {
@@ -195,7 +201,10 @@
     "codec": {
       "notSupported": "Неподдерживаемый кодек: {codec}"
     },
-    "generic": "Ошибка: {message}"
+    "generic": "Ошибка: {message}",
+    "init": {
+      "title": "Ошибка инициализации"
+    }
   },
   "recovery": {
     "title": "Восстановление",
@@ -219,6 +228,43 @@
     "playback": "Воспроизведение",
     "trimming": "Обрезка",
     "navigation": "Навигация"
+  },
+  "loading": {
+    "engine": "Инициализация движка..."
+  },
+  "firstRun": {
+    "levelHint": "Мы настроим интерфейс в соответствии с вашим опытом",
+    "levelBeginner": "Начинающий",
+    "levelBeginnerDesc": "Простой интерфейс",
+    "levelIntermediate": "Средний уровень",
+    "levelIntermediateDesc": "Сбалансированный",
+    "levelPro": "Профессионал",
+    "levelProDesc": "Все функции",
+    "step2Title": "Начать проект",
+    "step2Subtitle": "Выберите шаблон или начните с нуля",
+    "step3Title": "Добавить материал",
+    "step3Subtitle": "Перетащите или нажмите для выбора",
+    "filesSelected": "{count} файл(ов) выбрано",
+    "dropHint": "Перетащите видео, аудио или изображения сюда",
+    "startEditing": "Начать редактирование",
+    "startDemo": "Начать с демо-материалом",
+    "skipToDemo": "Пропустить → Начать с демо",
+    "templateYoutubeDesc": "1080p 30fps — Игры и влоги",
+    "templateShortDesc": "1080×1920 30fps — Вертикальное видео",
+    "templateFilmDesc": "4K 24fps — Кинематографический",
+    "templateBlankDesc": "Без пресета — автоопределение"
+  },
+  "scopes": {
+    "title": "Мониторы"
+  },
+  "inspector": {
+    "title": "Инспектор"
+  },
+  "captions": {
+    "title": "Субтитры"
+  },
+  "text": {
+    "title": "Текст"
   },
   "plurals": {
     "items": "{count, plural, one {# элемент} few {# элемента} other {# элементов}}",

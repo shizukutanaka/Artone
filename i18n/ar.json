@@ -22,7 +22,10 @@
     "settings": "الإعدادات",
     "help": "مساعدة",
     "about": "حول",
-    "exit": "خروج"
+    "exit": "خروج",
+    "skip": "تخطي",
+    "retry": "إعادة المحاولة",
+    "back": "رجوع"
   },
   "menu": {
     "file": "ملف",
@@ -174,7 +177,10 @@
     "search": "بحث في الوسائط",
     "duration": "المدة",
     "size": "حجم الملف",
-    "createdAt": "تاريخ الإنشاء"
+    "createdAt": "تاريخ الإنشاء",
+    "dropTitle": "إسقاط الوسائط",
+    "acceptedTypes": "فيديو، صوت، صور",
+    "dropHint": "إسقاط الملفات هنا"
   },
   "error": {
     "network": {
@@ -195,7 +201,10 @@
     "codec": {
       "notSupported": "كودك غير مدعوم: {codec}"
     },
-    "generic": "خطأ: {message}"
+    "generic": "خطأ: {message}",
+    "init": {
+      "title": "خطأ في التهيئة"
+    }
   },
   "recovery": {
     "title": "استعادة بعد التعطل",
@@ -219,6 +228,43 @@
     "playback": "التشغيل",
     "trimming": "التشذيب",
     "navigation": "التنقل"
+  },
+  "loading": {
+    "engine": "جارٍ تهيئة المحرك..."
+  },
+  "firstRun": {
+    "levelHint": "سنقوم بتعديل واجهة المستخدم لتناسب خبرتك",
+    "levelBeginner": "مبتدئ",
+    "levelBeginnerDesc": "تخطيط بسيط",
+    "levelIntermediate": "متوسط",
+    "levelIntermediateDesc": "متوازن",
+    "levelPro": "محترف",
+    "levelProDesc": "جميع الميزات",
+    "step2Title": "بدء مشروع",
+    "step2Subtitle": "اختر نموذجًا أو ابدأ فارغًا",
+    "step3Title": "إضافة مقاطع",
+    "step3Subtitle": "اسحب وأفلت أو انقر للتحديد",
+    "filesSelected": "{count} ملف محدد",
+    "dropHint": "أفلت الفيديو أو الصوت أو الصور هنا",
+    "startEditing": "بدء التحرير",
+    "startDemo": "البدء بمقاطع تجريبية",
+    "skipToDemo": "تخطي → البدء بالعرض التجريبي",
+    "templateYoutubeDesc": "1080p 30fps — الألعاب والمدونات",
+    "templateShortDesc": "1080×1920 30fps — فيديو عمودي",
+    "templateFilmDesc": "4K 24fps — سينمائي",
+    "templateBlankDesc": "بدون ضبط مسبق — كشف تلقائي"
+  },
+  "scopes": {
+    "title": "أدوات القياس"
+  },
+  "inspector": {
+    "title": "المفتش"
+  },
+  "captions": {
+    "title": "الترجمات"
+  },
+  "text": {
+    "title": "نص"
   },
   "plurals": {
     "items": "{count, plural, zero {لا عناصر} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}",

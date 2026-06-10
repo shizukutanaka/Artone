@@ -22,7 +22,10 @@
     "settings": "Ajustes",
     "help": "Ayuda",
     "about": "Acerca de",
-    "exit": "Salir"
+    "exit": "Salir",
+    "skip": "Saltar",
+    "retry": "Reintentar",
+    "back": "Atrás"
   },
   "menu": {
     "file": "Archivo",
@@ -174,7 +177,10 @@
     "search": "Buscar medios",
     "duration": "Duración",
     "size": "Tamaño",
-    "createdAt": "Creado"
+    "createdAt": "Creado",
+    "dropTitle": "Soltar medios",
+    "acceptedTypes": "Vídeo, Audio, Imágenes",
+    "dropHint": "Soltar archivos aquí"
   },
   "error": {
     "network": {
@@ -195,7 +201,10 @@
     "codec": {
       "notSupported": "Códec no soportado: {codec}"
     },
-    "generic": "Error: {message}"
+    "generic": "Error: {message}",
+    "init": {
+      "title": "Error de inicialización"
+    }
   },
   "recovery": {
     "title": "Recuperación",
@@ -219,6 +228,43 @@
     "playback": "Reproducción",
     "trimming": "Recorte",
     "navigation": "Navegación"
+  },
+  "loading": {
+    "engine": "Inicializando motor..."
+  },
+  "firstRun": {
+    "levelHint": "Ajustaremos la interfaz según tu experiencia",
+    "levelBeginner": "Principiante",
+    "levelBeginnerDesc": "Diseño simple",
+    "levelIntermediate": "Intermedio",
+    "levelIntermediateDesc": "Equilibrado",
+    "levelPro": "Profesional",
+    "levelProDesc": "Todas las funciones",
+    "step2Title": "Iniciar proyecto",
+    "step2Subtitle": "Elige una plantilla o comienza en blanco",
+    "step3Title": "Agregar material",
+    "step3Subtitle": "Arrastra y suelta, o haz clic para seleccionar",
+    "filesSelected": "{count} archivo(s) seleccionado(s)",
+    "dropHint": "Suelta video, audio o imágenes aquí",
+    "startEditing": "Comenzar edición",
+    "startDemo": "Comenzar con material de demo",
+    "skipToDemo": "Saltar → Comenzar con demo",
+    "templateYoutubeDesc": "1080p 30fps — Gaming y Vlogs",
+    "templateShortDesc": "1080×1920 30fps — Vídeo vertical",
+    "templateFilmDesc": "4K 24fps — Cinematográfico",
+    "templateBlankDesc": "Sin preset — detección automática"
+  },
+  "scopes": {
+    "title": "Scopes"
+  },
+  "inspector": {
+    "title": "Inspector"
+  },
+  "captions": {
+    "title": "Subtítulos"
+  },
+  "text": {
+    "title": "Texto"
   },
   "plurals": {
     "items": "{count, plural, one {# elemento} other {# elementos}}",

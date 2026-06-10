@@ -15,6 +15,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ds, color, space, radius, motion, shadow, z, type FeatureTier } from './design-system';
+import { t } from '../i18n/i18n-manager';
 
 // === 型定義 ===
 
@@ -213,7 +214,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               setSelectedIndex(0);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="コマンド、エフェクト、設定を検索..."
+            placeholder={t('palette.placeholder')}
             style={{
               flex: 1,
               background: 'transparent',
@@ -309,8 +310,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             color: color.textTertiary,
           }}
         >
-          <span>↑↓ 移動 · Enter 実行 · Esc 閉じる</span>
-          <span>{results.length} 件</span>
+          <span>{t('palette.hint')}</span>
+          <span>{t('palette.count', { count: results.length })}</span>
         </div>
       </div>
 
@@ -335,32 +336,32 @@ export function createDefaultCommands(
 ): PaletteItem[] {
   return [
     // Essential
-    { id: 'cmd-cut', label: 'カット', aliases: ['cut', 'katto'], category: 'command', shortcut: '⌘X', tier: 'essential', action: actions.cut ?? (() => {}) },
-    { id: 'cmd-copy', label: 'コピー', aliases: ['copy', 'kopi'], category: 'command', shortcut: '⌘C', tier: 'essential', action: actions.copy ?? (() => {}) },
-    { id: 'cmd-paste', label: 'ペースト', aliases: ['paste', 'pe-suto'], category: 'command', shortcut: '⌘V', tier: 'essential', action: actions.paste ?? (() => {}) },
-    { id: 'cmd-undo', label: '取り消し', aliases: ['undo', 'torikeshi'], category: 'command', shortcut: '⌘Z', tier: 'essential', action: actions.undo ?? (() => {}) },
-    { id: 'cmd-redo', label: 'やり直し', aliases: ['redo', 'yarinaoshi'], category: 'command', shortcut: '⌘⇧Z', tier: 'essential', action: actions.redo ?? (() => {}) },
-    { id: 'cmd-save', label: '保存', aliases: ['save', 'hozon'], category: 'command', shortcut: '⌘S', tier: 'essential', action: actions.save ?? (() => {}) },
-    { id: 'cmd-export', label: 'エクスポート', aliases: ['export', 'ekusupo-to'], category: 'command', shortcut: '⌘⇧E', tier: 'essential', action: actions.export ?? (() => {}) },
-    { id: 'cmd-import', label: 'インポート', aliases: ['import', 'inpo-to'], category: 'command', shortcut: '⌘I', tier: 'essential', action: actions.import ?? (() => {}) },
-    { id: 'cmd-play', label: '再生 / 停止', aliases: ['play', 'stop', 'saisei', 'teishi'], category: 'command', shortcut: 'Space', tier: 'essential', action: actions.play ?? (() => {}) },
+    { id: 'cmd-cut', label: t('palette.cmd.cut'), aliases: ['cut', 'katto'], category: 'command', shortcut: '⌘X', tier: 'essential', action: actions.cut ?? (() => {}) },
+    { id: 'cmd-copy', label: t('palette.cmd.copy'), aliases: ['copy', 'kopi'], category: 'command', shortcut: '⌘C', tier: 'essential', action: actions.copy ?? (() => {}) },
+    { id: 'cmd-paste', label: t('palette.cmd.paste'), aliases: ['paste', 'pe-suto'], category: 'command', shortcut: '⌘V', tier: 'essential', action: actions.paste ?? (() => {}) },
+    { id: 'cmd-undo', label: t('palette.cmd.undo'), aliases: ['undo', 'torikeshi'], category: 'command', shortcut: '⌘Z', tier: 'essential', action: actions.undo ?? (() => {}) },
+    { id: 'cmd-redo', label: t('palette.cmd.redo'), aliases: ['redo', 'yarinaoshi'], category: 'command', shortcut: '⌘⇧Z', tier: 'essential', action: actions.redo ?? (() => {}) },
+    { id: 'cmd-save', label: t('palette.cmd.save'), aliases: ['save', 'hozon'], category: 'command', shortcut: '⌘S', tier: 'essential', action: actions.save ?? (() => {}) },
+    { id: 'cmd-export', label: t('palette.cmd.export'), aliases: ['export', 'ekusupo-to'], category: 'command', shortcut: '⌘⇧E', tier: 'essential', action: actions.export ?? (() => {}) },
+    { id: 'cmd-import', label: t('palette.cmd.import'), aliases: ['import', 'inpo-to'], category: 'command', shortcut: '⌘I', tier: 'essential', action: actions.import ?? (() => {}) },
+    { id: 'cmd-play', label: t('palette.cmd.play'), aliases: ['play', 'stop', 'saisei', 'teishi'], category: 'command', shortcut: 'Space', tier: 'essential', action: actions.play ?? (() => {}) },
 
     // Standard
-    { id: 'cmd-color', label: 'カラー補正', aliases: ['color', 'kara-hosei', 'grade'], category: 'command', tier: 'standard', action: actions.colorGrade ?? (() => {}) },
-    { id: 'cmd-audio', label: 'オーディオミキサー', aliases: ['audio', 'mixer', 'o-dhio'], category: 'command', tier: 'standard', action: actions.audioMix ?? (() => {}) },
-    { id: 'cmd-caption', label: '字幕', aliases: ['subtitle', 'caption', 'jimaku'], category: 'command', tier: 'standard', action: actions.captions ?? (() => {}) },
-    { id: 'cmd-text', label: 'テキスト編集', aliases: ['text', 'tekisuto', 'transcript'], category: 'command', tier: 'standard', action: actions.textEdit ?? (() => {}) },
+    { id: 'cmd-color', label: t('palette.cmd.colorGrade'), aliases: ['color', 'kara-hosei', 'grade'], category: 'command', tier: 'standard', action: actions.colorGrade ?? (() => {}) },
+    { id: 'cmd-audio', label: t('palette.cmd.audioMix'), aliases: ['audio', 'mixer', 'o-dhio'], category: 'command', tier: 'standard', action: actions.audioMix ?? (() => {}) },
+    { id: 'cmd-caption', label: t('palette.cmd.captions'), aliases: ['subtitle', 'caption', 'jimaku'], category: 'command', tier: 'standard', action: actions.captions ?? (() => {}) },
+    { id: 'cmd-text', label: t('palette.cmd.textEdit'), aliases: ['text', 'tekisuto', 'transcript'], category: 'command', tier: 'standard', action: actions.textEdit ?? (() => {}) },
 
     // Pro
-    { id: 'cmd-multicam', label: 'マルチカム', aliases: ['multicam', 'maruchikamu'], category: 'command', tier: 'pro', action: actions.multicam ?? (() => {}) },
-    { id: 'cmd-scope', label: 'スコープ', aliases: ['scope', 'waveform', 'vectorscope', 'suko-pu'], category: 'command', tier: 'pro', action: actions.videoScopes ?? (() => {}) },
-    { id: 'cmd-otio', label: 'OTIO エクスポート', aliases: ['opentimelineio', 'interchange'], category: 'command', tier: 'pro', action: actions.otioExport ?? (() => {}) },
+    { id: 'cmd-multicam', label: t('palette.cmd.multicam'), aliases: ['multicam', 'maruchikamu'], category: 'command', tier: 'pro', action: actions.multicam ?? (() => {}) },
+    { id: 'cmd-scope', label: t('palette.cmd.videoScopes'), aliases: ['scope', 'waveform', 'vectorscope', 'suko-pu'], category: 'command', tier: 'pro', action: actions.videoScopes ?? (() => {}) },
+    { id: 'cmd-otio', label: t('palette.cmd.otioExport'), aliases: ['opentimelineio', 'interchange'], category: 'command', tier: 'pro', action: actions.otioExport ?? (() => {}) },
 
     // Settings
-    { id: 'set-theme', label: 'テーマ切り替え', aliases: ['theme', 'dark', 'light', 'te-ma'], category: 'setting', tier: 'essential', action: actions.toggleTheme ?? (() => {}) },
-    { id: 'set-shortcuts', label: 'ショートカット一覧', aliases: ['shortcuts', 'keyboard', 'sho-tokatto'], category: 'help', tier: 'essential', action: actions.showShortcuts ?? (() => {}) },
+    { id: 'set-theme', label: t('palette.cmd.toggleTheme'), aliases: ['theme', 'dark', 'light', 'te-ma'], category: 'setting', tier: 'essential', action: actions.toggleTheme ?? (() => {}) },
+    { id: 'set-shortcuts', label: t('palette.cmd.shortcuts'), aliases: ['shortcuts', 'keyboard', 'sho-tokatto'], category: 'help', tier: 'essential', action: actions.showShortcuts ?? (() => {}) },
 
     // Help
-    { id: 'help-about', label: 'Artone について', aliases: ['about', 'version'], category: 'help', tier: 'essential', action: actions.about ?? (() => {}) },
+    { id: 'help-about', label: t('palette.cmd.about'), aliases: ['about', 'version'], category: 'help', tier: 'essential', action: actions.about ?? (() => {}) },
   ];
 }

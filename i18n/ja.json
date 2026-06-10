@@ -22,7 +22,10 @@
     "settings": "設定",
     "help": "ヘルプ",
     "about": "情報",
-    "exit": "終了"
+    "exit": "終了",
+    "skip": "スキップ",
+    "retry": "再試行",
+    "back": "戻る"
   },
   "menu": {
     "file": "ファイル",
@@ -88,7 +91,8 @@
       "in": "拡大",
       "out": "縮小",
       "fit": "全体表示"
-    }
+    },
+    "dragHint": "メディアをタイムラインにドラッグ"
   },
   "color": {
     "title": "カラーグレーディング",
@@ -174,7 +178,10 @@
     "search": "メディア検索",
     "duration": "再生時間",
     "size": "ファイルサイズ",
-    "createdAt": "作成日時"
+    "createdAt": "作成日時",
+    "dropTitle": "メディアをドロップ",
+    "acceptedTypes": "動画・音声・画像",
+    "dropHint": "ファイルをドロップ"
   },
   "error": {
     "network": {
@@ -195,7 +202,10 @@
     "codec": {
       "notSupported": "未対応コーデック: {codec}"
     },
-    "generic": "エラーが発生しました: {message}"
+    "generic": "エラーが発生しました: {message}",
+    "init": {
+      "title": "初期化エラー"
+    }
   },
   "recovery": {
     "title": "クラッシュリカバリ",
@@ -219,6 +229,69 @@
     "playback": "再生制御",
     "trimming": "トリム",
     "navigation": "ナビゲーション"
+  },
+  "palette": {
+    "placeholder": "コマンド、エフェクト、設定を検索...",
+    "hint": "↑↓ 移動 · Enter 実行 · Esc 閉じる",
+    "count": "{count} 件",
+    "cmd": {
+      "cut": "カット",
+      "copy": "コピー",
+      "paste": "ペースト",
+      "undo": "取り消し",
+      "redo": "やり直し",
+      "save": "保存",
+      "export": "エクスポート",
+      "import": "インポート",
+      "play": "再生 / 停止",
+      "colorGrade": "カラー補正",
+      "audioMix": "オーディオミキサー",
+      "captions": "字幕",
+      "textEdit": "テキスト編集",
+      "multicam": "マルチカム",
+      "videoScopes": "スコープ",
+      "otioExport": "OTIO エクスポート",
+      "toggleTheme": "テーマ切り替え",
+      "shortcuts": "ショートカット一覧",
+      "about": "Artone について"
+    }
+  },
+  "loading": {
+    "engine": "エンジン初期化中..."
+  },
+  "firstRun": {
+    "levelHint": "あなたの経験レベルに合わせて UI を調整します",
+    "levelBeginner": "初めて",
+    "levelBeginnerDesc": "シンプルな画面",
+    "levelIntermediate": "経験あり",
+    "levelIntermediateDesc": "バランス型",
+    "levelPro": "プロ",
+    "levelProDesc": "全機能表示",
+    "step2Title": "プロジェクトを始める",
+    "step2Subtitle": "テンプレートを選ぶか、空白から",
+    "step3Title": "素材を追加",
+    "step3Subtitle": "ドラッグ＆ドロップ、またはクリックで選択",
+    "filesSelected": "{count} ファイル選択済み",
+    "dropHint": "動画・音声・画像をここにドロップ",
+    "startEditing": "編集を始める",
+    "startDemo": "デモ素材で始める",
+    "skipToDemo": "スキップ → デモ素材で開始",
+    "templateYoutubeDesc": "1080p 30fps — ゲーム実況・Vlog に最適",
+    "templateShortDesc": "1080×1920 30fps — 縦動画",
+    "templateFilmDesc": "4K 24fps — 映画・シネマティック",
+    "templateBlankDesc": "設定なし — 素材に合わせて自動検出"
+  },
+  "scopes": {
+    "title": "スコープ"
+  },
+  "inspector": {
+    "title": "インスペクター"
+  },
+  "captions": {
+    "title": "字幕"
+  },
+  "text": {
+    "title": "テキスト"
   },
   "plurals": {
     "items": "{count, plural, other {# 個のアイテム}}",

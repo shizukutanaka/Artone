@@ -18,6 +18,7 @@ import { CommandPalette, createDefaultCommands, type PaletteItem } from './comma
 import { safeStorageGet, safeStorageSet, formatTimecode } from './utils';
 import { DropZone } from './drop-zone';
 import { EngineProvider, useEngine, configFromFirstRun } from './engine-context';
+import { t } from '../i18n/i18n-manager';
 import type { AppConfig } from './main';
 
 // ============================================================
@@ -35,10 +36,10 @@ function tierFromLevel(level: ExperienceLevel): FeatureTier {
 // ============================================================
 
 export const ArtoneShell: React.FC = () => {
-  const [firstRunDone, setFirstRunDone] = useState(!!safeStorageGet('nv-first-run-done'));
+  const [firstRunDone, setFirstRunDone] = useState(!!safeStorageGet('artone-first-run-done'));
   const [engineConfig, setEngineConfig] = useState<Partial<AppConfig>>({});
   const [tier, setTier] = useState<FeatureTier>(
-    tierFromLevel((safeStorageGet('nv-level') as ExperienceLevel) || 'intermediate')
+    tierFromLevel((safeStorageGet('artone-level') as ExperienceLevel) || 'intermediate')
   );
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
@@ -47,8 +48,8 @@ export const ArtoneShell: React.FC = () => {
     setTier(tierFromLevel(result.level));
     setEngineConfig(configFromFirstRun(result.level, result.template));
     setPendingFiles(result.mediaFiles);
-    safeStorageSet('nv-first-run-done', '1');
-    safeStorageSet('nv-level', result.level);
+    safeStorageSet('artone-first-run-done', '1');
+    safeStorageSet('artone-level', result.level);
   }, []);
 
   if (!firstRunDone) {
@@ -146,12 +147,12 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     return (
       <div style={{ ...fullScreen, ...center, flexDirection: 'column', gap: space[4] }}>
         <div style={{ fontSize: 32 }}>⚠</div>
-        <div style={{ ...ds.text('title'), color: color.destructive }}>初期化エラー</div>
+        <div style={{ ...ds.text('title'), color: color.destructive }}>{t('error.init.title')}</div>
         <div style={{ ...ds.text('body'), color: color.textSecondary, maxWidth: 400, textAlign: 'center' }}>
           {engine.error}
         </div>
         <button style={ds.button('primary')} onClick={() => window.location.reload()}>
-          再試行
+          {t('common.retry')}
         </button>
       </div>
     );
@@ -164,10 +165,10 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
         <div style={{
           width: 48, height: 48, borderRadius: radius.full,
           border: `3px solid ${color.border}`, borderTopColor: color.brand,
-          animation: 'nv-spin 1s linear infinite',
+          animation: 'artone-spin 1s linear infinite',
         }} />
-        <div style={{ ...ds.text('body'), color: color.textSecondary }}>エンジン初期化中...</div>
-        <style>{`@keyframes nv-spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ ...ds.text('body'), color: color.textSecondary }}>{t('loading.engine')}</div>
+        <style>{`@keyframes artone-spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -187,7 +188,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
           background: `linear-gradient(135deg, ${color.brand}, #3B82F6)`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontWeight: 800, fontSize: 14, color: color.textOnBrand, flexShrink: 0,
-        }}>N</div>
+        }}>A</div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: space[2] }}>
           <span style={ds.text('title')}>{engine.projectName}</span>
@@ -238,7 +239,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               borderBottom: `1px solid ${color.borderSubtle}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             }}>
-              <span style={ds.text('title')}>メディア</span>
+              <span style={ds.text('title')}>{t('media.title')}</span>
               <button onClick={() => setSidebarOpen(false)} style={ds.button('ghost')}>◁</button>
             </div>
             {/* ドロップゾーン — 実際に importFiles を呼ぶ */}
@@ -264,7 +265,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
                 };
                 input.click();
               }}
-            >⬇ ファイルをドロップ</div>
+            >{t('media.dropHint')}</div>
           </>}
         </aside>
 
@@ -298,7 +299,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               height: 32, borderBottom: `1px solid ${color.borderSubtle}`,
               display: 'flex', alignItems: 'center', padding: `0 ${space[4]}px`, gap: space[3],
             }}>
-              <span style={{ ...ds.text('caption'), color: color.textTertiary }}>タイムライン</span>
+              <span style={{ ...ds.text('caption'), color: color.textTertiary }}>{t('timeline.title')}</span>
               <div style={{ flex: 1 }} />
               {activeTier !== 'essential' && <>
                 <ToolButton label="マーカー" />
@@ -323,7 +324,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
                 if (files.length > 0) actions.importFiles(files);
               }}
             >
-              メディアをタイムラインにドラッグ
+              {t('timeline.dragHint')}
             </div>
 
             {/* プレイヘッド */}
@@ -343,7 +344,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
           <aside style={{
             width: 300, background: color.surface2,
             borderLeft: `1px solid ${color.border}`, overflow: 'hidden',
-            animation: `nv-slide-in ${motion.slide} ${motion.snappy} forwards`,
+            animation: `artone-slide-in ${motion.slide} ${motion.snappy} forwards`,
           }}>
             <div style={{
               padding: `${space[3]}px ${space[4]}px`,
@@ -366,11 +367,11 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
           borderRadius: radius.lg, padding: `${space[3]}px ${space[4]}px`,
           maxWidth: 400, zIndex: z.toast,
           boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-          animation: `nv-slide-in 250ms ${motion.easeOut} forwards`,
+          animation: `artone-slide-in 250ms ${motion.easeOut} forwards`,
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: space[3] }}>
             <div>
-              <div style={{ ...ds.text('title'), color: color.destructive, marginBottom: space[1] }}>エラー</div>
+              <div style={{ ...ds.text('title'), color: color.destructive, marginBottom: space[1] }}>{t('common.error')}</div>
               <div style={{ ...ds.text('caption'), color: color.textSecondary, whiteSpace: 'pre-wrap' }}>
                 {engine.error}
               </div>
@@ -389,7 +390,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
       />
 
       <style>{`
-        @keyframes nv-slide-in {
+        @keyframes artone-slide-in {
           from { opacity: 0; transform: translateX(20px); }
           to { opacity: 1; transform: translateX(0); }
         }
@@ -408,11 +409,16 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
 // ============================================================
 
 function panelTitle(id: string): string {
-  const map: Record<string, string> = {
-    color: 'カラー', audio: 'オーディオ', captions: '字幕',
-    text: 'テキスト', scopes: 'スコープ', inspector: 'インスペクター',
+  const keyMap: Record<string, string> = {
+    color: 'color.title',
+    audio: 'audio.title',
+    captions: 'captions.title',
+    text: 'text.title',
+    scopes: 'scopes.title',
+    inspector: 'inspector.title',
   };
-  return map[id] ?? id;
+  const key = keyMap[id];
+  return key ? t(key) : id;
 }
 
 const ToolButton: React.FC<{ label: string; active?: boolean }> = ({ label, active }) => (

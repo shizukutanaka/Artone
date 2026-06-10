@@ -22,7 +22,10 @@
     "settings": "Configurações",
     "help": "Ajuda",
     "about": "Sobre",
-    "exit": "Sair"
+    "exit": "Sair",
+    "skip": "Ignorar",
+    "retry": "Tentar novamente",
+    "back": "Voltar"
   },
   "menu": {
     "file": "Arquivo",
@@ -174,7 +177,10 @@
     "search": "Pesquisar mídia",
     "duration": "Duração",
     "size": "Tamanho",
-    "createdAt": "Criado"
+    "createdAt": "Criado",
+    "dropTitle": "Soltar mídia",
+    "acceptedTypes": "Vídeo, Áudio, Imagens",
+    "dropHint": "Soltar arquivos aqui"
   },
   "error": {
     "network": {
@@ -195,7 +201,10 @@
     "codec": {
       "notSupported": "Codec não suportado: {codec}"
     },
-    "generic": "Erro: {message}"
+    "generic": "Erro: {message}",
+    "init": {
+      "title": "Erro de inicialização"
+    }
   },
   "recovery": {
     "title": "Recuperação",
@@ -219,6 +228,43 @@
     "playback": "Reprodução",
     "trimming": "Aparar",
     "navigation": "Navegação"
+  },
+  "loading": {
+    "engine": "Inicializando motor..."
+  },
+  "firstRun": {
+    "levelHint": "Ajustaremos a interface de acordo com sua experiência",
+    "levelBeginner": "Iniciante",
+    "levelBeginnerDesc": "Layout simples",
+    "levelIntermediate": "Intermediário",
+    "levelIntermediateDesc": "Equilibrado",
+    "levelPro": "Profissional",
+    "levelProDesc": "Todos os recursos",
+    "step2Title": "Iniciar projeto",
+    "step2Subtitle": "Escolha um modelo ou comece em branco",
+    "step3Title": "Adicionar material",
+    "step3Subtitle": "Arraste e solte ou clique para selecionar",
+    "filesSelected": "{count} arquivo(s) selecionado(s)",
+    "dropHint": "Solte vídeo, áudio ou imagens aqui",
+    "startEditing": "Começar edição",
+    "startDemo": "Começar com material de demo",
+    "skipToDemo": "Ignorar → Começar com demo",
+    "templateYoutubeDesc": "1080p 30fps — Gaming e Vlogs",
+    "templateShortDesc": "1080×1920 30fps — Vídeo vertical",
+    "templateFilmDesc": "4K 24fps — Cinematográfico",
+    "templateBlankDesc": "Sem preset — detecção automática"
+  },
+  "scopes": {
+    "title": "Monitores"
+  },
+  "inspector": {
+    "title": "Inspetor"
+  },
+  "captions": {
+    "title": "Legendas"
+  },
+  "text": {
+    "title": "Texto"
   },
   "plurals": {
     "items": "{count, plural, one {# item} other {# itens}}",

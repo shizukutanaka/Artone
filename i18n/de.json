@@ -22,7 +22,10 @@
     "settings": "Einstellungen",
     "help": "Hilfe",
     "about": "Über",
-    "exit": "Beenden"
+    "exit": "Beenden",
+    "skip": "Überspringen",
+    "retry": "Erneut versuchen",
+    "back": "Zurück"
   },
   "menu": {
     "file": "Datei",
@@ -174,7 +177,10 @@
     "search": "Medien suchen",
     "duration": "Dauer",
     "size": "Dateigröße",
-    "createdAt": "Erstellt"
+    "createdAt": "Erstellt",
+    "dropTitle": "Medien ablegen",
+    "acceptedTypes": "Video, Audio, Bilder",
+    "dropHint": "Dateien hier ablegen"
   },
   "error": {
     "network": {
@@ -195,7 +201,10 @@
     "codec": {
       "notSupported": "Codec nicht unterstützt: {codec}"
     },
-    "generic": "Fehler: {message}"
+    "generic": "Fehler: {message}",
+    "init": {
+      "title": "Initialisierungsfehler"
+    }
   },
   "recovery": {
     "title": "Wiederherstellung",
@@ -219,6 +228,43 @@
     "playback": "Wiedergabe",
     "trimming": "Trimmen",
     "navigation": "Navigation"
+  },
+  "loading": {
+    "engine": "Engine wird initialisiert..."
+  },
+  "firstRun": {
+    "levelHint": "Wir passen die Benutzeroberfläche an deine Erfahrung an",
+    "levelBeginner": "Anfänger",
+    "levelBeginnerDesc": "Einfaches Layout",
+    "levelIntermediate": "Erfahren",
+    "levelIntermediateDesc": "Ausgewogen",
+    "levelPro": "Profi",
+    "levelProDesc": "Alle Funktionen",
+    "step2Title": "Projekt starten",
+    "step2Subtitle": "Vorlage wählen oder leer starten",
+    "step3Title": "Material hinzufügen",
+    "step3Subtitle": "Drag & Drop oder klicken",
+    "filesSelected": "{count} Datei(en) ausgewählt",
+    "dropHint": "Video, Audio oder Bilder hier ablegen",
+    "startEditing": "Bearbeitung starten",
+    "startDemo": "Mit Demo-Material starten",
+    "skipToDemo": "Überspringen → Mit Demo-Material starten",
+    "templateYoutubeDesc": "1080p 30fps — Gaming & Vlogs",
+    "templateShortDesc": "1080×1920 30fps — Hochformat",
+    "templateFilmDesc": "4K 24fps — Kinoqualität",
+    "templateBlankDesc": "Kein Preset — automatisch erkennen"
+  },
+  "scopes": {
+    "title": "Scopes"
+  },
+  "inspector": {
+    "title": "Inspektor"
+  },
+  "captions": {
+    "title": "Untertitel"
+  },
+  "text": {
+    "title": "Text"
   },
   "plurals": {
     "items": "{count, plural, one {# Element} other {# Elemente}}",

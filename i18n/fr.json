@@ -22,7 +22,10 @@
     "settings": "Paramètres",
     "help": "Aide",
     "about": "À propos",
-    "exit": "Quitter"
+    "exit": "Quitter",
+    "skip": "Ignorer",
+    "retry": "Réessayer",
+    "back": "Retour"
   },
   "menu": {
     "file": "Fichier",
@@ -174,7 +177,10 @@
     "search": "Rechercher",
     "duration": "Durée",
     "size": "Taille",
-    "createdAt": "Créé"
+    "createdAt": "Créé",
+    "dropTitle": "Déposer des médias",
+    "acceptedTypes": "Vidéo, Audio, Images",
+    "dropHint": "Déposer les fichiers ici"
   },
   "error": {
     "network": {
@@ -195,7 +201,10 @@
     "codec": {
       "notSupported": "Codec non pris en charge : {codec}"
     },
-    "generic": "Erreur : {message}"
+    "generic": "Erreur : {message}",
+    "init": {
+      "title": "Erreur d'initialisation"
+    }
   },
   "recovery": {
     "title": "Récupération",
@@ -219,6 +228,43 @@
     "playback": "Lecture",
     "trimming": "Rognage",
     "navigation": "Navigation"
+  },
+  "loading": {
+    "engine": "Initialisation du moteur..."
+  },
+  "firstRun": {
+    "levelHint": "Nous adapterons l'interface à votre expérience",
+    "levelBeginner": "Débutant",
+    "levelBeginnerDesc": "Interface simple",
+    "levelIntermediate": "Intermédiaire",
+    "levelIntermediateDesc": "Équilibré",
+    "levelPro": "Professionnel",
+    "levelProDesc": "Toutes les fonctions",
+    "step2Title": "Démarrer un projet",
+    "step2Subtitle": "Choisissez un modèle ou commencez vide",
+    "step3Title": "Ajouter des médias",
+    "step3Subtitle": "Glisser-déposer ou cliquer pour sélectionner",
+    "filesSelected": "{count} fichier(s) sélectionné(s)",
+    "dropHint": "Déposez des vidéos, de l'audio ou des images ici",
+    "startEditing": "Commencer l'édition",
+    "startDemo": "Démarrer avec les médias de démo",
+    "skipToDemo": "Ignorer → Démarrer avec la démo",
+    "templateYoutubeDesc": "1080p 30fps — Gaming & Vlogs",
+    "templateShortDesc": "1080×1920 30fps — Vidéo verticale",
+    "templateFilmDesc": "4K 24fps — Cinématographique",
+    "templateBlankDesc": "Pas de preset — détection automatique"
+  },
+  "scopes": {
+    "title": "Moniteurs"
+  },
+  "inspector": {
+    "title": "Inspecteur"
+  },
+  "captions": {
+    "title": "Sous-titres"
+  },
+  "text": {
+    "title": "Texte"
   },
   "plurals": {
     "items": "{count, plural, one {# élément} other {# éléments}}",

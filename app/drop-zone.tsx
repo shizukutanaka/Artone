@@ -7,6 +7,7 @@
 
 import React, { useState, useCallback, useRef } from 'react';
 import { color, space, radius, z } from './design-system';
+import { t } from '../i18n/i18n-manager';
 
 interface DropZoneProps {
   onFilesDropped: (files: File[]) => void;
@@ -70,8 +71,8 @@ export const DropZone: React.FC<DropZoneProps> = ({
             borderRadius: radius.lg, textAlign: 'center',
           }}>
             <div style={{ fontSize: 32, marginBottom: space[2] }}>⬇</div>
-            <div style={{ color: color.textPrimary, fontWeight: 600, fontSize: 16 }}>メディアをドロップ</div>
-            <div style={{ color: color.textTertiary, fontSize: 13, marginTop: space[1] }}>動画・音声・画像</div>
+            <div style={{ color: color.textPrimary, fontWeight: 600, fontSize: 16 }}>{t('media.dropTitle')}</div>
+            <div style={{ color: color.textTertiary, fontSize: 13, marginTop: space[1] }}>{t('media.acceptedTypes')}</div>
           </div>
         </div>
       )}

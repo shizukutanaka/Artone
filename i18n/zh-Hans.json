@@ -22,7 +22,10 @@
     "settings": "设置",
     "help": "帮助",
     "about": "关于",
-    "exit": "退出"
+    "exit": "退出",
+    "skip": "跳过",
+    "retry": "重试",
+    "back": "返回"
   },
   "menu": {
     "file": "文件",
@@ -174,7 +177,10 @@
     "search": "搜索媒体",
     "duration": "时长",
     "size": "文件大小",
-    "createdAt": "创建时间"
+    "createdAt": "创建时间",
+    "dropTitle": "拖放媒体",
+    "acceptedTypes": "视频、音频、图片",
+    "dropHint": "将文件拖放到此处"
   },
   "error": {
     "network": {
@@ -195,7 +201,10 @@
     "codec": {
       "notSupported": "不支持的编解码器：{codec}"
     },
-    "generic": "错误：{message}"
+    "generic": "错误：{message}",
+    "init": {
+      "title": "初始化错误"
+    }
   },
   "recovery": {
     "title": "崩溃恢复",
@@ -219,6 +228,43 @@
     "playback": "播放",
     "trimming": "修剪",
     "navigation": "导航"
+  },
+  "loading": {
+    "engine": "正在初始化引擎..."
+  },
+  "firstRun": {
+    "levelHint": "我们将根据您的经验调整界面",
+    "levelBeginner": "初学者",
+    "levelBeginnerDesc": "简单布局",
+    "levelIntermediate": "中级",
+    "levelIntermediateDesc": "均衡",
+    "levelPro": "专业",
+    "levelProDesc": "所有功能",
+    "step2Title": "开始项目",
+    "step2Subtitle": "选择模板或从空白开始",
+    "step3Title": "添加素材",
+    "step3Subtitle": "拖放或点击选择",
+    "filesSelected": "已选择 {count} 个文件",
+    "dropHint": "将视频、音频或图片拖放到此处",
+    "startEditing": "开始编辑",
+    "startDemo": "使用示例素材开始",
+    "skipToDemo": "跳过 → 使用示例开始",
+    "templateYoutubeDesc": "1080p 30fps — 游戏与Vlog",
+    "templateShortDesc": "1080×1920 30fps — 竖屏视频",
+    "templateFilmDesc": "4K 24fps — 电影风格",
+    "templateBlankDesc": "无预设 — 从素材自动检测"
+  },
+  "scopes": {
+    "title": "监视器"
+  },
+  "inspector": {
+    "title": "检查器"
+  },
+  "captions": {
+    "title": "字幕"
+  },
+  "text": {
+    "title": "文本"
   },
   "plurals": {
     "items": "{count} 项",

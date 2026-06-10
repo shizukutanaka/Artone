@@ -126,7 +126,7 @@ describe('Design System — CSS Variables', () => {
   it('CSS_VARIABLES is a pre-computed constant', () => {
     expect(typeof CSS_VARIABLES).toBe('string');
     expect(CSS_VARIABLES).toContain(':root');
-    expect(CSS_VARIABLES).toContain('--nv-brand');
+    expect(CSS_VARIABLES).toContain('--artone-brand');
   });
 
   it('injectCSSVariables returns same value (deprecated compat)', () => {
@@ -134,7 +134,7 @@ describe('Design System — CSS Variables', () => {
   });
 
   it('contains all critical variables', () => {
-    const required = ['--nv-surface-1', '--nv-text-1', '--nv-font-sans', '--nv-brand'];
+    const required = ['--artone-surface-1', '--artone-text-1', '--artone-font-sans', '--artone-brand'];
     for (const v of required) {
       expect(CSS_VARIABLES).toContain(v);
     }

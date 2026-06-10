@@ -15,6 +15,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { ds, color, space, motion, typography } from './design-system';
+import { t } from '../i18n/i18n-manager';
 
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'pro';
 
@@ -35,43 +36,21 @@ export interface ProjectTemplate {
   tracks: number;
 }
 
-const TEMPLATES: ProjectTemplate[] = [
-  {
-    id: 'youtube',
-    name: 'YouTube',
-    description: '1080p 30fps — ゲーム実況・Vlog に最適',
-    icon: '▶',
-    fps: 30,
-    resolution: { width: 1920, height: 1080 },
-    tracks: 3,
-  },
-  {
-    id: 'short',
-    name: 'Short / Reel',
-    description: '1080×1920 30fps — 縦動画',
-    icon: '📱',
-    fps: 30,
-    resolution: { width: 1080, height: 1920 },
-    tracks: 2,
-  },
-  {
-    id: 'film',
-    name: 'Film',
-    description: '4K 24fps — 映画・シネマティック',
-    icon: '🎬',
-    fps: 24,
-    resolution: { width: 3840, height: 2160 },
-    tracks: 5,
-  },
-  {
-    id: 'blank',
-    name: 'Blank',
-    description: '設定なし — 素材に合わせて自動検出',
-    icon: '○',
-    fps: 30,
-    resolution: { width: 1920, height: 1080 },
-    tracks: 1,
-  },
+interface ProjectTemplateConfig {
+  id: string;
+  name: string;
+  descKey: string;
+  icon: string;
+  fps: number;
+  resolution: { width: number; height: number };
+  tracks: number;
+}
+
+const TEMPLATE_CONFIGS: ProjectTemplateConfig[] = [
+  { id: 'youtube', name: 'YouTube', descKey: 'firstRun.templateYoutubeDesc', icon: '▶', fps: 30, resolution: { width: 1920, height: 1080 }, tracks: 3 },
+  { id: 'short', name: 'Short / Reel', descKey: 'firstRun.templateShortDesc', icon: '📱', fps: 30, resolution: { width: 1080, height: 1920 }, tracks: 2 },
+  { id: 'film', name: 'Film', descKey: 'firstRun.templateFilmDesc', icon: '🎬', fps: 24, resolution: { width: 3840, height: 2160 }, tracks: 5 },
+  { id: 'blank', name: 'Blank', descKey: 'firstRun.templateBlankDesc', icon: '○', fps: 30, resolution: { width: 1920, height: 1080 }, tracks: 1 },
 ];
 
 // === コンポーネント ===
@@ -110,7 +89,7 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
     fontFamily: typography.fontFamily.sans,
     color: color.textPrimary,
     zIndex: ds.z.splash,
-    animation: `nv-fade-in ${motion.appear} forwards`,
+    animation: `artone-fade-in ${motion.appear} forwards`,
   };
 
   const cardStyle: React.CSSProperties = {
@@ -133,7 +112,7 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
     return (
       <div key={animKey} style={containerStyle}>
         <button style={skipStyle} onClick={() => finish(true)}>
-          スキップ
+          {t('common.skip')}
         </button>
         <div style={cardStyle}>
           <div
@@ -150,18 +129,18 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
             Artone
           </div>
           <p style={{ ...ds.text('body'), color: color.textSecondary, marginBottom: space[8] }}>
-            ブラウザで完結するプロ動画エディタ
+            {t('app.tagline')}
           </p>
 
           <p style={{ ...ds.text('caption'), color: color.textTertiary, marginBottom: space[4] }}>
-            あなたの経験レベルに合わせて UI を調整します
+            {t('firstRun.levelHint')}
           </p>
 
           <div style={{ display: 'flex', gap: space[3], justifyContent: 'center' }}>
             {([
-              { id: 'beginner', label: '初めて', desc: 'シンプルな画面' },
-              { id: 'intermediate', label: '経験あり', desc: 'バランス型' },
-              { id: 'pro', label: 'プロ', desc: '全機能表示' },
+              { id: 'beginner', label: t('firstRun.levelBeginner'), desc: t('firstRun.levelBeginnerDesc') },
+              { id: 'intermediate', label: t('firstRun.levelIntermediate'), desc: t('firstRun.levelIntermediateDesc') },
+              { id: 'pro', label: t('firstRun.levelPro'), desc: t('firstRun.levelProDesc') },
             ] as const).map((opt) => (
               <button
                 key={opt.id}
@@ -195,18 +174,18 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
     return (
       <div key={animKey} style={containerStyle}>
         <button style={skipStyle} onClick={() => finish(true)}>
-          スキップ
+          {t('common.skip')}
         </button>
         <button
           style={{ ...skipStyle, right: 'auto', left: space[4] }}
           onClick={() => advanceStep(0)}
         >
-          ← 戻る
+          ← {t('common.back')}
         </button>
         <div style={cardStyle}>
-          <h2 style={{ ...ds.text('display'), marginBottom: space[2] }}>プロジェクトを始める</h2>
+          <h2 style={{ ...ds.text('display'), marginBottom: space[2] }}>{t('firstRun.step2Title')}</h2>
           <p style={{ ...ds.text('body'), color: color.textSecondary, marginBottom: space[6] }}>
-            テンプレートを選ぶか、空白から
+            {t('firstRun.step2Subtitle')}
           </p>
 
           <div
@@ -217,12 +196,14 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
               marginBottom: space[6],
             }}
           >
-            {TEMPLATES.map((t) => (
+            {TEMPLATE_CONFIGS.map((cfg) => {
+              const tmpl: ProjectTemplate = { id: cfg.id, name: cfg.name, description: t(cfg.descKey), icon: cfg.icon, fps: cfg.fps, resolution: cfg.resolution, tracks: cfg.tracks };
+              return (
               <button
-                key={t.id}
+                key={cfg.id}
                 onClick={() => {
-                  setTemplate(t);
-                  
+                  setTemplate(tmpl);
+
                   advanceStep(2);
                 }}
                 onMouseEnter={(e) => {
@@ -232,7 +213,7 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLElement).style.transform = 'scale(1)';
                   (e.currentTarget as HTMLElement).style.borderColor =
-                    template?.id === t.id ? color.brand : color.border;
+                    template?.id === cfg.id ? color.brand : color.border;
                 }}
                 style={{
                   ...ds.panel(),
@@ -242,18 +223,19 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
                   transition: `all ${motion.hover}`,
                   transform: 'scale(1)',
                   border:
-                    template?.id === t.id
+                    template?.id === cfg.id
                       ? `2px solid ${color.brand}`
                       : `1px solid ${color.border}`,
                 }}
               >
-                <div style={{ fontSize: 24, marginBottom: space[2] }}>{t.icon}</div>
-                <div style={{ ...ds.text('title'), marginBottom: space[1] }}>{t.name}</div>
+                <div style={{ fontSize: 24, marginBottom: space[2] }}>{cfg.icon}</div>
+                <div style={{ ...ds.text('title'), marginBottom: space[1] }}>{cfg.name}</div>
                 <div style={{ ...ds.text('caption'), color: color.textTertiary }}>
-                  {t.description}
+                  {tmpl.description}
                 </div>
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -264,18 +246,18 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
   return (
     <div key={animKey} style={containerStyle}>
       <button style={skipStyle} onClick={() => finish()}>
-        スキップ → デモ素材で開始
+        {t('firstRun.skipToDemo')}
       </button>
       <button
         style={{ ...skipStyle, right: 'auto', left: space[4] }}
         onClick={() => advanceStep(1)}
       >
-        ← 戻る
+        ← {t('common.back')}
       </button>
       <div style={cardStyle}>
-        <h2 style={{ ...ds.text('display'), marginBottom: space[2] }}>素材を追加</h2>
+        <h2 style={{ ...ds.text('display'), marginBottom: space[2] }}>{t('firstRun.step3Title')}</h2>
         <p style={{ ...ds.text('body'), color: color.textSecondary, marginBottom: space[6] }}>
-          ドラッグ＆ドロップ、またはクリックで選択
+          {t('firstRun.step3Subtitle')}
         </p>
 
         <div
@@ -313,13 +295,13 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
             <>
               <span style={{ fontSize: 32, marginBottom: space[2] }}>✓</span>
               <span style={{ color: color.positive }}>
-                {mediaFiles.length} ファイル選択済み
+                {t('firstRun.filesSelected', { count: mediaFiles.length })}
               </span>
             </>
           ) : (
             <>
               <span style={{ fontSize: 32, marginBottom: space[2], opacity: 0.5 }}>⬇</span>
-              <span style={{ color: color.textTertiary }}>動画・音声・画像をここにドロップ</span>
+              <span style={{ color: color.textTertiary }}>{t('firstRun.dropHint')}</span>
             </>
           )}
         </div>
@@ -328,11 +310,11 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
           style={{ ...ds.button('primary'), width: '100%', padding: `${space[3]}px 0` }}
           onClick={() => finish()}
         >
-          {mediaFiles.length > 0 ? '編集を始める' : 'デモ素材で始める'}
+          {mediaFiles.length > 0 ? t('firstRun.startEditing') : t('firstRun.startDemo')}
         </button>
       </div>
       <style>{`
-        @keyframes nv-fade-in {
+        @keyframes artone-fade-in {
           from { opacity: 0; transform: scale(0.97); }
           to { opacity: 1; transform: scale(1); }
         }

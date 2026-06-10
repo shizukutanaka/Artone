@@ -22,7 +22,10 @@
     "settings": "설정",
     "help": "도움말",
     "about": "정보",
-    "exit": "종료"
+    "exit": "종료",
+    "skip": "건너뛰기",
+    "retry": "다시 시도",
+    "back": "뒤로"
   },
   "menu": {
     "file": "파일",
@@ -174,7 +177,10 @@
     "search": "미디어 검색",
     "duration": "재생 시간",
     "size": "파일 크기",
-    "createdAt": "생성일"
+    "createdAt": "생성일",
+    "dropTitle": "미디어 드롭",
+    "acceptedTypes": "동영상, 오디오, 이미지",
+    "dropHint": "파일을 여기에 놓으세요"
   },
   "error": {
     "network": {
@@ -195,7 +201,10 @@
     "codec": {
       "notSupported": "지원되지 않는 코덱: {codec}"
     },
-    "generic": "오류: {message}"
+    "generic": "오류: {message}",
+    "init": {
+      "title": "초기화 오류"
+    }
   },
   "recovery": {
     "title": "충돌 복구",
@@ -219,6 +228,43 @@
     "playback": "재생",
     "trimming": "트리밍",
     "navigation": "탐색"
+  },
+  "loading": {
+    "engine": "엔진 초기화 중..."
+  },
+  "firstRun": {
+    "levelHint": "경험 수준에 맞게 UI를 조정해 드리겠습니다",
+    "levelBeginner": "초보자",
+    "levelBeginnerDesc": "간단한 레이아웃",
+    "levelIntermediate": "중급",
+    "levelIntermediateDesc": "균형 잡힌",
+    "levelPro": "전문가",
+    "levelProDesc": "모든 기능",
+    "step2Title": "프로젝트 시작",
+    "step2Subtitle": "템플릿을 선택하거나 빈 상태로 시작",
+    "step3Title": "영상 추가",
+    "step3Subtitle": "드래그 앤 드롭하거나 클릭하여 선택",
+    "filesSelected": "{count}개 파일 선택됨",
+    "dropHint": "동영상, 오디오 또는 이미지를 여기에 놓으세요",
+    "startEditing": "편집 시작",
+    "startDemo": "데모 영상으로 시작",
+    "skipToDemo": "건너뛰기 → 데모로 시작",
+    "templateYoutubeDesc": "1080p 30fps — 게임 및 브이로그",
+    "templateShortDesc": "1080×1920 30fps — 세로 동영상",
+    "templateFilmDesc": "4K 24fps — 시네마틱",
+    "templateBlankDesc": "프리셋 없음 — 영상에서 자동 감지"
+  },
+  "scopes": {
+    "title": "스코프"
+  },
+  "inspector": {
+    "title": "인스펙터"
+  },
+  "captions": {
+    "title": "자막"
+  },
+  "text": {
+    "title": "텍스트"
   },
   "plurals": {
     "items": "{count}개 항목",

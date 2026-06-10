@@ -22,7 +22,10 @@
     "settings": "Settings",
     "help": "Help",
     "about": "About",
-    "exit": "Exit"
+    "exit": "Exit",
+    "skip": "Skip",
+    "retry": "Retry",
+    "back": "Back"
   },
   "menu": {
     "file": "File",
@@ -88,7 +91,8 @@
       "in": "Zoom In",
       "out": "Zoom Out",
       "fit": "Fit to Window"
-    }
+    },
+    "dragHint": "Drag media to the timeline"
   },
   "color": {
     "title": "Color Grading",
@@ -174,7 +178,10 @@
     "search": "Search Media",
     "duration": "Duration",
     "size": "File Size",
-    "createdAt": "Created"
+    "createdAt": "Created",
+    "dropTitle": "Drop Media",
+    "acceptedTypes": "Video, Audio, Images",
+    "dropHint": "Drop files here"
   },
   "error": {
     "network": {
@@ -195,7 +202,10 @@
     "codec": {
       "notSupported": "Unsupported codec: {codec}"
     },
-    "generic": "Error: {message}"
+    "generic": "Error: {message}",
+    "init": {
+      "title": "Initialization Error"
+    }
   },
   "recovery": {
     "title": "Crash Recovery",
@@ -219,6 +229,32 @@
     "playback": "Playback",
     "trimming": "Trimming",
     "navigation": "Navigation"
+  },
+  "palette": {
+    "placeholder": "Search commands, effects, settings...",
+    "hint": "↑↓ Navigate · Enter Execute · Esc Close",
+    "count": "{count} results",
+    "cmd": {
+      "cut": "Cut",
+      "copy": "Copy",
+      "paste": "Paste",
+      "undo": "Undo",
+      "redo": "Redo",
+      "save": "Save",
+      "export": "Export",
+      "import": "Import",
+      "play": "Play / Stop",
+      "colorGrade": "Color Correction",
+      "audioMix": "Audio Mixer",
+      "captions": "Captions",
+      "textEdit": "Text Edit",
+      "multicam": "Multicam",
+      "videoScopes": "Scopes",
+      "otioExport": "OTIO Export",
+      "toggleTheme": "Toggle Theme",
+      "shortcuts": "Keyboard Shortcuts",
+      "about": "About Artone"
+    }
   },
   "interchange": {
     "title": "Interchange",
@@ -257,6 +293,43 @@
     "auditPassed": "Audit passed",
     "auditFailed": "Audit failed",
     "licenseConflict": "License conflict: {component}"
+  },
+  "loading": {
+    "engine": "Initializing engine..."
+  },
+  "firstRun": {
+    "levelHint": "We'll adjust the UI to match your experience",
+    "levelBeginner": "Beginner",
+    "levelBeginnerDesc": "Simple layout",
+    "levelIntermediate": "Intermediate",
+    "levelIntermediateDesc": "Balanced",
+    "levelPro": "Pro",
+    "levelProDesc": "All features",
+    "step2Title": "Start a Project",
+    "step2Subtitle": "Choose a template or start blank",
+    "step3Title": "Add Footage",
+    "step3Subtitle": "Drag & drop, or click to select",
+    "filesSelected": "{count} file(s) selected",
+    "dropHint": "Drop video, audio, or images here",
+    "startEditing": "Start Editing",
+    "startDemo": "Start with Demo Footage",
+    "skipToDemo": "Skip → Start with Demo Footage",
+    "templateYoutubeDesc": "1080p 30fps — Gaming & Vlogs",
+    "templateShortDesc": "1080×1920 30fps — Vertical video",
+    "templateFilmDesc": "4K 24fps — Cinematic",
+    "templateBlankDesc": "No preset — auto-detect from footage"
+  },
+  "scopes": {
+    "title": "Scopes"
+  },
+  "inspector": {
+    "title": "Inspector"
+  },
+  "captions": {
+    "title": "Captions"
+  },
+  "text": {
+    "title": "Text"
   },
   "plurals": {
     "items": "{count, plural, one {# item} other {# items}}",

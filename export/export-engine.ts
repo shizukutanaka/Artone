@@ -19,6 +19,7 @@ import {
   type VideoChunkRef,
   type AudioChunkRef,
 } from './webm-muxer';
+import { muxMP4 } from './mp4-muxer';
 
 // ============================================================
 // Types
@@ -515,18 +516,18 @@ export class ExportEngine {
       return new Blob([webmBytes.buffer as ArrayBuffer], { type: 'video/webm' });
     }
 
-    // MP4: write raw sample data — a future mp4-muxer will replace this stub.
-    // The output is technically playable by some decoders that accept raw stream
-    // data, but a proper ISOBMFF container is needed for full compatibility.
-    const videoSize = videoChunks.reduce((s, c) => s + c.data.length, 0);
-    const audioSize = audioChunks?.reduce((s, c) => s + c.data.length, 0) ?? 0;
-    const buf = new Uint8Array(videoSize + audioSize);
-    let off = 0;
-    for (const c of videoChunks) { buf.set(c.data, off); off += c.data.length; }
-    if (audioChunks) {
-      for (const c of audioChunks) { buf.set(c.data, off); off += c.data.length; }
-    }
-    return new Blob([buf.buffer as ArrayBuffer], { type: 'video/mp4' });
+    // MP4: full ISOBMFF container with moov + mdat (H.264 includes avcC/AVCC conversion)
+    const mp4Track = { codec: config.codec, width: config.width, height: config.height, fps: config.fps };
+    const mp4AudioTrack = (audioChunks && audioChunks.length > 0)
+      ? { sampleRate: 48000, channels: 2 }
+      : undefined;
+    const mp4Bytes = muxMP4(
+      mp4Track,
+      videoChunks,
+      mp4AudioTrack,
+      mp4AudioTrack ? audioChunks! : undefined,
+    );
+    return new Blob([mp4Bytes.buffer as ArrayBuffer], { type: 'video/mp4' });
   }
 
   /** GIF export path: captures raw frames and encodes with the built-in GIF encoder. */

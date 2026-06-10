@@ -371,9 +371,10 @@ export class CollaborationEngine {
   }
 
   private broadcastUpdate(type: string, data: unknown): void {
+    if (!this.localUser) return;
     this.broadcast({
       type: 'update',
-      userId: this.requireLocalUser().id,
+      userId: this.localUser.id,
       data: { type, data },
       timestamp: Date.now()
     });

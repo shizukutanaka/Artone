@@ -56,6 +56,9 @@ Artone v3 の全変更を記録。
     - `destroy()` が閉じた context のノード参照 (`masterGain`/`masterAnalyser`) を残しメータ getter が dead node を触る問題を null クリアで修正。
   - `media/media-browser.ts`: `importFile()` が冒頭で生成する `URL.createObjectURL` を、メタデータ抽出/サムネイル生成が失敗した場合に revoke せずリークするバグを try-catch + `revokeObjectURL` で修正。33 テスト新規追加 (フィルタ/ソート/アイテム操作/統計/インポート、URL リーク回帰含む)。
   - `core/webcodecs-pipeline.ts`: `generateThumbnails()` が空 `chunks` で `chunks[-1].timestamp` を参照しクラッシュするバグ、および短尺クリップで `interval = floor(length/count) = 0` となり全サムネイルが先頭フレームに collapse するバグを、空入力の早期 return と `Math.max(1, ...)` クランプで修正。34 テスト新規追加 (コーデック検出/設定/ガード/FrameProcessors/サムネイル回帰)。`tests/setup.ts` の 2D context モックに transform 系メソッド (translate/rotate/scale/measureText 等) を追加。
+  - `plugins/plugin-bridge.ts`: テストゼロだったセキュリティ境界ゾーン (VST/AU WASM ブリッジ) の実バグ 2 件を修正 (35 テスト新規追加):
+    - `initialize()` が `createWorkletProcessor()` の生成した Blob オブジェクト URL を revoke せずリークするバグを try-finally + `revokeObjectURL` で修正 (`plugin-manager.ts` と同種のリーク)。
+    - `loadPreset()` のガードが `presetIndex < 0` を検査せず、`loadPreset(id, -1)` が `presets[-1].parameters` でクラッシュするバグを負数ガード追加で修正。
 - **`npm run typecheck` / `npm run build` を再 green 化** (`tsc --noEmit` エラー 27 → 0)。`strict`/`noUnusedLocals` 下の実型エラーを behavior-preserving に解消 (`any` 不使用):
   - `export/export-queue.ts`: await 中に `cancel()` が `job.status` を変更しうるがフロー解析が `'active'` リテラルに絞り込むためキャンセルガードが型エラーになる問題を、意図をコメント明記の上で型ワイドニングして解消。
   - `color/noise-reduction.ts` の `Float32Array` ジェネリック不整合、`timeline/trim-operations.ts` の未使用 `findNextAdjacent`、`animation/motion-path.ts` の未使用 `chordLen` を除去。

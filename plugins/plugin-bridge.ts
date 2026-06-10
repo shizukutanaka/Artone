@@ -99,8 +99,15 @@ export class PluginBridge {
   // ==================== Initialization ====================
   
   async initialize(): Promise<void> {
-    await this.audioContext.audioWorklet.addModule(this.createWorkletProcessor());
-    this.workletReady = true;
+    const workletUrl = this.createWorkletProcessor();
+    try {
+      await this.audioContext.audioWorklet.addModule(workletUrl);
+      this.workletReady = true;
+    } finally {
+      // The worklet module has been fetched; revoke the blob URL so it does
+      // not leak for the lifetime of the process.
+      URL.revokeObjectURL(workletUrl);
+    }
   }
   
   private createWorkletProcessor(): string {
@@ -388,7 +395,8 @@ export class PluginBridge {
   
   loadPreset(instanceId: string, presetIndex: number): void {
     const instance = this.instances.get(instanceId);
-    if (!instance || presetIndex >= instance.presets.length) return;
+    // Guard negative indices too: presets[-1] is undefined → .parameters throws.
+    if (!instance || presetIndex < 0 || presetIndex >= instance.presets.length) return;
     
     const preset = instance.presets[presetIndex];
     for (const [paramId, value] of Object.entries(preset.parameters)) {

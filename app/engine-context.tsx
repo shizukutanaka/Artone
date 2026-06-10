@@ -13,6 +13,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createLogger } from './logger';
 import { ArtoneApp, type AppConfig } from './main';
+import { t } from '../i18n/i18n-manager';
 import type { ExperienceLevel } from './first-run';
 
 // === Engine State (UI が参照する状態のサブセット) ===
@@ -39,7 +40,7 @@ const DEFAULT_STATE: EngineState = {
   currentTime: 0,
   duration: 0,
   fps: 30,
-  projectName: '無題のプロジェクト',
+  projectName: t('file.untitled'),
   hasUnsavedChanges: false,
   isReady: false,
   error: null,
@@ -165,7 +166,7 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
           ...s,
           isReady: true,
           fps: app.config?.defaultFps ?? 30,
-          projectName: '無題のプロジェクト',
+          projectName: t('file.untitled'),
           warnings: caps.warnings,
           capabilityTier: caps.tier as EngineState['capabilityTier'],
         }));

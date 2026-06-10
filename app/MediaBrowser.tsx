@@ -8,6 +8,7 @@
 
 import { color } from './design-system';
 import React, { useState, useCallback, useRef } from 'react';
+import { t } from '../i18n/i18n-manager';
 
 
 // ============================================================
@@ -57,16 +58,16 @@ function formatDuration(seconds?: number): string {
 function getProxyBadge(item: MediaItem): { label: string; color: string } | null {
   switch (item.proxyStatus) {
     case 'pending':
-      return { label: '待機中', color: color.caution };
+      return { label: t('media.status.pending'), color: color.caution };
     case 'processing':
       return {
         label: `${Math.round((item.proxyProgress || 0) * 100)}%`,
         color: color.brand
       };
     case 'ready':
-      return { label: 'プロキシ', color: color.positive };
+      return { label: t('media.status.proxy'), color: color.positive };
     case 'failed':
-      return { label: '失敗', color: color.destructive };
+      return { label: t('media.status.error'), color: color.destructive };
     default:
       return null;
   }
@@ -317,7 +318,7 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = ({
                 fontWeight: 500
               }}
             >
-              {f === 'all' ? '全て' : f === 'video' ? '動画' : f === 'audio' ? '音声' : '画像'}
+              {f === 'all' ? t('media.all') : f === 'video' ? t('media.video') : f === 'audio' ? t('media.audio') : t('media.image')}
             </button>
           ))}
         </div>
@@ -334,7 +335,7 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = ({
               padding: 24
             }}
           >
-            {items.length === 0 ? 'メディアをドロップまたはインポート' : '一致なし'}
+            {items.length === 0 ? t('media.empty') : t('media.noMatch')}
           </div>
         ) : (
           filtered.map((item) => (

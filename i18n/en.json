@@ -45,7 +45,8 @@
     "saveAs": "Save As",
     "import": "Import",
     "export": "Export",
-    "recent": "Recent Projects"
+    "recent": "Recent Projects",
+    "untitled": "Untitled Project"
   },
   "edit": {
     "undo": "Undo",
@@ -181,7 +182,15 @@
     "createdAt": "Created",
     "dropTitle": "Drop Media",
     "acceptedTypes": "Video, Audio, Images",
-    "dropHint": "Drop files here"
+    "dropHint": "Drop files here",
+    "all": "All",
+    "empty": "Drop or import media",
+    "noMatch": "No matches",
+    "status": {
+      "pending": "Pending",
+      "proxy": "Proxy",
+      "error": "Failed"
+    }
   },
   "error": {
     "network": {
@@ -296,6 +305,9 @@
   },
   "loading": {
     "engine": "Initializing engine..."
+  },
+  "preview": {
+    "webgpu": "Preview (WebGPU)"
   },
   "firstRun": {
     "levelHint": "We'll adjust the UI to match your experience",

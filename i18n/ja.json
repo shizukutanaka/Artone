@@ -45,7 +45,8 @@
     "saveAs": "名前を付けて保存",
     "import": "読み込み",
     "export": "書き出し",
-    "recent": "最近のプロジェクト"
+    "recent": "最近のプロジェクト",
+    "untitled": "無題のプロジェクト"
   },
   "edit": {
     "undo": "元に戻す",
@@ -181,7 +182,15 @@
     "createdAt": "作成日時",
     "dropTitle": "メディアをドロップ",
     "acceptedTypes": "動画・音声・画像",
-    "dropHint": "ファイルをドロップ"
+    "dropHint": "ファイルをドロップ",
+    "all": "全て",
+    "empty": "メディアをドロップまたはインポート",
+    "noMatch": "一致なし",
+    "status": {
+      "pending": "待機中",
+      "proxy": "プロキシ",
+      "error": "失敗"
+    }
   },
   "error": {
     "network": {
@@ -258,6 +267,9 @@
   },
   "loading": {
     "engine": "エンジン初期化中..."
+  },
+  "preview": {
+    "webgpu": "プレビュー (WebGPU)"
   },
   "firstRun": {
     "levelHint": "あなたの経験レベルに合わせて UI を調整します",

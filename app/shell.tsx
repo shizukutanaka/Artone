@@ -282,7 +282,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               borderRadius: radius.md, display: 'flex', alignItems: 'center', justifyContent: 'center',
               color: color.textTertiary, ...ds.text('body'),
             }}>
-              {engine.isReady ? 'プレビュー (WebGPU)' : '...'}
+              {engine.isReady ? t('preview.webgpu') : '...'}
             </div>
             {!sidebarOpen && (
               <button onClick={() => setSidebarOpen(true)}

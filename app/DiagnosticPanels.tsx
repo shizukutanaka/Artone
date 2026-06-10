@@ -9,6 +9,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { color } from './design-system';
+import { t } from '../i18n/i18n-manager';
 
 // Design System 移行済み — ローカル T 定数削除
 
@@ -62,12 +63,12 @@ export const ScopesPanel: React.FC<ScopesPanelProps> = ({ enabled, onToggle, ren
             }}
           >
             {s === 'waveform'
-              ? '波形'
+              ? t('color.scope.waveform')
               : s === 'vectorscope'
-              ? 'ベクトル'
+              ? t('color.scope.vectorscope')
               : s === 'histogram'
-              ? 'ヒスト'
-              : 'パレード'}
+              ? t('color.scope.histogram')
+              : t('color.scope.parade')}
           </button>
         ))}
       </div>

@@ -591,6 +591,7 @@ export class AIEffectsEngine {
     }
 
     // Find peaks
+    if (energyProfile.length === 0) return [];
     const avgEnergy = energyProfile.reduce((s, e) => s + e.energy, 0) / energyProfile.length;
     const threshold = avgEnergy * 1.5;
 
@@ -621,6 +622,16 @@ export class AIEffectsEngine {
         }
         
         inHighlight = false;
+      }
+    }
+
+    // REGRESSION: a burst that extends to the end of audio never triggers the
+    // energy<=threshold branch, so the trailing highlight is never flushed.
+    if (inHighlight) {
+      const end = data.length / sampleRate;
+      const duration = end - highlightStart;
+      if (duration >= minDuration) {
+        highlights.push({ start: highlightStart, end, score: peakEnergy / avgEnergy, reason: 'High energy' });
       }
     }
 
@@ -743,9 +754,11 @@ export class AIEffectsEngine {
     const bAvg = bSum / pixels;
     const gray = (rAvg + gAvg + bAvg) / 3;
 
-    const rScale = gray / rAvg;
-    const gScale = gray / gAvg;
-    const bScale = gray / bAvg;
+    // REGRESSION: if any channel average is 0, dividing produces NaN which
+    // corrupts every pixel via data[i] * NaN = NaN → Math.min(255, NaN) = NaN.
+    const rScale = rAvg > 0 ? gray / rAvg : 1;
+    const gScale = gAvg > 0 ? gray / gAvg : 1;
+    const bScale = bAvg > 0 ? gray / bAvg : 1;
 
     for (let i = 0; i < data.length; i += 4) {
       data[i] = Math.min(255, data[i] * rScale);

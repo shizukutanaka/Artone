@@ -160,7 +160,10 @@ export class AudioEngine {
     if (state && this.ctx) {
       const clamped = Math.max(0, Math.min(2, volume));
       state.track.volume = clamped;
-      state.gain.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.01);
+      // Don't override the muted gain (0); the new volume takes effect on unmute.
+      if (!state.track.mute) {
+        state.gain.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.01);
+      }
     }
   }
 
@@ -177,7 +180,9 @@ export class AudioEngine {
     const state = this.tracks.get(trackId);
     if (state && this.ctx) {
       state.track.mute = mute;
-      state.gain.gain.setTargetAtTime(mute ? 0 : 1, this.ctx.currentTime, 0.01);
+      // Unmute must restore the track's volume, not hardcode 1.0 — otherwise a
+      // mute/unmute cycle silently overrides any prior setVolume().
+      state.gain.gain.setTargetAtTime(mute ? 0 : state.track.volume, this.ctx.currentTime, 0.01);
     }
   }
 
@@ -443,6 +448,10 @@ export class AudioEngine {
     this.ctx?.close();
     this.tracks.clear();
     this.ctx = null;
+    // Drop references to nodes from the now-closed context so the metering
+    // getters short-circuit to -Infinity instead of touching dead nodes.
+    this.masterGain = null;
+    this.masterAnalyser = null;
   }
 }
 

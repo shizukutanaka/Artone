@@ -472,6 +472,10 @@ export class WebGPURenderEngine {
     });
     clearPass.end();
 
+    // Frame-local GPU resources created during encoding; destroyed after submit.
+    const transientBuffers: GPUBuffer[] = [];
+    const transientTextures: GPUTexture[] = [];
+
     // Render each layer
     for (const layer of layers) {
       if (!layer.texture) continue;
@@ -480,14 +484,23 @@ export class WebGPURenderEngine {
       let tex = layer.texture;
       for (const effect of layer.effects) {
         if (!effect.enabled) continue;
-        tex = await this.applyEffect(encoder, tex, effect) || tex;
+        const out = await this.applyEffect(encoder, tex, effect, transientBuffers);
+        if (out) {
+          transientTextures.push(out);
+          tex = out;
+        }
       }
 
       // Composite
-      await this.compositeLayer(encoder, outputView, tex, layer);
+      await this.compositeLayer(encoder, outputView, tex, layer, transientBuffers);
     }
 
     this.device.queue.submit([encoder.finish()]);
+
+    // REGRESSION: destroy all frame-local GPU resources after submit.
+    // paramBuffers and intermediate effect textures were previously leaked every frame.
+    for (const buf of transientBuffers) buf.destroy();
+    for (const t of transientTextures) t.destroy();
 
     // Update stats
     this.updateStats(performance.now() - startTime);
@@ -496,7 +509,8 @@ export class WebGPURenderEngine {
   private async applyEffect(
     encoder: GPUCommandEncoder,
     input: GPUTexture,
-    effect: RenderEffect
+    effect: RenderEffect,
+    transient: GPUBuffer[]
   ): Promise<GPUTexture | null> {
     if (!this.device) return null;
 
@@ -519,6 +533,7 @@ export class WebGPURenderEngine {
       size: 32,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
+    transient.push(paramBuffer);
     this.device.queue.writeBuffer(paramBuffer, 0, paramData);
 
     const bindGroup = this.device.createBindGroup({
@@ -546,7 +561,8 @@ export class WebGPURenderEngine {
     encoder: GPUCommandEncoder,
     output: GPUTextureView,
     texture: GPUTexture,
-    layer: RenderLayer
+    layer: RenderLayer,
+    transient: GPUBuffer[]
   ): Promise<void> {
     if (!this.device || !this.sampler) return;
 
@@ -557,6 +573,7 @@ export class WebGPURenderEngine {
       size: 16,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
+    transient.push(paramBuffer);
     this.device.queue.writeBuffer(paramBuffer, 0, paramData);
 
     const bindGroup = this.device.createBindGroup({

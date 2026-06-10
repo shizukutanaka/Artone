@@ -7,6 +7,14 @@ Artone v3 の全変更を記録。
 
 ## [Unreleased]
 
+### Added
+- **GIF89a エクスポーター実装** (`export/gif-encoder.ts`): 空 Blob を返すスタブを完全な自己完結型アニメーション GIF エンコーダで置き換え。メディアン・カット色量子化 (フレーム毎 256 色, 4× ピクセルサンプリング) + 32³ 最近傍 LUT (O(1) 色マッピング) + Floyd-Steinberg ディザリング + LZW 圧縮 (可変幅コード/LSB ファースト) + Netscape 2.0 アニメーションループ拡張を実装。25 テスト追加。
+- **GIF 書き出しパス** (`export/export-engine.ts`): `export()` が GIF フォーマット時に WebCodecs をバイパスし `exportGif()` → `videoFrameToImageData()` → `encodeGif()` を呼ぶ専用ルートを追加。
+
+### Fixed
+- `export/export-engine.ts`: GIF フォーマット判定が WebCodecs 音声エンコードパスに残存していた (到達不能な dead code) を除去。
+- `perf/performance-monitor.ts`: `getMetrics()` の `gpuTime` が `0` にハードコードされ GPU バウンド検出が常に機能しない問題を修正。`recordGPUTime(queryId)` を追加し GPU タイムスタンプクエリ結果をキャッシュして `analyzeBottleneck()` に反映するようにした。
+
 ### Changed
 - **リブランド: NovaEdit → Artone**。製品名・識別子・ストレージ/キャッシュキー・リポジトリ参照を全面改名 (`NovaEdit*`→`Artone*`、`novaedit`→`artone`、`NovaTimeline/NovaClip/...`→`Artone*`)。サードパーティ依存 `@xenova/transformers` は対象外として保護。
 - 存在しない URL を実在の参照へ修正 (`novaedit.app` → `github.com/shizukutanaka/artone`)。

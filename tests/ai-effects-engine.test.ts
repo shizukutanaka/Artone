@@ -397,3 +397,254 @@ describe('AIEffectsEngine — subscribe()', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+// ============================================================
+// Background removal helpers (white-box)
+// ============================================================
+
+type EnginePrivate = {
+  estimateBgColor(d: Uint8ClampedArray, w: number, h: number): { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number };
+  buildBgMask(d: Uint8ClampedArray, w: number, h: number, bg: { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number }, threshold: number): Uint8Array;
+  morphClose1D(mask: Uint8Array, w: number, h: number, r: number): Uint8Array;
+  isSkinPixelYCbCr(r: number, g: number, b: number): boolean;
+  findFaceCandidates(d: Uint8ClampedArray, w: number, h: number): Array<{ x: number; y: number; w: number; h: number; density: number }>;
+  lanczos2Kernel(x: number): number;
+  resizeLanczos2(src: Uint8ClampedArray, sW: number, sH: number, dW: number, dH: number): Uint8ClampedArray;
+};
+
+function priv(engine: AIEffectsEngine): EnginePrivate {
+  return engine as unknown as EnginePrivate;
+}
+
+/** Build a W×H solid-colour RGBA image. */
+function solidImage(w: number, h: number, r: number, g: number, b: number): Uint8ClampedArray {
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    data[i * 4] = r; data[i * 4 + 1] = g; data[i * 4 + 2] = b; data[i * 4 + 3] = 255;
+  }
+  return data;
+}
+
+describe('AIEffectsEngine — estimateBgColor', () => {
+  it('returns the correct mean for a solid-colour image', () => {
+    const engine = makeEngine();
+    const data = solidImage(20, 20, 200, 100, 50);
+    const bg = priv(engine).estimateBgColor(data, 20, 20);
+    expect(bg.r).toBeCloseTo(200, 0);
+    expect(bg.g).toBeCloseTo(100, 0);
+    expect(bg.b).toBeCloseTo(50, 0);
+  });
+
+  it('returns positive variance for a noisy image', () => {
+    const engine = makeEngine();
+    const data = new Uint8ClampedArray(40 * 40 * 4);
+    for (let i = 0; i < 40 * 40; i++) {
+      data[i * 4] = (i % 2 === 0) ? 200 : 50; // alternating R
+      data[i * 4 + 1] = 100; data[i * 4 + 2] = 50; data[i * 4 + 3] = 255;
+    }
+    const bg = priv(engine).estimateBgColor(data, 40, 40);
+    expect(bg.vrR).toBeGreaterThan(100);
+  });
+
+  it('handles a 1×1 image without throwing', () => {
+    const engine = makeEngine();
+    const data = solidImage(1, 1, 128, 64, 32);
+    expect(() => priv(engine).estimateBgColor(data, 1, 1)).not.toThrow();
+  });
+});
+
+describe('AIEffectsEngine — buildBgMask', () => {
+  it('marks all pixels as background when image is uniform', () => {
+    const engine = makeEngine();
+    const data = solidImage(8, 8, 200, 100, 50);
+    const bg = priv(engine).estimateBgColor(data, 8, 8);
+    const mask = priv(engine).buildBgMask(data, 8, 8, bg, 0.35);
+    // All pixels match background → entire mask should be 0 (background)
+    expect(mask.every(v => v === 0)).toBe(true);
+  });
+
+  it('marks differing pixels as foreground', () => {
+    const engine = makeEngine();
+    // Outer pixels are white (200,200,200); center pixel is red (200,0,0)
+    const w = 5, h = 5;
+    const data = solidImage(w, h, 200, 200, 200);
+    // Overwrite center pixel with clearly different color
+    const cx = 2, cy = 2;
+    data[(cy * w + cx) * 4 + 1] = 0; // G=0 → diverges from 200
+    data[(cy * w + cx) * 4 + 2] = 0; // B=0
+
+    const bg = priv(engine).estimateBgColor(data, w, h);
+    const mask = priv(engine).buildBgMask(data, w, h, bg, 0.1); // low threshold
+    expect(mask[cy * w + cx]).toBe(1); // center pixel is foreground
+  });
+});
+
+describe('AIEffectsEngine — morphClose1D', () => {
+  it('preserves a large foreground region', () => {
+    const engine = makeEngine();
+    // 8×1 mask with a 6-pixel foreground block
+    const mask = new Uint8Array([0, 1, 1, 1, 1, 1, 1, 0]);
+    const closed = priv(engine).morphClose1D(mask, 8, 1, 1);
+    // Large region should be preserved after closing
+    expect(closed.slice(1, 7).every(v => v === 1)).toBe(true);
+  });
+
+  it('fills a small gap between two foreground regions', () => {
+    const engine = makeEngine();
+    // Closing (dilate→erode) fills small holes in foreground
+    // Two blobs separated by a 1-pixel gap: positions 0-2 and 4-6 (gap at 3)
+    const mask = new Uint8Array([1, 1, 1, 0, 1, 1, 1, 0, 0, 0]);
+    const closed = priv(engine).morphClose1D(mask, 10, 1, 2);
+    // The gap at index 3 should be filled
+    expect(closed[3]).toBe(1);
+  });
+});
+
+// ============================================================
+// Skin detection (white-box)
+// ============================================================
+
+describe('AIEffectsEngine — isSkinPixelYCbCr', () => {
+  it('identifies a typical light skin tone as skin', () => {
+    const engine = makeEngine();
+    // Light skin: ~220, 180, 150
+    expect(priv(engine).isSkinPixelYCbCr(220, 180, 150)).toBe(true);
+  });
+
+  it('identifies a darker skin tone as skin', () => {
+    const engine = makeEngine();
+    // Medium-dark skin: ~150, 110, 90
+    expect(priv(engine).isSkinPixelYCbCr(150, 110, 90)).toBe(true);
+  });
+
+  it('rejects blue sky (non-skin)', () => {
+    const engine = makeEngine();
+    expect(priv(engine).isSkinPixelYCbCr(135, 180, 220)).toBe(false);
+  });
+
+  it('rejects green grass (non-skin)', () => {
+    const engine = makeEngine();
+    expect(priv(engine).isSkinPixelYCbCr(80, 150, 60)).toBe(false);
+  });
+
+  it('rejects near-black pixels', () => {
+    const engine = makeEngine();
+    expect(priv(engine).isSkinPixelYCbCr(10, 8, 6)).toBe(false);
+  });
+
+  it('rejects pure white', () => {
+    const engine = makeEngine();
+    expect(priv(engine).isSkinPixelYCbCr(255, 255, 255)).toBe(false);
+  });
+});
+
+// ============================================================
+// Face candidates (white-box)
+// ============================================================
+
+describe('AIEffectsEngine — findFaceCandidates', () => {
+  it('returns empty array for a fully black image (no skin)', () => {
+    const engine = makeEngine();
+    const data = new Uint8ClampedArray(64 * 64 * 4).fill(0); // all black, alpha=0
+    expect(priv(engine).findFaceCandidates(data, 64, 64)).toHaveLength(0);
+  });
+
+  it('detects a large skin-coloured region', () => {
+    const engine = makeEngine();
+    // 64×64 solid skin-tone image (light skin ~220,180,150)
+    const data = solidImage(64, 64, 220, 180, 150);
+    const faces = priv(engine).findFaceCandidates(data, 64, 64);
+    // Should detect at least one face-like region
+    expect(faces.length).toBeGreaterThan(0);
+  });
+
+  it('face density is between 0 and 1', () => {
+    const engine = makeEngine();
+    const data = solidImage(64, 64, 220, 180, 150);
+    for (const f of priv(engine).findFaceCandidates(data, 64, 64)) {
+      expect(f.density).toBeGreaterThan(0);
+      expect(f.density).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('bounding box is within image bounds', () => {
+    const engine = makeEngine();
+    const w = 128, h = 128;
+    const data = solidImage(w, h, 200, 165, 140);
+    for (const f of priv(engine).findFaceCandidates(data, w, h)) {
+      expect(f.x).toBeGreaterThanOrEqual(0);
+      expect(f.y).toBeGreaterThanOrEqual(0);
+      expect(f.x + f.w).toBeLessThanOrEqual(w + 16); // allow SCALE overshoot
+      expect(f.y + f.h).toBeLessThanOrEqual(h + 16);
+    }
+  });
+});
+
+// ============================================================
+// Lanczos-2 resampling (white-box)
+// ============================================================
+
+describe('AIEffectsEngine — lanczos2Kernel', () => {
+  it('returns 1 at x=0', () => {
+    expect(priv(makeEngine()).lanczos2Kernel(0)).toBe(1);
+  });
+
+  it('returns 0 at |x| >= 2', () => {
+    const e = makeEngine();
+    expect(priv(e).lanczos2Kernel(2)).toBe(0);
+    expect(priv(e).lanczos2Kernel(-2)).toBe(0);
+    expect(priv(e).lanczos2Kernel(3)).toBe(0);
+  });
+
+  it('is symmetric: k(-x) == k(x)', () => {
+    const e = makeEngine();
+    for (const x of [0.5, 1.0, 1.5]) {
+      expect(priv(e).lanczos2Kernel(-x)).toBeCloseTo(priv(e).lanczos2Kernel(x), 10);
+    }
+  });
+
+  it('returns a value in (-1, 1) for x in (0, 2)', () => {
+    const e = makeEngine();
+    for (let x = 0.1; x < 2.0; x += 0.1) {
+      const v = priv(e).lanczos2Kernel(x);
+      expect(Math.abs(v)).toBeLessThan(1);
+    }
+  });
+});
+
+describe('AIEffectsEngine — resizeLanczos2', () => {
+  it('2×2 → 4×4 produces the correct number of bytes', () => {
+    const e = makeEngine();
+    const src = new Uint8ClampedArray(2 * 2 * 4).fill(128);
+    const dst = priv(e).resizeLanczos2(src, 2, 2, 4, 4);
+    expect(dst.length).toBe(4 * 4 * 4);
+  });
+
+  it('all output values are in [0, 255]', () => {
+    const e = makeEngine();
+    const src = solidImage(4, 4, 200, 100, 50).map(v => v) as unknown as Uint8ClampedArray;
+    // Create proper Uint8ClampedArray
+    const srcClamped = new Uint8ClampedArray(src);
+    const dst = priv(e).resizeLanczos2(srcClamped, 4, 4, 8, 8);
+    for (let i = 0; i < dst.length; i++) {
+      expect(dst[i]).toBeGreaterThanOrEqual(0);
+      expect(dst[i]).toBeLessThanOrEqual(255);
+    }
+  });
+
+  it('solid-colour upscale preserves the colour', () => {
+    const e = makeEngine();
+    const src = new Uint8ClampedArray(4 * 4 * 4);
+    // All pixels = (200, 100, 50, 255)
+    for (let i = 0; i < 16; i++) {
+      src[i * 4] = 200; src[i * 4 + 1] = 100; src[i * 4 + 2] = 50; src[i * 4 + 3] = 255;
+    }
+    const dst = priv(e).resizeLanczos2(src, 4, 4, 8, 8);
+    // All output pixels should be close to the source colour
+    for (let i = 0; i < 64; i++) {
+      expect(dst[i * 4]).toBeCloseTo(200, -1);     // R ±16
+      expect(dst[i * 4 + 1]).toBeCloseTo(100, -1); // G ±16
+      expect(dst[i * 4 + 2]).toBeCloseTo(50, -1);  // B ±16
+    }
+  });
+});

@@ -287,21 +287,18 @@ export class AIEffectsEngine {
     this.ctx.drawImage(frame, 0, 0);
     const imageData = this.ctx.getImageData(0, 0, width, height);
 
-    // Simple green screen removal (production would use ML)
+    // Border-based background subtraction: estimate background from frame edges,
+    // then compute per-pixel Mahalanobis distance to the background colour model.
+    // Works for any uniform/bokeh background without requiring a specific chroma key colour.
     const data = imageData.data;
-    const threshold = options.threshold ?? 0.4;
+    const threshold = options.threshold ?? 0.35;
 
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i] / 255;
-      const g = data[i + 1] / 255;
-      const b = data[i + 2] / 255;
+    const bg = this.estimateBgColor(data, width, height);
+    const mask = this.buildBgMask(data, width, height, bg, threshold);
+    const cleaned = this.morphClose1D(mask, width, height, 3);
 
-      // Check if pixel is greenish
-      const isGreen = g > threshold && g > r * 1.2 && g > b * 1.2;
-      
-      if (isGreen) {
-        data[i + 3] = 0; // Set alpha to 0
-      }
+    for (let i = 0; i < width * height; i++) {
+      data[i * 4 + 3] = cleaned[i] === 0 ? 0 : 255;
     }
 
     // Apply feathering (simple box blur on alpha)
@@ -383,37 +380,16 @@ export class AIEffectsEngine {
     const imageData = this.ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
 
-    // Find skin-colored regions (very simplified)
-    const skinMap = new Uint8Array(width * height);
-    
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      
-      // Simple skin tone detection
-      const isSkin = r > 95 && g > 40 && b > 20 &&
-                     r > g && r > b &&
-                     Math.abs(r - g) > 15 &&
-                     r - Math.min(g, b) > 15;
-      
-      skinMap[i / 4] = isSkin ? 1 : 0;
-    }
+    // Skin pixel detection (YCbCr-range approach, robust across skin tones)
+    // then low-resolution connected-components to locate face-like regions.
+    const regions = this.findFaceCandidates(data, width, height);
 
-    // Find connected components (simplified)
-    const faces: FaceDetection[] = [];
-    
-    // Return mock face for demo
-    if (skinMap.some(v => v === 1)) {
-      faces.push({
-        id: 0,
-        bounds: { x: width * 0.3, y: height * 0.1, width: width * 0.4, height: height * 0.5 },
-        landmarks: [],
-        confidence: 0.85
-      });
-    }
-
-    return faces;
+    return regions.map((reg, i) => ({
+      id: i,
+      bounds: { x: reg.x, y: reg.y, width: reg.w, height: reg.h },
+      landmarks: [],
+      confidence: Math.min(0.9, reg.density * 1.5),
+    }));
   }
 
   // ============================================================
@@ -655,47 +631,21 @@ export class AIEffectsEngine {
     const newWidth = width * scale;
     const newHeight = height * scale;
 
-    // Simple bicubic upscale (production would use ESRGAN)
-    const canvas = new OffscreenCanvas(newWidth, newHeight);
-    const ctx = canvas.getContext('2d')!;
-    
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(frame, 0, 0, newWidth, newHeight);
+    // Lanczos-2 separable resampling — significantly sharper than browser bilinear.
+    // Separable horizontal then vertical pass: O(W×H×4) vs O(W×H×16) for 2D kernel.
+    const srcCanvas = new OffscreenCanvas(width, height);
+    const srcCtx = srcCanvas.getContext('2d')!;
+    srcCtx.drawImage(frame, 0, 0);
+    const srcData = srcCtx.getImageData(0, 0, width, height);
 
-    // Apply sharpening
-    const imageData = ctx.getImageData(0, 0, newWidth, newHeight);
-    this.sharpen(imageData.data, newWidth, newHeight, 0.3);
-    ctx.putImageData(imageData, 0, 0);
+    const resized = this.resizeLanczos2(srcData.data, width, height, newWidth, newHeight);
 
-    return createImageBitmap(canvas);
-  }
-
-  private sharpen(data: Uint8ClampedArray, width: number, height: number, amount: number): void {
-    const kernel = [
-      0, -amount, 0,
-      -amount, 1 + 4 * amount, -amount,
-      0, -amount, 0
-    ];
-
-    const temp = new Uint8ClampedArray(data.length);
-    temp.set(data);
-
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        for (let c = 0; c < 3; c++) {
-          let sum = 0;
-          for (let ky = -1; ky <= 1; ky++) {
-            for (let kx = -1; kx <= 1; kx++) {
-              const idx = ((y + ky) * width + (x + kx)) * 4 + c;
-              sum += temp[idx] * kernel[(ky + 1) * 3 + (kx + 1)];
-            }
-          }
-          const idx = (y * width + x) * 4 + c;
-          data[idx] = Math.max(0, Math.min(255, sum));
-        }
-      }
-    }
+    const dstCanvas = new OffscreenCanvas(newWidth, newHeight);
+    const dstCtx = dstCanvas.getContext('2d')!;
+    const dstImageData = dstCtx.createImageData(newWidth, newHeight);
+    dstImageData.data.set(resized);
+    dstCtx.putImageData(dstImageData, 0, 0);
+    return createImageBitmap(dstCanvas);
   }
 
   // ============================================================
@@ -835,6 +785,277 @@ export class AIEffectsEngine {
       data[i + 1] = Math.min(255, data[i + 1] + 15);
       data[i + 2] = Math.min(255, data[i + 2] + 10);
     }
+  }
+
+  // ============================================================
+  // Background subtraction helpers
+  // ============================================================
+
+  /** Sample border pixels and return per-channel mean and variance. */
+  private estimateBgColor(
+    data: Uint8ClampedArray, width: number, height: number
+  ): { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number } {
+    const bw = Math.max(1, Math.round(width * 0.08));
+    const bh = Math.max(1, Math.round(height * 0.08));
+    let rS = 0, gS = 0, bS = 0, n = 0;
+
+    const sample = (x: number, y: number): void => {
+      const i = (y * width + x) * 4;
+      rS += data[i]; gS += data[i + 1]; bS += data[i + 2]; n++;
+    };
+    for (let y = 0; y < bh; y++) for (let x = 0; x < width; x++) sample(x, y);
+    for (let y = height - bh; y < height; y++) for (let x = 0; x < width; x++) sample(x, y);
+    for (let y = bh; y < height - bh; y++) {
+      for (let x = 0; x < bw; x++) sample(x, y);
+      for (let x = width - bw; x < width; x++) sample(x, y);
+    }
+    if (n === 0) return { r: 0, g: 0, b: 0, vrR: 10000, vrG: 10000, vrB: 10000 };
+
+    const r = rS / n, g = gS / n, b = bS / n;
+    let vrR = 0, vrG = 0, vrB = 0;
+    const sample2 = (x: number, y: number): void => {
+      const i = (y * width + x) * 4;
+      vrR += (data[i] - r) ** 2; vrG += (data[i + 1] - g) ** 2; vrB += (data[i + 2] - b) ** 2;
+    };
+    for (let y = 0; y < bh; y++) for (let x = 0; x < width; x++) sample2(x, y);
+    for (let y = height - bh; y < height; y++) for (let x = 0; x < width; x++) sample2(x, y);
+    for (let y = bh; y < height - bh; y++) {
+      for (let x = 0; x < bw; x++) sample2(x, y);
+      for (let x = width - bw; x < width; x++) sample2(x, y);
+    }
+    return { r, g, b, vrR: Math.max(100, vrR / n), vrG: Math.max(100, vrG / n), vrB: Math.max(100, vrB / n) };
+  }
+
+  /** Per-pixel Mahalanobis distance → binary foreground (1) / background (0) mask. */
+  private buildBgMask(
+    data: Uint8ClampedArray, width: number, height: number,
+    bg: { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number },
+    threshold: number
+  ): Uint8Array {
+    const mask = new Uint8Array(width * height);
+    const tSq = (threshold * 10) ** 2;
+    for (let i = 0; i < width * height; i++) {
+      const dr = (data[i * 4] - bg.r) ** 2 / bg.vrR;
+      const dg = (data[i * 4 + 1] - bg.g) ** 2 / bg.vrG;
+      const db = (data[i * 4 + 2] - bg.b) ** 2 / bg.vrB;
+      mask[i] = dr + dg + db > tSq ? 1 : 0;
+    }
+    return mask;
+  }
+
+  /** 1D-separable morphological closing (dilate then erode) on a binary mask. */
+  private morphClose1D(mask: Uint8Array, width: number, height: number, r: number): Uint8Array {
+    const d = this.dilate1D(mask, width, height, r);
+    return this.erode1D(d, width, height, r);
+  }
+
+  private dilate1D(src: Uint8Array, width: number, height: number, r: number): Uint8Array {
+    const tmp = new Uint8Array(src.length);
+    // Horizontal
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let v = 0;
+        for (let dx = -r; dx <= r && !v; dx++) {
+          const nx = Math.max(0, Math.min(width - 1, x + dx));
+          v |= src[y * width + nx];
+        }
+        tmp[y * width + x] = v;
+      }
+    }
+    // Vertical
+    const dst = new Uint8Array(src.length);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let v = 0;
+        for (let dy = -r; dy <= r && !v; dy++) {
+          const ny = Math.max(0, Math.min(height - 1, y + dy));
+          v |= tmp[ny * width + x];
+        }
+        dst[y * width + x] = v;
+      }
+    }
+    return dst;
+  }
+
+  private erode1D(src: Uint8Array, width: number, height: number, r: number): Uint8Array {
+    const tmp = new Uint8Array(src.length);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let v = 1;
+        for (let dx = -r; dx <= r && v; dx++) {
+          const nx = Math.max(0, Math.min(width - 1, x + dx));
+          v &= src[y * width + nx];
+        }
+        tmp[y * width + x] = v;
+      }
+    }
+    const dst = new Uint8Array(src.length);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let v = 1;
+        for (let dy = -r; dy <= r && v; dy++) {
+          const ny = Math.max(0, Math.min(height - 1, y + dy));
+          v &= tmp[ny * width + x];
+        }
+        dst[y * width + x] = v;
+      }
+    }
+    return dst;
+  }
+
+  // ============================================================
+  // Face detection helpers
+  // ============================================================
+
+  /** Returns true if the pixel falls within typical skin-tone ranges (YCbCr bounds). */
+  private isSkinPixelYCbCr(r: number, g: number, b: number): boolean {
+    const Cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+    const Cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+    return Cb >= 77 && Cb <= 127 && Cr >= 133 && Cr <= 173 &&
+      r > 60 && g > 40 && b > 20; // exclude very dark/near-black
+  }
+
+  /**
+   * Builds a 1/16-scale skin density map, runs BFS connected-component labelling,
+   * and returns face-candidate regions sorted by skin density descending.
+   */
+  private findFaceCandidates(
+    data: Uint8ClampedArray, width: number, height: number
+  ): Array<{ x: number; y: number; w: number; h: number; density: number }> {
+    const SCALE = 16;
+    const mapW = Math.ceil(width / SCALE);
+    const mapH = Math.ceil(height / SCALE);
+    const density = new Float32Array(mapW * mapH);
+
+    for (let by = 0; by < mapH; by++) {
+      for (let bx = 0; bx < mapW; bx++) {
+        let skin = 0, total = 0;
+        const y0 = by * SCALE, y1 = Math.min(height, y0 + SCALE);
+        const x0 = bx * SCALE, x1 = Math.min(width, x0 + SCALE);
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            const i = (y * width + x) * 4;
+            if (this.isSkinPixelYCbCr(data[i], data[i + 1], data[i + 2])) skin++;
+            total++;
+          }
+        }
+        density[by * mapW + bx] = total > 0 ? skin / total : 0;
+      }
+    }
+
+    const THRESH = 0.25;
+    const binary = new Uint8Array(mapW * mapH);
+    for (let i = 0; i < binary.length; i++) binary[i] = density[i] >= THRESH ? 1 : 0;
+
+    // BFS connected components on low-res map
+    const labels = new Int32Array(mapW * mapH).fill(-1);
+    const results: Array<{ x: number; y: number; w: number; h: number; density: number }> = [];
+
+    for (let seed = 0; seed < binary.length; seed++) {
+      if (!binary[seed] || labels[seed] >= 0) continue;
+      const label = results.length;
+      let minX = mapW, maxX = 0, minY = mapH, maxY = 0;
+      let skinSum = 0, compSize = 0;
+      const queue: number[] = [seed];
+      labels[seed] = label;
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        const cx = curr % mapW, cy = Math.floor(curr / mapW);
+        if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+        if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+        skinSum += density[curr]; compSize++;
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const nx = cx + dx, ny = cy + dy;
+          if (nx < 0 || nx >= mapW || ny < 0 || ny >= mapH) continue;
+          const ni = ny * mapW + nx;
+          if (binary[ni] && labels[ni] < 0) { labels[ni] = label; queue.push(ni); }
+        }
+      }
+      const pxX = minX * SCALE, pxY = minY * SCALE;
+      const pxW = (maxX - minX + 1) * SCALE, pxH = (maxY - minY + 1) * SCALE;
+      const aspect = pxW / Math.max(1, pxH);
+      const minArea = width * height * 0.02;
+      // Face: 0.5–2.0 aspect, at least 2% of frame area
+      if (aspect >= 0.5 && aspect <= 2.0 && pxW * pxH >= minArea) {
+        results.push({ x: pxX, y: pxY, w: pxW, h: pxH, density: skinSum / compSize });
+      }
+    }
+
+    return results.sort((a, b) => b.density - a.density);
+  }
+
+  // ============================================================
+  // Lanczos-2 resampling helpers
+  // ============================================================
+
+  /** Lanczos-2 kernel: L(x) = sinc(x)·sinc(x/2) for |x|<2, 0 otherwise. */
+  private lanczos2Kernel(x: number): number {
+    if (x === 0) return 1;
+    const ax = Math.abs(x);
+    if (ax >= 2) return 0;
+    const pix = Math.PI * x;
+    // sinc(x)·sinc(x/2) = sin(πx)·sin(πx/2) / (πx·πx/2)
+    return (Math.sin(pix) * Math.sin(pix / 2)) / (pix * pix / 2);
+  }
+
+  /**
+   * Separable Lanczos-2 resize: horizontal pass then vertical pass.
+   * Produces crisper results than canvas bilinear for AI upscale operations.
+   */
+  private resizeLanczos2(
+    src: Uint8ClampedArray, srcW: number, srcH: number,
+    dstW: number, dstH: number
+  ): Uint8ClampedArray {
+    const xRatio = srcW / dstW;
+    // Horizontal pass: srcW×srcH → dstW×srcH (float buffer)
+    const hBuf = new Float32Array(dstW * srcH * 4);
+    for (let y = 0; y < srcH; y++) {
+      for (let x = 0; x < dstW; x++) {
+        const sx = (x + 0.5) * xRatio - 0.5;
+        const xi = Math.floor(sx);
+        let r = 0, g = 0, b = 0, a = 0, wS = 0;
+        for (let kx = xi - 1; kx <= xi + 2; kx++) {
+          const w = this.lanczos2Kernel(sx - kx);
+          if (w === 0) continue;
+          const nx = Math.max(0, Math.min(srcW - 1, kx));
+          const idx = (y * srcW + nx) * 4;
+          r += src[idx] * w; g += src[idx + 1] * w;
+          b += src[idx + 2] * w; a += src[idx + 3] * w;
+          wS += w;
+        }
+        const oi = (y * dstW + x) * 4;
+        const inv = wS > 0 ? 1 / wS : 1;
+        hBuf[oi] = r * inv; hBuf[oi + 1] = g * inv;
+        hBuf[oi + 2] = b * inv; hBuf[oi + 3] = a * inv;
+      }
+    }
+
+    // Vertical pass: dstW×srcH → dstW×dstH
+    const yRatio = srcH / dstH;
+    const result = new Uint8ClampedArray(dstW * dstH * 4);
+    for (let y = 0; y < dstH; y++) {
+      const sy = (y + 0.5) * yRatio - 0.5;
+      const yi = Math.floor(sy);
+      for (let x = 0; x < dstW; x++) {
+        let r = 0, g = 0, b = 0, a = 0, wS = 0;
+        for (let ky = yi - 1; ky <= yi + 2; ky++) {
+          const w = this.lanczos2Kernel(sy - ky);
+          if (w === 0) continue;
+          const ny = Math.max(0, Math.min(srcH - 1, ky));
+          const idx = (ny * dstW + x) * 4;
+          r += hBuf[idx] * w; g += hBuf[idx + 1] * w;
+          b += hBuf[idx + 2] * w; a += hBuf[idx + 3] * w;
+          wS += w;
+        }
+        const oi = (y * dstW + x) * 4;
+        const inv = wS > 0 ? 1 / wS : 1;
+        result[oi] = Math.max(0, Math.min(255, Math.round(r * inv)));
+        result[oi + 1] = Math.max(0, Math.min(255, Math.round(g * inv)));
+        result[oi + 2] = Math.max(0, Math.min(255, Math.round(b * inv)));
+        result[oi + 3] = Math.max(0, Math.min(255, Math.round(a * inv)));
+      }
+    }
+    return result;
   }
 
   // ============================================================

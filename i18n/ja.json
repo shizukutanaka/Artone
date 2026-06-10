@@ -214,7 +214,13 @@
     "generic": "エラーが発生しました: {message}",
     "init": {
       "title": "初期化エラー"
-    }
+    },
+    "unexpected": {
+      "title": "予期しないエラー",
+      "body": "問題が発生しました。作業中のプロジェクトは自動保存されています。"
+    },
+    "details": "エラー詳細",
+    "restart": "再起動"
   },
   "recovery": {
     "title": "クラッシュリカバリ",
@@ -297,7 +303,22 @@
     "title": "スコープ"
   },
   "inspector": {
-    "title": "インスペクター"
+    "title": "インスペクター",
+    "selectHint": "要素を選択",
+    "section": {
+      "basic": "基本",
+      "transform": "変形",
+      "opacity": "不透明度",
+      "project": "プロジェクト"
+    },
+    "label": {
+      "name": "名前",
+      "start": "開始",
+      "scale": "スケール",
+      "rotation": "回転",
+      "alpha": "α",
+      "enabled": "有効"
+    }
   },
   "captions": {
     "title": "字幕"

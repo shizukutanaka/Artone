@@ -8,6 +8,7 @@
 import React from 'react';
 import { color, space, radius, ds, typography } from './design-system';
 import { createLogger } from './logger';
+import { t } from '../i18n/i18n-manager';
 
 const log = createLogger('ErrorBoundary');
 
@@ -54,14 +55,14 @@ export class ErrorBoundary extends React.Component<Props, State> {
             justifyContent: 'center', margin: `0 auto`, marginBottom: space[6], fontSize: 28,
           }}>⚠</div>
 
-          <h1 style={{ ...ds.text('display'), marginBottom: space[3] }}>予期しないエラー</h1>
+          <h1 style={{ ...ds.text('display'), marginBottom: space[3] }}>{t('error.unexpected.title')}</h1>
           <p style={{ ...ds.text('body'), color: color.textSecondary, marginBottom: space[6] }}>
-            問題が発生しました。作業中のプロジェクトは自動保存されています。
+            {t('error.unexpected.body')}
           </p>
 
           <details style={{ ...ds.panel(), padding: space[4], textAlign: 'left', marginBottom: space[6] }}>
             <summary style={{ ...ds.text('caption'), color: color.textTertiary, cursor: 'pointer', marginBottom: space[2] }}>
-              エラー詳細
+              {t('error.details')}
             </summary>
             <pre style={{
               ...ds.text('mono'), color: color.destructive, whiteSpace: 'pre-wrap',
@@ -73,8 +74,8 @@ export class ErrorBoundary extends React.Component<Props, State> {
           </details>
 
           <div style={{ display: 'flex', gap: space[3], justifyContent: 'center' }}>
-            <button onClick={this.handleReset} style={ds.button('secondary')}>再試行</button>
-            <button onClick={this.handleReload} style={ds.button('primary')}>再起動</button>
+            <button onClick={this.handleReset} style={ds.button('secondary')}>{t('common.retry')}</button>
+            <button onClick={this.handleReload} style={ds.button('primary')}>{t('error.restart')}</button>
           </div>
         </div>
       </div>

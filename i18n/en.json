@@ -214,7 +214,13 @@
     "generic": "Error: {message}",
     "init": {
       "title": "Initialization Error"
-    }
+    },
+    "unexpected": {
+      "title": "Unexpected Error",
+      "body": "Something went wrong. Your current project has been auto-saved."
+    },
+    "details": "Error Details",
+    "restart": "Restart"
   },
   "recovery": {
     "title": "Crash Recovery",
@@ -335,7 +341,22 @@
     "title": "Scopes"
   },
   "inspector": {
-    "title": "Inspector"
+    "title": "Inspector",
+    "selectHint": "Select an element",
+    "section": {
+      "basic": "Basic",
+      "transform": "Transform",
+      "opacity": "Opacity",
+      "project": "Project"
+    },
+    "label": {
+      "name": "Name",
+      "start": "Start",
+      "scale": "Scale",
+      "rotation": "Rotation",
+      "alpha": "α",
+      "enabled": "Enabled"
+    }
   },
   "captions": {
     "title": "Captions"

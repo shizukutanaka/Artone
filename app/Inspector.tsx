@@ -9,6 +9,7 @@
 
 import { color } from './design-system';
 import React from 'react';
+import { t } from '../i18n/i18n-manager';
 
 
 // ============================================================
@@ -230,8 +231,8 @@ const ClipInspector: React.FC<{ sel: ClipSelection; onChange: (s: ClipSelection)
   onChange
 }) => (
   <>
-    <Section title="基本">
-      <Row label="名前">
+    <Section title={t('inspector.section.basic')}>
+      <Row label={t('inspector.label.name')}>
         <input
           value={sel.name}
           onChange={(e) => onChange({ ...sel, name: e.target.value })}
@@ -246,7 +247,7 @@ const ClipInspector: React.FC<{ sel: ClipSelection; onChange: (s: ClipSelection)
           }}
         />
       </Row>
-      <Row label="開始">
+      <Row label={t('inspector.label.start')}>
         <NumberInput
           value={sel.startTime}
           onChange={(v) => onChange({ ...sel, startTime: v })}
@@ -254,7 +255,7 @@ const ClipInspector: React.FC<{ sel: ClipSelection; onChange: (s: ClipSelection)
           unit="s"
         />
       </Row>
-      <Row label="長さ">
+      <Row label={t('media.duration')}>
         <NumberInput
           value={sel.duration}
           onChange={(v) => onChange({ ...sel, duration: v })}
@@ -263,7 +264,7 @@ const ClipInspector: React.FC<{ sel: ClipSelection; onChange: (s: ClipSelection)
           unit="s"
         />
       </Row>
-      <Row label="速度">
+      <Row label={t('timeline.clip.speed')}>
         <Slider
           value={sel.speed}
           onChange={(v) => onChange({ ...sel, speed: v })}
@@ -273,23 +274,23 @@ const ClipInspector: React.FC<{ sel: ClipSelection; onChange: (s: ClipSelection)
       </Row>
     </Section>
 
-    <Section title="変形">
+    <Section title={t('inspector.section.transform')}>
       <Row label="X">
         <NumberInput value={sel.position.x} onChange={(v) => onChange({ ...sel, position: { ...sel.position, x: v } })} unit="px" />
       </Row>
       <Row label="Y">
         <NumberInput value={sel.position.y} onChange={(v) => onChange({ ...sel, position: { ...sel.position, y: v } })} unit="px" />
       </Row>
-      <Row label="スケール">
+      <Row label={t('inspector.label.scale')}>
         <Slider value={sel.scale} onChange={(v) => onChange({ ...sel, scale: v })} min={0.1} max={4} />
       </Row>
-      <Row label="回転">
+      <Row label={t('inspector.label.rotation')}>
         <NumberInput value={sel.rotation} onChange={(v) => onChange({ ...sel, rotation: v })} unit="°" />
       </Row>
     </Section>
 
-    <Section title="不透明度">
-      <Row label="α">
+    <Section title={t('inspector.section.opacity')}>
+      <Row label={t('inspector.label.alpha')}>
         <Slider value={sel.opacity} onChange={(v) => onChange({ ...sel, opacity: v })} min={0} max={1} />
       </Row>
     </Section>
@@ -302,7 +303,7 @@ const EffectInspector: React.FC<{ sel: EffectSelection; onChange: (s: EffectSele
 }) => (
   <>
     <Section title={sel.name}>
-      <Row label="有効">
+      <Row label={t('inspector.label.enabled')}>
         <Toggle value={sel.enabled} onChange={(v) => onChange({ ...sel, enabled: v })} />
       </Row>
       {Object.entries(sel.parameters).map(([key, value]) => (
@@ -351,17 +352,17 @@ const AudioInspector: React.FC<{ sel: AudioSelection; onChange: (s: AudioSelecti
   onChange
 }) => (
   <>
-    <Section title="オーディオ">
-      <Row label="音量">
+    <Section title={t('audio.title')}>
+      <Row label={t('audio.volume')}>
         <Slider value={sel.volume} onChange={(v) => onChange({ ...sel, volume: v })} min={0} max={2} />
       </Row>
-      <Row label="パン">
+      <Row label={t('audio.pan')}>
         <Slider value={sel.pan} onChange={(v) => onChange({ ...sel, pan: v })} min={-1} max={1} />
       </Row>
-      <Row label="ミュート">
+      <Row label={t('audio.mute')}>
         <Toggle value={sel.muted} onChange={(v) => onChange({ ...sel, muted: v })} />
       </Row>
-      <Row label="ソロ">
+      <Row label={t('timeline.track.solo')}>
         <Toggle value={sel.solo} onChange={(v) => onChange({ ...sel, solo: v })} />
       </Row>
     </Section>
@@ -373,8 +374,8 @@ const ProjectInspector: React.FC<{ sel: ProjectSelection; onChange: (s: ProjectS
   onChange
 }) => (
   <>
-    <Section title="プロジェクト">
-      <Row label="名前">
+    <Section title={t('inspector.section.project')}>
+      <Row label={t('inspector.label.name')}>
         <input
           value={sel.name}
           onChange={(e) => onChange({ ...sel, name: e.target.value })}
@@ -410,7 +411,7 @@ const ProjectInspector: React.FC<{ sel: ProjectSelection; onChange: (s: ProjectS
           ))}
         </select>
       </Row>
-      <Row label="解像度">
+      <Row label={t('export.resolution')}>
         <div style={{ display: 'flex', gap: 4 }}>
           <NumberInput
             value={sel.resolution.width}
@@ -447,7 +448,7 @@ export const Inspector: React.FC<InspectorProps> = ({ selection, onChange }) => 
           padding: 24
         }}
       >
-        要素を選択
+        {t('inspector.selectHint')}
       </div>
     );
   }

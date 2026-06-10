@@ -650,9 +650,14 @@ export class WebGPURenderEngine {
 
   destroy(): void {
     this.clearCache();
-    // GPURenderPipeline and GPUComputePipeline have no .destroy(), but holding
-    // references prevents GC. Clear the map so the device can be reclaimed.
+    // GPURenderPipeline, GPUComputePipeline, GPUSampler, and GPUShaderModule
+    // have no .destroy(), but clearing the maps allows GC.
     this.pipelines.clear();
+    this.shaders.clear();
+    this.sampler = null;
+    // Explicitly destroy the device to release all remaining GPU resources
+    // (uniform buffers, bind group layouts, etc.) before nulling the reference.
+    this.device?.destroy();
     this.device = null;
     this.context = null;
   }

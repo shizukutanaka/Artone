@@ -59,6 +59,7 @@ function makeMockDevice() {
     createBindGroup: vi.fn(() => ({})),
     createCommandEncoder: vi.fn(() => encoder),
     createSampler: vi.fn(() => ({})),
+    destroy: vi.fn(),
     queue: {
       writeBuffer: vi.fn(),
       submit: vi.fn(),
@@ -66,7 +67,7 @@ function makeMockDevice() {
     },
   };
 
-  return { device, createdBuffers, createdTextures, encoder, pass };
+  return { device, createdBuffers, createdTextures, encoder, pass, deviceDestroy: device.destroy };
 }
 
 function makeContext() {
@@ -287,6 +288,8 @@ describe('WebGPURenderEngine — destroy()', () => {
     engine.destroy();
     // Cached texture destroyed
     expect(mock.createdTextures[0].destroy).toHaveBeenCalled();
+    // GPUDevice.destroy() called to free all remaining GPU resources
+    expect(mock.deviceDestroy).toHaveBeenCalledOnce();
     // After destroy, renderFrame becomes a no-op (device cleared)
     await expect(engine.renderFrame([makeLayer()])).resolves.toBeUndefined();
   });

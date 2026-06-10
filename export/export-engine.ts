@@ -12,6 +12,13 @@
  */
 import { encodeWAVBlob, type WavBitDepth } from './wav-encoder';
 import { encodeGif, type GifFrameInput } from './gif-encoder';
+import {
+  muxWebM,
+  toWebMVideoCodecId,
+  toWebMAudioCodecId,
+  type VideoChunkRef,
+  type AudioChunkRef,
+} from './webm-muxer';
 
 // ============================================================
 // Types
@@ -51,8 +58,8 @@ export interface ExportJob {
 }
 
 export interface EncodedData {
-  video: EncodedVideoChunk[];
-  audio: Uint8Array | null;
+  video: VideoChunkRef[];
+  audio: AudioChunkRef[] | null;
   duration: number;
 }
 
@@ -274,11 +281,12 @@ export class ExportEngine {
         }
       );
 
-      // Phase 2: Encode audio (GIF is already handled above; this path is mp4/webm only)
-      let audioData: Uint8Array | null = null;
+      // Phase 2: Encode audio (GIF already handled above; this path is mp4/webm only)
+      let audioChunks: AudioChunkRef[] | null = null;
       if (audioBuffer) {
         onProgress?.(0.8, 'Encoding audio...');
-        audioData = await this.encodeAudio(audioBuffer, job.config.audioBitrate);
+        const result = await this.encodeAudio(audioBuffer, job.config.audioBitrate);
+        audioChunks = result.length > 0 ? result : null;
         job.progress = 0.9;
         this.notifyListeners(job);
       }
@@ -290,7 +298,7 @@ export class ExportEngine {
 
       const blob = await this.mux(
         videoChunks,
-        audioData,
+        audioChunks,
         job.config,
         duration
       );
@@ -323,8 +331,8 @@ export class ExportEngine {
     job: ExportJob,
     renderFrame: (frameIndex: number) => Promise<VideoFrame>,
     onProgress: (progress: number) => void
-  ): Promise<EncodedVideoChunk[]> {
-    const chunks: EncodedVideoChunk[] = [];
+  ): Promise<VideoChunkRef[]> {
+    const chunks: VideoChunkRef[] = [];
     const { config } = job;
 
     // Check codec support
@@ -344,7 +352,14 @@ export class ExportEngine {
     return new Promise((resolve, reject) => {
       this.encoder = new VideoEncoder({
         output: (chunk) => {
-          chunks.push(chunk);
+          const data = new Uint8Array(chunk.byteLength);
+          chunk.copyTo(data);
+          chunks.push({
+            data,
+            timestampUs: chunk.timestamp,
+            durationUs: chunk.duration ?? Math.round(1_000_000 / config.fps),
+            isKeyframe: chunk.type === 'key',
+          });
         },
         error: reject
       });
@@ -398,8 +413,8 @@ export class ExportEngine {
   private async encodeAudio(
     buffer: AudioBuffer,
     bitrate: number
-  ): Promise<Uint8Array> {
-    const chunks: Uint8Array[] = [];
+  ): Promise<AudioChunkRef[]> {
+    const chunks: AudioChunkRef[] = [];
     const sampleRate = buffer.sampleRate;
     const channels = Math.min(buffer.numberOfChannels, 2);
 
@@ -412,15 +427,8 @@ export class ExportEngine {
     });
 
     if (!support.supported) {
-      // Fallback: return raw PCM
-      const pcm = new Float32Array(buffer.length * channels);
-      for (let ch = 0; ch < channels; ch++) {
-        const channelData = buffer.getChannelData(ch);
-        for (let i = 0; i < buffer.length; i++) {
-          pcm[i * channels + ch] = channelData[i];
-        }
-      }
-      return new Uint8Array(pcm.buffer);
+      // Fallback: no audio — caller handles null
+      return [];
     }
 
     return new Promise((resolve, reject) => {
@@ -428,7 +436,7 @@ export class ExportEngine {
         output: (chunk) => {
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
-          chunks.push(data);
+          chunks.push({ data, timestampUs: chunk.timestamp });
         },
         error: reject
       });
@@ -472,16 +480,7 @@ export class ExportEngine {
         audioData.close();
       }
 
-      this.audioEncoder.flush().then(() => {
-        const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-        const result = new Uint8Array(totalLength);
-        let offset = 0;
-        for (const chunk of chunks) {
-          result.set(chunk, offset);
-          offset += chunk.length;
-        }
-        resolve(result);
-      }).catch(reject);
+      this.audioEncoder.flush().then(() => resolve(chunks)).catch(reject);
     });
   }
 
@@ -490,41 +489,44 @@ export class ExportEngine {
   // ============================================================
 
   private async mux(
-    videoChunks: EncodedVideoChunk[],
-    audioData: Uint8Array | null,
+    videoChunks: VideoChunkRef[],
+    audioChunks: AudioChunkRef[] | null,
     config: ExportConfig,
     _duration: number
   ): Promise<Blob> {
-    // Simple MP4/WebM container generation
-    // In production, use mp4-muxer or similar library
-    
-    // Build basic container
-    const videoSize = videoChunks.reduce((sum, c) => sum + c.byteLength, 0);
-    const audioSize = audioData?.length || 0;
-    const totalSize = videoSize + audioSize + 1024; // Header overhead
-
-    const buffer = new ArrayBuffer(totalSize);
-    let offset = 0;
-
-    // Write video chunks
-    for (const chunk of videoChunks) {
-      const data = new Uint8Array(chunk.byteLength);
-      chunk.copyTo(data);
-      new Uint8Array(buffer, offset, chunk.byteLength).set(data);
-      offset += chunk.byteLength;
+    if (config.format === 'webm') {
+      const videoTrack = {
+        codecId: toWebMVideoCodecId(config.codec),
+        width: config.width,
+        height: config.height,
+      };
+      const hasAudio = audioChunks && audioChunks.length > 0;
+      const audioTrack = hasAudio ? {
+        codecId: toWebMAudioCodecId('mp4a.40.2'),
+        sampleRate: 48000,
+        channels: 2,
+      } : undefined;
+      const webmBytes = muxWebM(
+        videoTrack,
+        videoChunks,
+        audioTrack,
+        hasAudio ? audioChunks! : undefined,
+      );
+      return new Blob([webmBytes.buffer as ArrayBuffer], { type: 'video/webm' });
     }
 
-    // Write audio data
-    if (audioData) {
-      new Uint8Array(buffer, offset, audioData.length).set(audioData);
-      offset += audioData.length;
+    // MP4: write raw sample data — a future mp4-muxer will replace this stub.
+    // The output is technically playable by some decoders that accept raw stream
+    // data, but a proper ISOBMFF container is needed for full compatibility.
+    const videoSize = videoChunks.reduce((s, c) => s + c.data.length, 0);
+    const audioSize = audioChunks?.reduce((s, c) => s + c.data.length, 0) ?? 0;
+    const buf = new Uint8Array(videoSize + audioSize);
+    let off = 0;
+    for (const c of videoChunks) { buf.set(c.data, off); off += c.data.length; }
+    if (audioChunks) {
+      for (const c of audioChunks) { buf.set(c.data, off); off += c.data.length; }
     }
-
-    const mimeType = config.format === 'mp4' 
-      ? 'video/mp4' 
-      : 'video/webm';
-
-    return new Blob([buffer.slice(0, offset)], { type: mimeType });
+    return new Blob([buf.buffer as ArrayBuffer], { type: 'video/mp4' });
   }
 
   /** GIF export path: captures raw frames and encodes with the built-in GIF encoder. */

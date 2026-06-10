@@ -80,6 +80,10 @@ export class FrameCache {
 
   /** フレームを Tier 1 (hot) に追加。 */
   put(frameIndex: number, data: VideoFrame | ImageBitmap, byteSize: number): void {
+    // Re-putting an existing index must release the stale frame first; otherwise
+    // the old VideoFrame leaks GPU memory and currentBytes double-counts.
+    this.removeExisting(frameIndex);
+
     if (this.config.sinkFrames.includes(frameIndex)) {
       this.sink.set(frameIndex, { frameIndex, data, byteSize, lastAccess: performance.now() });
       return;
@@ -88,6 +92,17 @@ export class FrameCache {
     this.hot.set(frameIndex, frame);
     this.currentBytes += byteSize;
     this.evictIfNeeded();
+  }
+
+  /** 指定インデックスの既存フレームを全 Tier から除去し解放する。 */
+  private removeExisting(frameIndex: number): void {
+    const hot = this.hot.get(frameIndex);
+    if (hot) { this.releaseFrame(hot); this.hot.delete(frameIndex); }
+    const warm = this.warm.get(frameIndex);
+    if (warm) { this.releaseFrame(warm); this.warm.delete(frameIndex); }
+    const sink = this.sink.get(frameIndex);
+    // sink frames are not counted in currentBytes — close data without adjusting bytes.
+    if (sink) { this.closeData(sink); this.sink.delete(frameIndex); }
   }
 
   private promoteToHot(frameIndex: number, frame: CachedFrame): void {
@@ -152,6 +167,11 @@ export class FrameCache {
   /** VideoFrame.close() でGPUメモリを明示解放 (WebCodecs ハンドブック準拠) */
   private releaseFrame(frame: CachedFrame): void {
     this.currentBytes -= frame.byteSize;
+    this.closeData(frame);
+  }
+
+  /** フレームデータの GPU/メモリハンドルを close する (byte 会計は変更しない)。 */
+  private closeData(frame: CachedFrame): void {
     if (frame.data instanceof VideoFrame) {
       frame.data.close();
     } else if ('close' in frame.data && typeof frame.data.close === 'function') {

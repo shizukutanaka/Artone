@@ -49,6 +49,7 @@ Artone v3 の全変更を記録。
     - `detectHighlights()`: 空バッファで `0/0 = NaN` のしきい値が生成されるバグを早期リターンで修正。
     - `detectHighlights()`: 高エネルギーバーストが音声末尾まで続く場合にステートマシンが `energy<=threshold` に到達せずハイライトが生成されないバグを、ループ後の trailing flush で修正。
   - `render/webgpu-engine.ts`: `renderFrame()` がフレームごとに `applyEffect`/`compositeLayer` 内で生成する `paramBuffer` (GPUBuffer) と中間 `output` テクスチャ (GPUTexture) を一切 `destroy()` せずリークする重大な GPU リソースリークを修正 (リスクゾーン: CLAUDE.md「すべての GPUBuffer/GPUTexture は destroy() 必須」)。フレームローカルリソースを配列で収集し `queue.submit()` 後に破棄。`GPUTextureUsage`/`GPUBufferUsage` グローバル定数スタブを `tests/setup.ts` に追加。17 テスト新規追加。
+  - `render/frame-cache.ts`: `put()` が同一フレームインデックスの再投入時に既存の `VideoFrame` を `close()` せず置換するため GPU メモリがリークし、かつ `currentBytes` が古いサイズを減算せず二重計上されるバグを修正 (リスクゾーン)。`removeExisting()` で全 Tier から既存フレームを解放してから挿入。`releaseFrame` から `closeData` を抽出 (sink は byte 会計対象外のため close のみ)。26 テスト新規追加。
 - **`npm run typecheck` / `npm run build` を再 green 化** (`tsc --noEmit` エラー 27 → 0)。`strict`/`noUnusedLocals` 下の実型エラーを behavior-preserving に解消 (`any` 不使用):
   - `export/export-queue.ts`: await 中に `cancel()` が `job.status` を変更しうるがフロー解析が `'active'` リテラルに絞り込むためキャンセルガードが型エラーになる問題を、意図をコメント明記の上で型ワイドニングして解消。
   - `color/noise-reduction.ts` の `Float32Array` ジェネリック不整合、`timeline/trim-operations.ts` の未使用 `findNextAdjacent`、`animation/motion-path.ts` の未使用 `chordLen` を除去。

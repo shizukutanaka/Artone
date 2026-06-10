@@ -12,6 +12,7 @@
 
 import { color } from './design-system';
 import { createLogger } from './logger';
+import { t } from '../i18n/i18n-manager';
 import { safeStorageGet, safeStorageSet, safeStorageRemove } from './utils';
 import { MagneticTimeline, type TimelineState } from '../timeline/magnetic-timeline';
 import { TextBasedEditor } from '../timeline/text-based-editing';
@@ -527,7 +528,7 @@ export class ArtoneApp {
 
   private async showRecoveryDialog(data: RecoveryData): Promise<boolean> {
     const time = new Date(data.timestamp).toLocaleTimeString();
-    return confirm(`Unsaved work detected from ${time}. Restore?`);
+    return confirm(t('recovery.restorePrompt', { time }));
   }
 
   private async restoreFromRecovery(data: RecoveryData): Promise<void> {

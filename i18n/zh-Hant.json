@@ -202,7 +202,8 @@
     "available": "可復原上次工作階段",
     "restore": "復原",
     "discard": "捨棄",
-    "autoSave": "自動儲存"
+    "autoSave": "自動儲存",
+    "restorePrompt": "偵測到來自 {time} 的未儲存工作。是否還原？"
   },
   "performance": {
     "fps": "FPS：{value}",

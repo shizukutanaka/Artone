@@ -202,7 +202,8 @@
     "available": "Sessão anterior recuperável",
     "restore": "Restaurar",
     "discard": "Descartar",
-    "autoSave": "Auto-salvar"
+    "autoSave": "Auto-salvar",
+    "restorePrompt": "Trabalho não salvo detectado de {time}. Restaurar?"
   },
   "performance": {
     "fps": "FPS: {value}",

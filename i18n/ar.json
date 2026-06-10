@@ -202,7 +202,8 @@
     "available": "يمكن استعادة الجلسة السابقة",
     "restore": "استعادة",
     "discard": "تجاهل",
-    "autoSave": "حفظ تلقائي"
+    "autoSave": "حفظ تلقائي",
+    "restorePrompt": "تم اكتشاف عمل غير محفوظ من {time}. هل تريد الاستعادة؟"
   },
   "performance": {
     "fps": "FPS: {value}",

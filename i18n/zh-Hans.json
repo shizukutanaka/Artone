@@ -202,7 +202,8 @@
     "available": "可恢复上次会话",
     "restore": "恢复",
     "discard": "丢弃",
-    "autoSave": "自动保存"
+    "autoSave": "自动保存",
+    "restorePrompt": "检测到来自 {time} 的未保存工作。是否恢复？"
   },
   "performance": {
     "fps": "FPS：{value}",

@@ -202,7 +202,8 @@
     "available": "Vorherige Sitzung wiederherstellbar",
     "restore": "Wiederherstellen",
     "discard": "Verwerfen",
-    "autoSave": "Auto-Speichern"
+    "autoSave": "Auto-Speichern",
+    "restorePrompt": "Nicht gespeicherte Arbeit von {time} gefunden. Wiederherstellen?"
   },
   "performance": {
     "fps": "FPS: {value}",

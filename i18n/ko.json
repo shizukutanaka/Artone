@@ -202,7 +202,8 @@
     "available": "이전 세션 복구 가능",
     "restore": "복구",
     "discard": "취소",
-    "autoSave": "자동 저장"
+    "autoSave": "자동 저장",
+    "restorePrompt": "{time}의 저장되지 않은 작업이 감지되었습니다. 복원하시겠습니까?"
   },
   "performance": {
     "fps": "FPS: {value}",

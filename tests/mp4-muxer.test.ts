@@ -43,11 +43,6 @@ function makeH264Keyframe(payload: Uint8Array = new Uint8Array(8).fill(0x01)): U
   ]);
 }
 
-/** Build a synthetic Annex-B delta frame (P-slice). */
-function makeH264DeltaFrame(): Uint8Array {
-  const pNAL = new Uint8Array([0x41, 0x01, 0x02, 0x03]);  // NAL type=1 (non-IDR)
-  return new Uint8Array([0x00, 0x00, 0x00, 0x01, ...pNAL]);
-}
 
 function fakeVideoChunk(
   timestampUs: number,

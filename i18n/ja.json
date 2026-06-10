@@ -202,7 +202,8 @@
     "available": "前回セッションを復元できます",
     "restore": "復元",
     "discard": "破棄",
-    "autoSave": "自動保存"
+    "autoSave": "自動保存",
+    "restorePrompt": "{time} の未保存の作業が見つかりました。復元しますか？"
   },
   "performance": {
     "fps": "FPS: {value}",

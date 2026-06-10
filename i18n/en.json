@@ -202,7 +202,8 @@
     "available": "Previous session can be restored",
     "restore": "Restore",
     "discard": "Discard",
-    "autoSave": "Auto-save"
+    "autoSave": "Auto-save",
+    "restorePrompt": "Unsaved work detected from {time}. Restore?"
   },
   "performance": {
     "fps": "FPS: {value}",

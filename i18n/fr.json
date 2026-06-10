@@ -202,7 +202,8 @@
     "available": "Session précédente récupérable",
     "restore": "Restaurer",
     "discard": "Abandonner",
-    "autoSave": "Sauvegarde auto"
+    "autoSave": "Sauvegarde auto",
+    "restorePrompt": "Travail non enregistré détecté depuis {time}. Restaurer ?"
   },
   "performance": {
     "fps": "FPS : {value}",

@@ -108,13 +108,13 @@ function concat(arrays: Uint8Array[]): Uint8Array {
  */
 function sizeVint(n: number): Uint8Array {
   if (n < 0x7F)
-    return new Uint8Array([0x80 | n]);
+    {return new Uint8Array([0x80 | n]);}
   if (n < 0x3FFF)
-    return new Uint8Array([0x40 | (n >> 8), n & 0xFF]);
+    {return new Uint8Array([0x40 | (n >> 8), n & 0xFF]);}
   if (n < 0x1FFFFF)
-    return new Uint8Array([0x20 | (n >> 16), (n >> 8) & 0xFF, n & 0xFF]);
+    {return new Uint8Array([0x20 | (n >> 16), (n >> 8) & 0xFF, n & 0xFF]);}
   if (n < 0x0FFFFFFF)
-    return new Uint8Array([0x10 | (n >>> 24), (n >>> 16) & 0xFF, (n >>> 8) & 0xFF, n & 0xFF]);
+    {return new Uint8Array([0x10 | (n >>> 24), (n >>> 16) & 0xFF, (n >>> 8) & 0xFF, n & 0xFF]);}
   // 5-byte for up to ~34 GB
   if (n < 0x7FFFFFFFF) {
     const hi = Math.floor(n / 0x100000000);

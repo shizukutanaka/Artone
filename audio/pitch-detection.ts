@@ -165,7 +165,7 @@ const DEFAULT_FMAX = 1200;
  * @example
  * ```ts
  * const result = detectPitch(monoFrame, { sampleRate: 44100 });
- * if (result.frequency) console.log(`${result.frequency.toFixed(1)} Hz`);
+ * if (result.frequency) display(`${result.frequency.toFixed(1)} Hz`);
  * ```
  */
 export function detectPitch(

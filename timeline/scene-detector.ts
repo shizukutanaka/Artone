@@ -186,7 +186,7 @@ function resolvedDistance(
  * const detector = createSceneDetector({ threshold: 0.4 });
  * for (const { data, width, height } of frames) {
  *   const cut = detector.addFrame(data, width, height);
- *   if (cut) console.log('Scene cut at frame', cut.frameIndex);
+ *   if (cut) markCut(cut.frameIndex);
  * }
  * ```
  */

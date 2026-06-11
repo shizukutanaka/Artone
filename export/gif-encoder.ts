@@ -67,7 +67,7 @@ function medianCut(pixels: RGB[], maxColors: number): RGB[] {
     return empty;
   }
 
-  let boxes: ColorBox[] = [makeColorBox(pixels)];
+  const boxes: ColorBox[] = [makeColorBox(pixels)];
 
   while (boxes.length < maxColors) {
     // Find the box with the largest colour range

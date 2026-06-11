@@ -20,8 +20,9 @@
  * # AI generated (reviewed)
  */
 
+import type {
+  BiquadCoeffs} from './biquad-filter';
 import {
-  BiquadCoeffs,
   makeLowpass,
   makeHighpass,
   makeBandpass,

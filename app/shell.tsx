@@ -112,6 +112,54 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     return () => window.removeEventListener('keydown', handler);
   }, [actions]);
 
+  // keyboard shortcut events dispatched via app.emit → engine state lastCommand
+  useEffect(() => {
+    const cmd = engine.lastCommand;
+    if (!cmd) return;
+    const { name, payload } = cmd.cmd;
+    switch (name) {
+      case 'togglePanel':
+        setActivePanel((p) => (p === payload ? null : (payload as string)));
+        break;
+      case 'showExport':
+        setActivePanel('export');
+        break;
+      case 'showImport': {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.accept = 'video/*,audio/*,image/*';
+        input.onchange = () => {
+          const files = Array.from(input.files ?? []);
+          if (files.length > 0) actions.importFiles(files);
+        };
+        input.click();
+        break;
+      }
+      case 'addMarker':
+      case 'nextMarker':
+      case 'prevMarker':
+      case 'toggleSnap':
+      case 'zoomTimeline':
+      case 'zoomTimelineFit':
+      case 'switchCamera':
+      case 'newProject':
+      case 'openProject':
+      case 'saveAs':
+        // Emit to any future subscriber (no-op for now; events are typed for extensibility)
+        break;
+      case 'toggleFullscreen':
+        if (document.fullscreenEnabled) {
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => undefined);
+          } else {
+            document.documentElement.requestFullscreen().catch(() => undefined);
+          }
+        }
+        break;
+    }
+  }, [engine.lastCommand]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // コマンドパレット — エンジンの実アクションを渡す
   const commands: PaletteItem[] = createDefaultCommands({
     play: () => actions.togglePlayPause(),

@@ -20,6 +20,12 @@ import type { ExperienceLevel } from './first-run';
 
 const log = createLogger('EngineContext');
 
+/** App-level command dispatched by keyboard shortcuts or internal events. */
+export interface AppCommand {
+  name: string;
+  payload?: unknown;
+}
+
 export interface EngineState {
   isPlaying: boolean;
   currentTime: number;
@@ -33,6 +39,14 @@ export interface EngineState {
   warnings: string[];
   /** full / degraded / minimal */
   capabilityTier: 'full' | 'degraded' | 'minimal' | 'unknown';
+  /**
+   * Last command dispatched via app.emit (e.g. from keyboard shortcuts).
+   * Shell components watch this via useEffect to handle UI-level commands
+   * such as panel toggles, save-as dialogs, and zoom operations.
+   * The `seq` counter increments on each dispatch so the same command name
+   * can be dispatched twice in a row and still trigger the effect.
+   */
+  lastCommand: { cmd: AppCommand; seq: number } | null;
 }
 
 const DEFAULT_STATE: EngineState = {
@@ -46,6 +60,7 @@ const DEFAULT_STATE: EngineState = {
   error: null,
   warnings: [],
   capabilityTier: 'unknown',
+  lastCommand: null,
 };
 
 // === Engine Actions (UI → エンジンのコマンド) ===
@@ -162,6 +177,11 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
       config ?? {},
       (app, caps) => {
         appRef.current = app;
+        // Wire up app.emit so keyboard-shortcut events reach the React layer
+        let cmdSeq = 0;
+        app.emit = (name: string, payload?: unknown) => {
+          setState((s) => ({ ...s, lastCommand: { cmd: { name, payload }, seq: ++cmdSeq } }));
+        };
         setState((s) => ({
           ...s,
           isReady: true,

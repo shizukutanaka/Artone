@@ -308,7 +308,7 @@ describe('ProjectManager', () => {
 
 // === Recovery Manager ===
 
-import { RecoveryManager } from '../recovery/recovery-manager';
+import { RecoveryManager, type RecoveryData } from '../recovery/recovery-manager';
 
 describe('RecoveryManager', () => {
   it('creates with config', () => {
@@ -325,7 +325,7 @@ describe('RecoveryManager', () => {
   it('saveSnapshot returns null without db', async () => {
     const rm = new RecoveryManager({ autoSaveInterval: 5000 });
     // db is null until init() — saveSnapshot should return null safely
-    const id = await rm.saveSnapshot('auto', 'p1', 'Test', { tracks: [], settings: {} } as any);
+    const id = await rm.saveSnapshot('auto', 'p1', 'Test', { tracks: [], settings: {} } as unknown as RecoveryData);
     expect(id).toBeNull();
   });
 
@@ -340,13 +340,13 @@ describe('RecoveryManager', () => {
   it('REGRESSION: crash handler saves a snapshot with data from startAutoSave', async () => {
     const rm = new RecoveryManager();
     await rm.init();
-    const mockData = {
+    const mockData: RecoveryData = {
       timeline: null, clips: [], tracks: [], effects: [],
       markers: [], playhead: 0, selection: [], historyPosition: 0, settings: {}
     };
     // Replace saveSnapshot so this test does not need a working IDB write path
     const spy = vi.spyOn(rm, 'saveSnapshot').mockResolvedValue('snap-id');
-    rm.startAutoSave(() => mockData as any, 'proj-1', 'My Project');
+    rm.startAutoSave(() => mockData, 'proj-1', 'My Project');
     window.dispatchEvent(new ErrorEvent('error'));
     expect(spy).toHaveBeenCalledWith('crash', 'proj-1', 'My Project', mockData);
   });

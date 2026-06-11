@@ -202,10 +202,10 @@ describe('I18nManager', () => {
     const unsub = i18n.subscribe(listener);
     // Change locale if supported
     try {
-      await (i18n as any).setLocale?.('ja');
+      await i18n.setLocale('ja');
       expect(listener).toHaveBeenCalled();
     } catch {
-      // setLocale may not exist — just unsub cleanly
+      // setLocale may reject if the locale fails to load — just unsub cleanly
     }
     unsub();
   });

@@ -54,7 +54,7 @@ test.describe('Timeline Operations', () => {
   test('should zoom timeline with scroll', async ({ page }) => {
     const timeline = page.locator('[data-testid="timeline"]');
     await page.evaluate(() => {
-      return (window as any).__timelineZoom || 1;
+      return (window as unknown as { __timelineZoom?: number }).__timelineZoom || 1;
     });
     
     await timeline.hover();

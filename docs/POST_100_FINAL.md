@@ -13,7 +13,7 @@
 ### Reactコンポーネント (5モジュール)
 | モジュール | 機能 | LOC |
 |-----------|------|-----|
-| `app/ArtoneUI.tsx` | メインアプリシェル | 412 |
+| `app/shell.tsx` | メインアプリシェル (ArtoneShell) | 約500 |
 | `app/Inspector.tsx` | コンテキスト感応プロパティエディタ | 480 |
 | `app/TimelineView.tsx` | マルチトラックタイムライン | 425 |
 | `app/MediaBrowser.tsx` | メディアブラウザ＋プロキシ表示 | 382 |

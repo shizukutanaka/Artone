@@ -10,7 +10,6 @@
 - DiagnosticPanels.tsx
 - Inspector.tsx
 - MediaBrowser.tsx
-- ArtoneUI.tsx
 - TimelineView.tsx
 - capabilities.ts
 - command-palette.tsx

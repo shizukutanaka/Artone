@@ -497,3 +497,25 @@ describe('LUTManager — cube export→import round-trip', () => {
     }
   });
 });
+
+// ─── generateWGSLShader ───────────────────────────────────────────────────────
+
+describe('LUTManager — generateWGSLShader', () => {
+  let lm: LUTManager;
+
+  beforeEach(() => { lm = new LUTManager(); });
+
+  it('returns empty string for unknown LUT id', () => {
+    expect(lm.generateWGSLShader('nonexistent')).toBe('');
+  });
+
+  it('returns a WGSL compute shader string for a valid LUT', () => {
+    addLUT(lm, makeLUT({ id: 'shade-lut', name: 'Shader LUT', size: 2 }));
+    const shader = lm.generateWGSLShader('shade-lut');
+    expect(typeof shader).toBe('string');
+    expect(shader.length).toBeGreaterThan(0);
+    expect(shader).toContain('@compute');
+    expect(shader).toContain('textureSampleLevel');
+    expect(shader).toContain('mix(color.rgb');
+  });
+});

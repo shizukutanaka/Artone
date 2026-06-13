@@ -7,7 +7,7 @@
  * - トーンマッピング各手法の出力範囲
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { HDREngine } from '../color/hdr-engine';
 
 describe('HDREngine — PQ (SMPTE ST 2084)', () => {
@@ -136,5 +136,40 @@ describe('HDREngine — Metadata', () => {
 
   it('getMetadata returns null initially', () => {
     expect(hdr.getMetadata()).toBeNull();
+  });
+});
+
+// ─── subscribe / notify ───────────────────────────────────────────────────────
+
+const hdrMeta = {
+  format: 'hdr10' as const,
+  maxCLL: 1000,
+  maxFALL: 400,
+  masteringDisplay: {
+    redPrimary: { x: 0.708, y: 0.292 },
+    greenPrimary: { x: 0.170, y: 0.797 },
+    bluePrimary: { x: 0.131, y: 0.046 },
+    whitePoint: { x: 0.3127, y: 0.3290 },
+    maxLuminance: 1000,
+    minLuminance: 0.0001,
+  },
+};
+
+describe('HDREngine — subscribe / notify', () => {
+  it('subscribe listener is called when metadata changes', () => {
+    const hdr = new HDREngine();
+    const listener = vi.fn();
+    hdr.subscribe(listener);
+    hdr.setMetadata(hdrMeta);
+    expect(listener).toHaveBeenCalled();
+  });
+
+  it('unsubscribe stops further notifications', () => {
+    const hdr = new HDREngine();
+    const listener = vi.fn();
+    const unsub = hdr.subscribe(listener);
+    unsub();
+    hdr.setMetadata({ ...hdrMeta, format: 'hlg', maxCLL: 0, maxFALL: 0 });
+    expect(listener).not.toHaveBeenCalled();
   });
 });

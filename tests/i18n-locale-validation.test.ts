@@ -7,8 +7,8 @@
  * # AI generated (reviewed)
  */
 
-import { describe, it, expect } from 'vitest';
-import { I18nManager } from '../i18n/i18n-manager';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { I18nManager, setupI18n, i18n, t } from '../i18n/i18n-manager';
 
 function makeManager(): I18nManager {
   return new I18nManager({
@@ -55,5 +55,46 @@ describe('i18n loadLocale — locale validation', () => {
       const err = await mgr.loadLocale(loc).then(() => null, (e: Error) => e);
       if (err) expect(err.message).not.toMatch(/Invalid locale/);
     }
+  });
+});
+
+// ─── setupI18n / i18n() / t() global helpers ─────────────────────────────────
+
+describe('setupI18n / i18n() / t() global helpers', () => {
+  beforeEach(() => {
+    // Reset module-level singleton by calling setupI18n with a fresh config
+    // (we cannot import the private variable, but setupI18n always overwrites it)
+    setupI18n({
+      defaultLocale: 'en',
+      fallbackLocale: 'en',
+      loadPath: '/i18n/{locale}.json',
+    });
+  });
+
+  it('setupI18n returns the new I18nManager instance', () => {
+    const mgr = setupI18n({
+      defaultLocale: 'ja',
+      fallbackLocale: 'en',
+      loadPath: '/i18n/{locale}.json',
+    });
+    expect(mgr).toBeInstanceOf(I18nManager);
+  });
+
+  it('i18n() returns the instance set by setupI18n', () => {
+    const mgr = setupI18n({
+      defaultLocale: 'en',
+      fallbackLocale: 'en',
+      loadPath: '/i18n/{locale}.json',
+    });
+    expect(i18n()).toBe(mgr);
+  });
+
+  it('t() shorthand delegates to the global i18n instance', () => {
+    // Load the English strings manually so t() can resolve something
+    const mgr = i18n();
+    // Inject a minimal translation to verify delegation
+    (mgr as unknown as { translations: Map<string, unknown> }).translations.set('en', { test: { key: 'Hello' } });
+    (mgr as unknown as { currentLocale: string }).currentLocale = 'en';
+    expect(t('test.key')).toBe('Hello');
   });
 });

@@ -143,6 +143,8 @@ describe('HDREngine — Metadata', () => {
 
 const hdrMeta = {
   format: 'hdr10' as const,
+  colorSpace: 'rec2020' as const,
+  transferFunction: 'pq' as const,
   maxCLL: 1000,
   maxFALL: 400,
   masteringDisplay: {

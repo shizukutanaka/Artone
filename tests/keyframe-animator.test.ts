@@ -238,7 +238,7 @@ describe('KeyframeAnimator — subscribe / notify', () => {
     const id = anim.createAnimation('bounce').id;
     const listener = vi.fn();
     anim.subscribe(listener);
-    anim.addKeyframe(id, 'x', { time: 0, value: 0, easing: 'linear' });
+    anim.addKeyframe(id, 'x', 0, 0, 'linear');
     expect(listener).toHaveBeenCalled();
   });
 
@@ -248,17 +248,18 @@ describe('KeyframeAnimator — subscribe / notify', () => {
     const listener = vi.fn();
     const unsub = anim.subscribe(listener);
     unsub();
-    anim.addKeyframe(id, 'x', { time: 0, value: 10, easing: 'linear' });
+    anim.addKeyframe(id, 'x', 0, 10, 'linear');
     expect(listener).not.toHaveBeenCalled();
   });
 
   it('listener is called when a keyframe is deleted', () => {
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('test').id;
-    const kf = anim.addKeyframe(id, 'y', { time: 0, value: 5, easing: 'easeIn' });
+    const kf = anim.addKeyframe(id, 'y', 0, 5, 'easeIn');
+    expect(kf).not.toBeNull();
     const listener = vi.fn();
     anim.subscribe(listener);
-    anim.deleteKeyframe(id, 'y', kf.id);
+    anim.deleteKeyframe(id, 'y', kf!.id);
     expect(listener).toHaveBeenCalled();
   });
 });

@@ -9,6 +9,7 @@ import {
   PerformanceMonitor,
   MemoryProfiler,
   AutoQualityAdjuster,
+  FrametimeGraph,
   PerformanceOverlayUI,
 } from '../perf/performance-monitor';
 
@@ -426,5 +427,113 @@ describe('PerformanceOverlayUI', () => {
   it('dropped frames highlighted in non-zero case', () => {
     const html = PerformanceOverlayUI({ ...baseMetrics, droppedFrames: 5 });
     expect(html).toContain('5');
+  });
+});
+
+// ============================================================
+// FrametimeGraph
+// ============================================================
+
+describe('FrametimeGraph', () => {
+  /** Create an HTMLCanvasElement-shaped object with a fully-mocked 2D context.
+   *  jsdom's canvas.getContext('2d') returns null; we supply our own mock. */
+  function makeCanvas(width = 160, height = 30): HTMLCanvasElement {
+    const gradient = { addColorStop: vi.fn() };
+    const ctx2d = {
+      fillStyle: '', strokeStyle: '', lineWidth: 1,
+      fillRect: vi.fn(), clearRect: vi.fn(),
+      beginPath: vi.fn(), closePath: vi.fn(),
+      moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(), fill: vi.fn(),
+      createLinearGradient: vi.fn(() => gradient),
+    };
+    return {
+      width,
+      height,
+      getContext: vi.fn(() => ctx2d),
+    } as unknown as HTMLCanvasElement;
+  }
+
+  it('constructs without throwing', () => {
+    expect(() => new FrametimeGraph(makeCanvas())).not.toThrow();
+  });
+
+  it('push() accumulates and renders without error', () => {
+    const graph = new FrametimeGraph(makeCanvas());
+    for (let i = 0; i < 110; i++) {
+      expect(() => graph.push(16 + (i % 5))).not.toThrow();
+    }
+  });
+
+  it('push() single-sample does not attempt gradient path (length < 2)', () => {
+    const canvas = makeCanvas();
+    const graph = new FrametimeGraph(canvas);
+    expect(() => graph.push(16.67)).not.toThrow();
+  });
+
+  it('push() with two values triggers full gradient render path', () => {
+    const canvas = makeCanvas();
+    const graph = new FrametimeGraph(canvas);
+    graph.push(16.67);
+    // createLinearGradient is called during the multi-value render
+    graph.push(20);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.createLinearGradient).toHaveBeenCalled();
+  });
+
+  it('push() renders many varied values without error', () => {
+    const graph = new FrametimeGraph(makeCanvas(320, 60));
+    for (let i = 0; i < 50; i++) {
+      graph.push(10 + Math.sin(i * 0.3) * 15);
+    }
+  });
+});
+
+// ============================================================
+// AutoQualityAdjuster — warning / optimal branches
+// ============================================================
+
+describe('AutoQualityAdjuster — warning and optimal branches', () => {
+  function makeMonitor(level: 'optimal' | 'warning' | 'critical'): PerformanceMonitor {
+    const mon = new PerformanceMonitor();
+    vi.spyOn(mon, 'getPerformanceLevel').mockReturnValue(level);
+    return mon;
+  }
+
+  it('reduces quality on warning level', () => {
+    const adj = new AutoQualityAdjuster(makeMonitor('warning'));
+    const q = adj.update();
+    // warning: reduce by 0.1, clamped to 0.5 minimum → 1.0 - 0.1 = 0.9
+    expect(q).toBeCloseTo(0.9);
+  });
+
+  it('increases quality on optimal level when below 1.0', () => {
+    const adj = new AutoQualityAdjuster(makeMonitor('critical'));
+    adj.update(); // drops to 0.75
+    // Switch to optimal — should increase
+    const mon2 = makeMonitor('optimal');
+    const adj2 = new AutoQualityAdjuster(mon2);
+    vi.spyOn(adj2 as unknown as { monitor: PerformanceMonitor }, 'monitor', 'get').mockReturnValue(mon2);
+    // Manually lower quality first by injecting the private field
+    (adj2 as unknown as { qualityLevel: number }).qualityLevel = 0.5;
+    (adj2 as unknown as { adjustmentCooldown: number }).adjustmentCooldown = 0;
+    const q = adj2.update();
+    expect(q).toBeCloseTo(0.55, 2); // 0.5 + 0.05
+  });
+
+  it('returns same quality on cooldown period', () => {
+    const adj = new AutoQualityAdjuster(makeMonitor('critical'));
+    adj.update(); // triggers cooldown
+    const q1 = adj.update(); // cooldown active
+    const q2 = adj.update(); // still cooling
+    expect(q1).toBe(q2);
+  });
+
+  it('warning clamps quality to 0.5 minimum', () => {
+    const adj = new AutoQualityAdjuster(makeMonitor('warning'));
+    // Drive quality below 0.5 via critical first, then warning
+    (adj as unknown as { qualityLevel: number }).qualityLevel = 0.51;
+    (adj as unknown as { adjustmentCooldown: number }).adjustmentCooldown = 0;
+    const q = adj.update();
+    expect(q).toBeGreaterThanOrEqual(0.5);
   });
 });

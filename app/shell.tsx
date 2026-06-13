@@ -22,6 +22,8 @@ import { t } from '../i18n/i18n-manager';
 import { Inspector, type Selection } from './Inspector';
 import { ScopesPanel, type ScopeType } from './DiagnosticPanels';
 import { EXPORT_PRESETS } from '../export/export-engine';
+import { MediaBrowser, type MediaItem } from './MediaBrowser';
+import { TimelineView, type TimelineTrack, type TimelineClip } from './TimelineView';
 import type { AppConfig } from './main';
 
 // ============================================================
@@ -207,11 +209,79 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>({ type: 'none' });
   const [enabledScopes, setEnabledScopes] = useState<ScopeType[]>(['waveform', 'histogram']);
+  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [selectedMediaId, setSelectedMediaId] = useState<string | undefined>();
+  const [timelineTracks] = useState<TimelineTrack[]>([
+    { id: 'v1', name: 'V1', type: 'video', height: 48, muted: false, locked: false },
+    { id: 'v2', name: 'V2', type: 'video', height: 48, muted: false, locked: false },
+    { id: 'a1', name: 'A1', type: 'audio', height: 40, muted: false, locked: false },
+    { id: 'a2', name: 'A2', type: 'audio', height: 40, muted: false, locked: false },
+  ]);
+  const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);  // start = seconds from track start
+  const [pxPerSecond, setPxPerSecond] = useState(100);
+
+  const handleClipMove = useCallback((clipId: string, newStart: number, newTrackId?: string) => {
+    setTimelineClips((prev) => prev.map((c) =>
+      c.id === clipId
+        ? { ...c, start: newStart, ...(newTrackId ? { trackId: newTrackId } : {}) }
+        : c
+    ));
+  }, []);
+
+  const handleClipResize = useCallback((clipId: string, newStart: number, newDuration: number) => {
+    setTimelineClips((prev) => prev.map((c) =>
+      c.id === clipId ? { ...c, start: newStart, duration: newDuration } : c
+    ));
+  }, []);
+
+  const handleClipSelect = useCallback((clipId: string, _multi: boolean) => {
+    setTimelineClips((prev) => {
+      const clip = prev.find((c) => c.id === clipId);
+      if (clip) {
+        setSelection({
+          type: 'clip',
+          id: clip.id,
+          name: clip.name,
+          duration: clip.duration,
+          startTime: clip.start,
+          speed: 1,
+          opacity: 1,
+          position: { x: 0, y: 0 },
+          scale: 1,
+          rotation: 0,
+        });
+      }
+      return prev;
+    });
+  }, []);
+
+  /** Import files into engine AND add them to the local media browser. */
+  const handleImport = useCallback(async (files: File[]) => {
+    await actions.importFiles(files);
+    setMediaItems((prev) => {
+      const next = [...prev];
+      for (const file of files) {
+        if (next.some((m) => m.name === file.name && m.size === file.size)) continue;
+        const type: MediaItem['type'] =
+          file.type.startsWith('video') ? 'video' :
+          file.type.startsWith('audio') ? 'audio' : 'image';
+        next.push({
+          id: `media_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          name: file.name,
+          type,
+          size: file.size,
+          url: URL.createObjectURL(file),
+          proxyStatus: 'none',
+        });
+      }
+      return next;
+    });
+  }, [actions]);
 
   // First-Run で選択されたファイルをインポート
   useEffect(() => {
     if (engine.isReady && pendingFiles.length > 0) {
-      actions.importFiles(pendingFiles);
+      handleImport(pendingFiles).catch(() => undefined);
     }
   }, [engine.isReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -355,34 +425,23 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               padding: `${space[3]}px ${space[4]}px`,
               borderBottom: `1px solid ${color.borderSubtle}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              flexShrink: 0,
             }}>
               <span style={ds.text('title')}>{t('media.title')}</span>
               <button onClick={() => setSidebarOpen(false)} style={ds.button('ghost')}>◁</button>
             </div>
-            {/* ドロップゾーン — 実際に importFiles を呼ぶ */}
-            <div
-              style={{
-                flex: 1, display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'center', padding: space[4],
-                color: color.textTertiary, ...ds.text('caption'), cursor: 'pointer',
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const files = Array.from(e.dataTransfer.files);
-                if (files.length > 0) actions.importFiles(files);
-              }}
-              onClick={() => {
-                const input = document.createElement('input');
-                input.type = 'file'; input.multiple = true;
-                input.accept = 'video/*,audio/*,image/*';
-                input.onchange = () => {
-                  const files = Array.from(input.files ?? []);
-                  if (files.length > 0) actions.importFiles(files);
-                };
-                input.click();
-              }}
-            >{t('media.dropHint')}</div>
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <MediaBrowser
+                items={mediaItems}
+                selectedId={selectedMediaId}
+                onImport={(files) => { handleImport(files).catch(() => undefined); }}
+                onSelect={(item) => setSelectedMediaId(item.id)}
+                onDelete={(id) => {
+                  setMediaItems((prev) => prev.filter((m) => m.id !== id));
+                  if (selectedMediaId === id) setSelectedMediaId(undefined);
+                }}
+              />
+            </div>
           </>}
         </aside>
 
@@ -412,46 +471,18 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
             flex: 1, background: color.surface2,
             borderTop: `1px solid ${color.border}`, position: 'relative', overflow: 'hidden',
           }}>
-            <div style={{
-              height: 32, borderBottom: `1px solid ${color.borderSubtle}`,
-              display: 'flex', alignItems: 'center', padding: `0 ${space[4]}px`, gap: space[3],
-            }}>
-              <span style={{ ...ds.text('caption'), color: color.textTertiary }}>{t('timeline.title')}</span>
-              <div style={{ flex: 1 }} />
-              {activeTier !== 'essential' && <>
-                <ToolButton label="マーカー" />
-                <ToolButton label="スナップ" active />
-              </>}
-              {activeTier === 'pro' && <>
-                <ToolButton label="マルチカム" />
-                <ToolButton label="ネスト" />
-              </>}
-            </div>
-
-            <div
-              style={{
-                flex: 1, display: 'flex', flexDirection: 'column',
-                alignItems: 'center', justifyContent: 'center',
-                color: color.textTertiary, ...ds.text('body'), height: 'calc(100% - 32px)',
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const files = Array.from(e.dataTransfer.files);
-                if (files.length > 0) actions.importFiles(files);
-              }}
-            >
-              {t('timeline.dragHint')}
-            </div>
-
-            {/* プレイヘッド */}
-            {engine.duration > 0 && (
-              <div style={{
-                position: 'absolute', top: 0, bottom: 0,
-                left: `${(engine.currentTime / engine.duration) * 100}%`,
-                width: 2, background: color.playhead, zIndex: z.panel, pointerEvents: 'none',
-              }} />
-            )}
+            <TimelineView
+              tracks={timelineTracks}
+              clips={timelineClips}
+              duration={Math.max(engine.duration, 30)}
+              playhead={engine.currentTime}
+              pxPerSecond={pxPerSecond}
+              onPlayheadChange={(t) => actions.seek(t)}
+              onClipMove={handleClipMove}
+              onClipSelect={handleClipSelect}
+              onClipResize={handleClipResize}
+              onZoomChange={setPxPerSecond}
+            />
           </div>
         </main>
         </DropZone>
@@ -563,14 +594,6 @@ function panelTitle(id: string): string {
   return key ? t(key) : id;
 }
 
-const ToolButton: React.FC<{ label: string; active?: boolean }> = ({ label, active }) => (
-  <button style={{
-    ...ds.button('ghost'), ...ds.text('caption'),
-    color: active ? color.brand : color.textTertiary,
-    borderBottom: active ? `2px solid ${color.brand}` : '2px solid transparent',
-    borderRadius: 0, padding: `${space[1]}px ${space[2]}px`,
-  }}>{label}</button>
-);
 
 const fullScreen: React.CSSProperties = {
   position: 'fixed', inset: 0, background: color.surface1,

@@ -25,7 +25,8 @@
     "exit": "Quitter",
     "skip": "Ignorer",
     "retry": "Réessayer",
-    "back": "Retour"
+    "back": "Retour",
+    "comingSoon": "Bientôt disponible"
   },
   "menu": {
     "file": "Fichier",

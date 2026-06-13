@@ -19,6 +19,9 @@ import { safeStorageGet, safeStorageSet, formatTimecode } from './utils';
 import { DropZone } from './drop-zone';
 import { EngineProvider, useEngine, configFromFirstRun } from './engine-context';
 import { t } from '../i18n/i18n-manager';
+import { Inspector, type Selection } from './Inspector';
+import { ScopesPanel, type ScopeType } from './DiagnosticPanels';
+import { EXPORT_PRESETS } from '../export/export-engine';
 import type { AppConfig } from './main';
 
 // ============================================================
@@ -101,6 +104,61 @@ function dispatchAppCommand(
   }
 }
 
+/** Draws a static placeholder on a scope canvas (no video frame available yet). */
+function renderScopePlaceholder(canvas: HTMLCanvasElement, scope: ScopeType): void {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const { width, height } = canvas;
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = scope === 'vectorscope' ? '#2a6' : '#27a';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (scope === 'vectorscope') {
+    ctx.arc(width / 2, height / 2, Math.min(width, height) * 0.35, 0, Math.PI * 2);
+  } else {
+    ctx.moveTo(0, height * 0.5);
+    ctx.lineTo(width, height * 0.5);
+  }
+  ctx.stroke();
+}
+
+interface ExportPanelProps { onExport: (preset?: string) => Promise<void>; }
+
+/** Minimal export preset picker wired to the engine's export action. */
+const ExportPanel: React.FC<ExportPanelProps> = ({ onExport }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: space[2] }}>
+    {EXPORT_PRESETS.map((preset) => (
+      <button
+        key={preset.id}
+        onClick={() => { onExport(preset.id).catch(() => undefined); }}
+        style={{
+          ...ds.button('secondary'), textAlign: 'left', display: 'block',
+          padding: `${space[2]}px ${space[3]}px`,
+        }}
+      >
+        <div style={ds.text('body')}>{preset.name}</div>
+        <div style={{ ...ds.text('caption'), color: color.textTertiary }}>{preset.description}</div>
+      </button>
+    ))}
+  </div>
+);
+
+/** Generic placeholder for panels not yet implemented. */
+const PlaceholderPanel: React.FC<{ name: string }> = ({ name }) => (
+  <div style={{
+    display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center',
+    height: 200, color: color.textTertiary, gap: space[2],
+  }}>
+    <div style={{ fontSize: 32 }}>🚧</div>
+    <div style={ds.text('body')}>{name}</div>
+    <div style={{ ...ds.text('caption'), textAlign: 'center' }}>
+      {t('common.comingSoon')}
+    </div>
+  </div>
+);
+
 // ============================================================
 // ArtoneShell — 最外層 (First-Run 判定 + EngineProvider)
 // ============================================================
@@ -147,6 +205,8 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activePanel, setActivePanel] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection>({ type: 'none' });
+  const [enabledScopes, setEnabledScopes] = useState<ScopeType[]>(['waveform', 'histogram']);
 
   // First-Run で選択されたファイルをインポート
   useEffect(() => {
@@ -401,15 +461,40 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
           <aside style={{
             width: 300, background: color.surface2,
             borderLeft: `1px solid ${color.border}`, overflow: 'hidden',
+            display: 'flex', flexDirection: 'column',
             animation: `artone-slide-in ${motion.slide} ${motion.snappy} forwards`,
           }}>
             <div style={{
               padding: `${space[3]}px ${space[4]}px`,
               borderBottom: `1px solid ${color.borderSubtle}`,
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              flexShrink: 0,
             }}>
               <span style={ds.text('title')}>{panelTitle(activePanel)}</span>
               <button onClick={() => setActivePanel(null)} style={ds.button('ghost')}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: space[3] }}>
+              {activePanel === 'scopes' && (
+                <ScopesPanel
+                  enabled={enabledScopes}
+                  onToggle={(s) =>
+                    setEnabledScopes((prev) =>
+                      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+                    )
+                  }
+                  renderScope={renderScopePlaceholder}
+                />
+              )}
+              {activePanel === 'inspector' && (
+                <Inspector selection={selection} onChange={setSelection} />
+              )}
+              {activePanel === 'export' && (
+                <ExportPanel onExport={actions.exportProject} />
+              )}
+              {(activePanel === 'color' || activePanel === 'audio' ||
+                activePanel === 'captions' || activePanel === 'text') && (
+                <PlaceholderPanel name={panelTitle(activePanel)} />
+              )}
             </div>
           </aside>
         )}

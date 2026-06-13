@@ -25,7 +25,8 @@
     "exit": "Exit",
     "skip": "Skip",
     "retry": "Retry",
-    "back": "Back"
+    "back": "Back",
+    "comingSoon": "Coming soon"
   },
   "menu": {
     "file": "File",

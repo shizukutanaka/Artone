@@ -25,7 +25,8 @@
     "exit": "Beenden",
     "skip": "Überspringen",
     "retry": "Erneut versuchen",
-    "back": "Zurück"
+    "back": "Zurück",
+    "comingSoon": "Demnächst verfügbar"
   },
   "menu": {
     "file": "Datei",

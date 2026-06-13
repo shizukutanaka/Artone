@@ -25,7 +25,8 @@
     "exit": "Salir",
     "skip": "Saltar",
     "retry": "Reintentar",
-    "back": "Atrás"
+    "back": "Atrás",
+    "comingSoon": "Próximamente"
   },
   "menu": {
     "file": "Archivo",

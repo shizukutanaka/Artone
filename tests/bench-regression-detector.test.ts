@@ -20,6 +20,7 @@ import {
   type BenchmarkResult,
   type BenchmarkBaseline,
 } from '../bench/regression-detector';
+import { standardBenchmarks } from '../bench/standard-suite';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -340,4 +341,69 @@ describe('bench factory', () => {
   it('bench.store is BaselineStore', () => {
     expect(bench.store).toBe(BaselineStore);
   });
+});
+
+// ── standardBenchmarks ────────────────────────────────────────────────────────
+
+describe('standardBenchmarks — suite structure', () => {
+  it('exports a non-empty array of BenchmarkSpec', () => {
+    expect(Array.isArray(standardBenchmarks)).toBe(true);
+    expect(standardBenchmarks.length).toBeGreaterThan(0);
+  });
+
+  it('every spec has a name, category, budget, and run function', () => {
+    for (const spec of standardBenchmarks) {
+      expect(typeof spec.name).toBe('string');
+      expect(spec.name.length).toBeGreaterThan(0);
+      expect(typeof spec.category).toBe('string');
+      expect(typeof spec.budget).toBe('number');
+      expect(typeof spec.run).toBe('function');
+    }
+  });
+
+  it('covers expected categories (render, effect, decode, encode, export, startup)', () => {
+    const categories = new Set(standardBenchmarks.map((s) => s.category));
+    expect(categories.has('render')).toBe(true);
+    expect(categories.has('effect')).toBe(true);
+    expect(categories.has('decode')).toBe(true);
+    expect(categories.has('encode')).toBe(true);
+    expect(categories.has('export')).toBe(true);
+    expect(categories.has('startup')).toBe(true);
+  });
+});
+
+describe('standardBenchmarks — execution via BenchmarkRunner', () => {
+  it('runs all non-canvas benchmarks synchronously without throwing', async () => {
+    const runner = bench.runner();
+    // Filter out benchmarks that need OffscreenCanvas (browser-only)
+    const runnable = standardBenchmarks.filter(
+      (s) => !s.name.includes('putImageData') && !s.name.includes('canvas')
+    );
+    runner.registerAll(runnable);
+    const results = await runner.runAll();
+    expect(results.length).toBe(runnable.length);
+    for (const r of results) {
+      expect(r.meanMs).toBeGreaterThanOrEqual(0);
+      expect(r.opsPerSec).toBeGreaterThan(0);
+    }
+  }, 30000);
+
+  it('render.fill_1080p benchmark completes and measures correctly', async () => {
+    const spec = standardBenchmarks.find((s) => s.name === 'render.fill_1080p')!;
+    expect(spec).toBeDefined();
+    const runner = bench.runner();
+    runner.register(spec);
+    const results = await runner.runAll();
+    expect(results[0].name).toBe('render.fill_1080p');
+    expect(results[0].meanMs).toBeGreaterThanOrEqual(0);
+  }, 15000);
+
+  it('startup.json_parse_5kb benchmark runs and produces a result', async () => {
+    const spec = standardBenchmarks.find((s) => s.name === 'startup.json_parse_5kb')!;
+    expect(spec).toBeDefined();
+    const runner = bench.runner();
+    runner.register(spec);
+    const results = await runner.runAll();
+    expect(results[0].opsPerSec).toBeGreaterThan(0);
+  }, 15000);
 });

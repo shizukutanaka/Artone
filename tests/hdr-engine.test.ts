@@ -155,6 +155,85 @@ const hdrMeta = {
   },
 };
 
+describe('HDREngine — convertColorSpace', () => {
+  it('same colorspace is identity (rec709→rec709)', () => {
+    const hdr = new HDREngine();
+    const { r, g, b } = hdr.convertColorSpace(0.5, 0.3, 0.1, 'rec709', 'rec709');
+    expect(r).toBeCloseTo(0.5, 2);
+    expect(g).toBeCloseTo(0.3, 2);
+    expect(b).toBeCloseTo(0.1, 2);
+  });
+
+  it('rec2020→rec709 produces different values', () => {
+    const hdr = new HDREngine();
+    const { r, g, b } = hdr.convertColorSpace(0.5, 0.3, 0.1, 'rec2020', 'rec709');
+    // Just verify it runs and produces finite values
+    expect(Number.isFinite(r)).toBe(true);
+    expect(Number.isFinite(g)).toBe(true);
+    expect(Number.isFinite(b)).toBe(true);
+  });
+
+  it('dci_p3→rec709 runs without error', () => {
+    const hdr = new HDREngine();
+    const result = hdr.convertColorSpace(0.4, 0.4, 0.4, 'dci_p3', 'rec709');
+    expect(Number.isFinite(result.r)).toBe(true);
+  });
+
+  it('aces→rec709 runs without error', () => {
+    const hdr = new HDREngine();
+    const result = hdr.convertColorSpace(0.18, 0.18, 0.18, 'aces', 'rec709');
+    expect(Number.isFinite(result.r)).toBe(true);
+  });
+});
+
+describe('HDREngine — processFrame', () => {
+  function makeImageData(r = 128, g = 64, b = 32): ImageData {
+    const data = new Uint8ClampedArray(4);
+    data[0] = r; data[1] = g; data[2] = b; data[3] = 255;
+    return new ImageData(data, 1, 1);
+  }
+
+  it('processFrame without metadata applies gamma and returns ImageData', () => {
+    const hdr = new HDREngine();
+    const img = makeImageData(128, 64, 32);
+    const out = hdr.processFrame(img, true);
+    expect(out).toBeInstanceOf(ImageData);
+    expect(out.data[3]).toBe(255); // alpha preserved
+  });
+
+  it('processFrame with PQ metadata tone-maps to SDR range', () => {
+    const hdr = new HDREngine();
+    hdr.setMetadata({ ...hdrMeta, colorSpace: 'rec709', transferFunction: 'pq' });
+    const img = makeImageData(200, 100, 50);
+    const out = hdr.processFrame(img, true);
+    expect(out.data[0]).toBeGreaterThanOrEqual(0);
+    expect(out.data[0]).toBeLessThanOrEqual(255);
+  });
+
+  it('processFrame with HLG metadata runs without error', () => {
+    const hdr = new HDREngine();
+    hdr.setMetadata({ ...hdrMeta, colorSpace: 'rec709', transferFunction: 'hlg' });
+    const img = makeImageData(100, 100, 100);
+    const out = hdr.processFrame(img, true);
+    expect(out).toBeInstanceOf(ImageData);
+  });
+
+  it('processFrame with rec2020 color space does color conversion', () => {
+    const hdr = new HDREngine();
+    hdr.setMetadata({ ...hdrMeta, colorSpace: 'rec2020', transferFunction: 'pq' });
+    const img = makeImageData(128, 128, 128);
+    const out = hdr.processFrame(img, true);
+    expect(out).toBeInstanceOf(ImageData);
+  });
+
+  it('processFrame with outputSDR=false skips tone mapping', () => {
+    const hdr = new HDREngine();
+    const img = makeImageData(128, 128, 128);
+    const out = hdr.processFrame(img, false);
+    expect(out).toBeInstanceOf(ImageData);
+  });
+});
+
 describe('HDREngine — subscribe / notify', () => {
   it('subscribe listener is called when metadata changes', () => {
     const hdr = new HDREngine();

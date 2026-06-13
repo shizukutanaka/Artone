@@ -386,3 +386,242 @@ describe('PluginBridge — accessors', () => {
     expect(() => makeBridge().unloadPlugin('ghost')).not.toThrow();
   });
 });
+
+// ============================================================
+// processOffline
+// ============================================================
+
+describe('PluginBridge — processOffline', () => {
+  let bridge: PluginBridge;
+
+  beforeEach(() => { bridge = makeBridge(); });
+
+  it('throws when instance not found', async () => {
+    const fakeBuffer = { numberOfChannels: 1, length: 128, sampleRate: 44100, getChannelData: () => new Float32Array(128) } as unknown as AudioBuffer;
+    await expect(bridge.processOffline('ghost', fakeBuffer)).rejects.toThrow('not found');
+  });
+
+  it('throws when plugin does not support offline processing', async () => {
+    const inst = injectInstance(bridge);
+    // wasmInstance.exports defaults to {} — missing process/getInputBuffer/getOutputBuffer
+    const fakeBuffer = { numberOfChannels: 1, length: 128, sampleRate: 44100, getChannelData: () => new Float32Array(128) } as unknown as AudioBuffer;
+    await expect(bridge.processOffline(inst.id, fakeBuffer)).rejects.toThrow('offline processing');
+  });
+
+  it('processes audio blocks through WASM and returns output buffer', async () => {
+    const BLOCK = 128;
+    const channels = 2;
+    const length = BLOCK;
+
+    // Allocate a memory buffer large enough for 2 channel * BLOCK * Float32 * 2 (in+out)
+    const memoryBuffer = new ArrayBuffer(channels * BLOCK * 4 * 2);
+    const inputPtr = 0;
+    const outputPtr = channels * BLOCK * 4;
+
+    const processFn = vi.fn();
+
+    const inst = injectInstance(bridge);
+    (inst.wasmInstance as unknown as { exports: Record<string, unknown> }).exports = {
+      process: processFn,
+      getInputBuffer: vi.fn().mockReturnValue(inputPtr),
+      getOutputBuffer: vi.fn().mockReturnValue(outputPtr),
+      memory: { buffer: memoryBuffer },
+    };
+
+    const outChannelData = [new Float32Array(length), new Float32Array(length)];
+    const outputBufferMock = {
+      numberOfChannels: channels,
+      length,
+      sampleRate: 44100,
+      getChannelData: vi.fn((ch: number) => outChannelData[ch]),
+    };
+    (bridge as unknown as { audioContext: { createBuffer: ReturnType<typeof vi.fn> } }).audioContext = {
+      createBuffer: vi.fn().mockReturnValue(outputBufferMock),
+    };
+
+    const inputChannelData = new Float32Array(length).fill(0.5);
+    const inputBuffer = {
+      numberOfChannels: channels,
+      length,
+      sampleRate: 44100,
+      getChannelData: vi.fn().mockReturnValue(inputChannelData),
+    } as unknown as AudioBuffer;
+
+    const result = await bridge.processOffline(inst.id, inputBuffer);
+    expect(processFn).toHaveBeenCalledWith(length);
+    expect(result).toBe(outputBufferMock);
+  });
+
+  it('handles multiple blocks when input length exceeds BLOCK_SIZE', async () => {
+    const BLOCK = 128;
+    const channels = 1;
+    const length = BLOCK * 3; // 3 blocks
+
+    const memoryBuffer = new ArrayBuffer(channels * BLOCK * 4 * 2);
+    const processFn = vi.fn();
+
+    const inst = injectInstance(bridge);
+    (inst.wasmInstance as unknown as { exports: Record<string, unknown> }).exports = {
+      process: processFn,
+      getInputBuffer: vi.fn().mockReturnValue(0),
+      getOutputBuffer: vi.fn().mockReturnValue(channels * BLOCK * 4),
+      memory: { buffer: memoryBuffer },
+    };
+
+    const outChannelData = [new Float32Array(length)];
+    const outputBufferMock = {
+      numberOfChannels: channels,
+      length,
+      sampleRate: 44100,
+      getChannelData: vi.fn((ch: number) => outChannelData[ch]),
+    };
+    (bridge as unknown as { audioContext: { createBuffer: ReturnType<typeof vi.fn> } }).audioContext = {
+      createBuffer: vi.fn().mockReturnValue(outputBufferMock),
+    };
+
+    const inputBuffer = {
+      numberOfChannels: channels,
+      length,
+      sampleRate: 44100,
+      getChannelData: vi.fn().mockReturnValue(new Float32Array(length)),
+    } as unknown as AudioBuffer;
+
+    await bridge.processOffline(inst.id, inputBuffer);
+    // 3 blocks → process called 3 times
+    expect(processFn).toHaveBeenCalledTimes(3);
+  });
+});
+
+// ============================================================
+// openPluginUI
+// ============================================================
+
+describe('PluginBridge — openPluginUI', () => {
+  let bridge: PluginBridge;
+
+  beforeEach(() => { bridge = makeBridge(); });
+
+  it('does nothing for unknown instance', async () => {
+    const container = document.createElement('div');
+    await bridge.openPluginUI('ghost', container);
+    expect(container.childNodes.length).toBe(0);
+  });
+
+  it('creates generic UI when descriptor has no uiUrl', async () => {
+    const inst = injectInstance(bridge);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    expect(container.childNodes.length).toBeGreaterThan(0);
+    expect(container.querySelector('.plugin-ui')).not.toBeNull();
+  });
+
+  it('generic UI contains parameter knobs for non-hidden params', async () => {
+    const inst = injectInstance(bridge);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const knobs = container.querySelectorAll('.plugin-param');
+    // descriptor has 2 parameters (gain, mix), neither hidden
+    expect(knobs.length).toBe(2);
+  });
+
+  it('creates an iframe when uiUrl is set', async () => {
+    const desc = makeDescriptor({ uiUrl: 'about:blank' });
+    const inst = injectInstance(bridge, desc);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const iframe = container.querySelector('iframe');
+    expect(iframe).not.toBeNull();
+    expect(iframe!.src).toContain('about:blank');
+  });
+
+  it('bypass button in generic UI toggles instance bypassed flag', async () => {
+    const inst = injectInstance(bridge);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const bypassBtn = container.querySelector('.plugin-bypass') as HTMLButtonElement;
+    expect(bypassBtn).not.toBeNull();
+    bypassBtn.click();
+    expect(bridge.getInstance(inst.id)!.bypassed).toBe(true);
+    bypassBtn.click();
+    expect(bridge.getInstance(inst.id)!.bypassed).toBe(false);
+  });
+
+  it('knob mousedown + mousemove changes parameter via drag', async () => {
+    const inst = injectInstance(bridge);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+
+    const knob = container.querySelector('.plugin-param-knob') as HTMLElement;
+    expect(knob).not.toBeNull();
+
+    // Simulate mousedown to start drag at clientY=100
+    knob.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientY: 100 }));
+    // Simulate mousemove upward by 50px → positive delta → gain increases
+    document.dispatchEvent(new MouseEvent('mousemove', { bubbles: false, clientY: 50 }));
+
+    // gain range is -12 to 12, delta = (100-50)/100 * 24 = 12 → clamped to 12
+    expect(bridge.getParameter(inst.id, 'gain')).toBe(12);
+
+    // mouseup stops dragging
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: false }));
+    document.dispatchEvent(new MouseEvent('mousemove', { bubbles: false, clientY: 0 }));
+    // value unchanged after mouseup
+    expect(bridge.getParameter(inst.id, 'gain')).toBe(12);
+  });
+
+  it('preset selector change loads preset', async () => {
+    const inst = injectInstance(bridge);
+    bridge.setParameter(inst.id, 'gain', 6);
+    bridge.savePreset(inst.id, 'Test Preset');
+    bridge.setParameter(inst.id, 'gain', 0);
+
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+
+    const select = container.querySelector('.plugin-preset-select') as HTMLSelectElement;
+    // First real preset is at index 1 (option value "0")
+    select.value = '0';
+    select.dispatchEvent(new Event('change', { bubbles: false }));
+    expect(bridge.getParameter(inst.id, 'gain')).toBe(6);
+  });
+
+  it('generic UI hides hidden parameters', async () => {
+    const desc = makeDescriptor({
+      parameters: [
+        { id: 'visible', name: 'Visible', shortName: 'V', unit: '', minValue: 0, maxValue: 1, defaultValue: 0.5, stepCount: 0, flags: { automatable: true, readonly: false, hidden: false, programChange: false } },
+        { id: 'secret', name: 'Secret', shortName: 'S', unit: '', minValue: 0, maxValue: 1, defaultValue: 0, stepCount: 0, flags: { automatable: false, readonly: true, hidden: true, programChange: false } },
+      ],
+    });
+    const inst = injectInstance(bridge, desc);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const knobs = container.querySelectorAll('.plugin-param');
+    expect(knobs.length).toBe(1); // only 'visible'
+  });
+
+  it('formatValue uses integer formatting for stepCount > 0', async () => {
+    const desc = makeDescriptor({
+      parameters: [
+        { id: 'steps', name: 'Steps', shortName: 'S', unit: '', minValue: 0, maxValue: 8, defaultValue: 3, stepCount: 8, flags: { automatable: true, readonly: false, hidden: false, programChange: false } },
+      ],
+    });
+    const inst = injectInstance(bridge, desc);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const valueEl = container.querySelector('.plugin-param-value');
+    expect(valueEl?.textContent).toBe('3'); // integer formatted, no decimal
+  });
+
+  it('formatValue uses integer for large values (|v| >= 100)', async () => {
+    const desc = makeDescriptor({
+      parameters: [
+        { id: 'big', name: 'Big', shortName: 'B', unit: 'Hz', minValue: 0, maxValue: 20000, defaultValue: 1000, stepCount: 0, flags: { automatable: true, readonly: false, hidden: false, programChange: false } },
+      ],
+    });
+    const inst = injectInstance(bridge, desc);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const valueEl = container.querySelector('.plugin-param-value');
+    expect(valueEl?.textContent).toBe('1000 Hz'); // integer, not 1000.0
+  });
+});

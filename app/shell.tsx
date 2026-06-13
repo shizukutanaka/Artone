@@ -255,28 +255,48 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     });
   }, []);
 
-  /** Import files into engine AND add them to the local media browser. */
+  /** Probe a video/audio File for its duration via a temporary media element. */
+  const probeFileDuration = useCallback((file: File, objectUrl: string): Promise<number> => {
+    return new Promise((resolve) => {
+      const el = document.createElement(file.type.startsWith('audio') ? 'audio' : 'video');
+      el.preload = 'metadata';
+      el.onloadedmetadata = () => { resolve(el.duration || 30); };
+      el.onerror = () => resolve(30);
+      el.src = objectUrl;
+    });
+  }, []);
+
+  /** Import files into engine AND add them to the local media browser and timeline. */
   const handleImport = useCallback(async (files: File[]) => {
     await actions.importFiles(files);
-    setMediaItems((prev) => {
-      const next = [...prev];
-      for (const file of files) {
-        if (next.some((m) => m.name === file.name && m.size === file.size)) continue;
-        const type: MediaItem['type'] =
-          file.type.startsWith('video') ? 'video' :
-          file.type.startsWith('audio') ? 'audio' : 'image';
-        next.push({
-          id: `media_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-          name: file.name,
-          type,
-          size: file.size,
-          url: URL.createObjectURL(file),
-          proxyStatus: 'none',
-        });
-      }
-      return next;
-    });
-  }, [actions]);
+    for (const file of files) {
+      const type: MediaItem['type'] =
+        file.type.startsWith('video') ? 'video' :
+        file.type.startsWith('audio') ? 'audio' : 'image';
+      const url = URL.createObjectURL(file);
+      const duration = type === 'image' ? 5 : await probeFileDuration(file, url);
+      const mediaId = `media_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const item: MediaItem = {
+        id: mediaId, name: file.name, type, size: file.size, url,
+        duration, proxyStatus: 'none',
+      };
+      setMediaItems((prev) => {
+        if (prev.some((m) => m.name === file.name && m.size === file.size)) return prev;
+        return [...prev, item];
+      });
+      // Auto-add clip to the first matching track after existing clips
+      const trackId = type === 'audio' ? 'a1' : 'v1';
+      setTimelineClips((prev) => {
+        const trackClips = prev.filter((c) => c.trackId === trackId);
+        const startTime = trackClips.reduce((max, c) => Math.max(max, c.start + c.duration), 0);
+        return [...prev, {
+          id: `clip_${mediaId}`, trackId, name: file.name,
+          start: startTime, duration,
+          color: type === 'audio' ? '#1d4ed8' : type === 'video' ? '#166534' : '#7c3aed',
+        }];
+      });
+    }
+  }, [actions, probeFileDuration]);
 
   // First-Run で選択されたファイルをインポート
   useEffect(() => {

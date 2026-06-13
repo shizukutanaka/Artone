@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { I18nManager, setupI18n, i18n, t } from '../i18n/i18n-manager';
+import { TIER1_LOCALES, TIER2_LOCALES, ALL_TIER1_TIER2, TIER3_LOCALES_META } from '../i18n/locales';
 
 function makeManager(): I18nManager {
   return new I18nManager({
@@ -96,5 +97,54 @@ describe('setupI18n / i18n() / t() global helpers', () => {
     (mgr as unknown as { translations: Map<string, unknown> }).translations.set('en', { test: { key: 'Hello' } });
     (mgr as unknown as { currentLocale: string }).currentLocale = 'en';
     expect(t('test.key')).toBe('Hello');
+  });
+});
+
+describe('locales — TIER1_LOCALES', () => {
+  it('contains at least 10 locales', () => {
+    expect(TIER1_LOCALES.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('every locale has required BCP 47 code', () => {
+    for (const locale of TIER1_LOCALES) {
+      expect(locale.code).toBeTruthy();
+      expect(locale.name).toBeTruthy();
+      expect(locale.tier).toBe(1);
+    }
+  });
+
+  it('Arabic is RTL', () => {
+    const ar = TIER1_LOCALES.find((l) => l.code === 'ar');
+    expect(ar?.rtl).toBe(true);
+  });
+
+  it('English is not RTL', () => {
+    const en = TIER1_LOCALES.find((l) => l.code === 'en');
+    expect(en?.rtl).toBe(false);
+  });
+});
+
+describe('locales — TIER2_LOCALES', () => {
+  it('contains more than 10 locales', () => {
+    expect(TIER2_LOCALES.length).toBeGreaterThan(10);
+  });
+
+  it('all are tier 2', () => {
+    for (const locale of TIER2_LOCALES) {
+      expect(locale.tier).toBe(2);
+    }
+  });
+});
+
+describe('locales — ALL_TIER1_TIER2', () => {
+  it('is the union of TIER1 + TIER2', () => {
+    expect(ALL_TIER1_TIER2.length).toBe(TIER1_LOCALES.length + TIER2_LOCALES.length);
+  });
+});
+
+describe('locales — TIER3_LOCALES_META', () => {
+  it('has count and loadPath', () => {
+    expect(TIER3_LOCALES_META.count).toBeGreaterThan(100);
+    expect(TIER3_LOCALES_META.loadPath).toBeTruthy();
   });
 });

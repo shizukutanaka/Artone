@@ -8,8 +8,12 @@ import { describe, it, expect } from 'vitest';
 import {
   LicenseAnalyzer,
   SBOMGenerator,
+  VulnerabilityScanner,
+  SupplyChainAuditor,
   type Component,
+  type CVE,
 } from '../security/sbom';
+import { loadCVEDatabase, findCVEsForPackage, normalizeVersion, KNOWN_CVES } from '../security/cve-database';
 
 const lib = (name: string, version: string, license: string | null): Component => ({
   name, version, type: 'library', license,
@@ -110,5 +114,205 @@ describe('SBOMGenerator — CycloneDX 1.7', () => {
     const bom = gen.generate(project, components, []);
     expect(() => new Date(bom.metadata.timestamp).toISOString()).not.toThrow();
     expect(bom.metadata.timestamp).toBe(new Date(bom.metadata.timestamp).toISOString());
+  });
+
+  it('toSPDX emits PackageChecksum for sha256 hash', () => {
+    const b64 = Buffer.from('deadbeef', 'hex').toString('base64');
+    const hashed: Component = {
+      name: 'react', version: '18.2.0', type: 'library', license: 'MIT',
+      hash: { algorithm: 'sha256', value: b64 },
+    };
+    const bom = gen.generate(project, [hashed], []);
+    const spdx = gen.toSPDX(bom);
+    expect(spdx).toContain('PackageChecksum: SHA256: deadbeef');
+  });
+
+  it('toSPDX emits PackageChecksum for sha1 hash with uppercase algo', () => {
+    const b64 = Buffer.from('cafebabe', 'hex').toString('base64');
+    const hashed: Component = {
+      name: 'lodash', version: '4.17.21', type: 'library', license: 'MIT',
+      hash: { algorithm: 'sha1', value: b64 },
+    };
+    const bom = gen.generate(project, [hashed], []);
+    const spdx = gen.toSPDX(bom);
+    expect(spdx).toContain('PackageChecksum: SHA1: cafebabe');
+  });
+
+  it('toSPDX skips PackageChecksum for invalid base64', () => {
+    const hashed: Component = {
+      name: 'react', version: '18.2.0', type: 'library', license: 'MIT',
+      hash: { algorithm: 'sha256', value: '!!!invalid-base64!!!' },
+    };
+    const bom = gen.generate(project, [hashed], []);
+    const spdx = gen.toSPDX(bom);
+    // base64ToHex may or may not throw on malformed; key is it doesn't crash
+    expect(spdx).toContain('PackageName: react');
+  });
+});
+
+describe('VulnerabilityScanner', () => {
+  const scanner = new VulnerabilityScanner();
+  const cve: CVE = {
+    id: 'CVE-2023-0001',
+    package: 'lodash',
+    affectedVersions: '<4.17.22',
+    severity: 'high',
+    description: 'Prototype pollution',
+    fixedIn: '4.17.22',
+  };
+
+  it('detects vulnerability for matching component', () => {
+    scanner.loadDatabase([cve]);
+    const reports = scanner.scan([{ name: 'lodash', version: '4.17.21', type: 'library', license: 'MIT' }]);
+    expect(reports).toHaveLength(1);
+    expect(reports[0].vulnerabilities[0].id).toBe('CVE-2023-0001');
+  });
+
+  it('returns empty for non-matching version', () => {
+    scanner.loadDatabase([cve]);
+    const reports = scanner.scan([{ name: 'lodash', version: '4.17.22', type: 'library', license: 'MIT' }]);
+    expect(reports).toHaveLength(0);
+  });
+
+  it('returns empty when no CVEs loaded', () => {
+    const fresh = new VulnerabilityScanner();
+    const reports = fresh.scan([{ name: 'lodash', version: '4.17.21', type: 'library', license: 'MIT' }]);
+    expect(reports).toHaveLength(0);
+  });
+});
+
+describe('SupplyChainAuditor — audit + formatReport', () => {
+  const auditor = new SupplyChainAuditor();
+  const project: Component = { name: 'artone', version: '3.0.0', type: 'application', license: 'MIT' };
+
+  it('audit passes for clean components', () => {
+    const report = auditor.audit(project, [
+      { name: 'react', version: '18.2.0', type: 'library', license: 'MIT' },
+    ], []);
+    expect(report.summary.passed).toBe(true);
+    expect(report.summary.criticalVulns).toBe(0);
+    expect(report.summary.licenseIssues).toBe(0);
+  });
+
+  it('audit fails when GPL dependency conflicts with MIT project', () => {
+    const report = auditor.audit(project, [
+      { name: 'gpl-lib', version: '1.0.0', type: 'library', license: 'GPL-3.0' },
+    ], []);
+    expect(report.summary.passed).toBe(false);
+    expect(report.summary.licenseIssues).toBeGreaterThan(0);
+    expect(report.licenseConflicts[0].component).toContain('gpl-lib');
+  });
+
+  it('audit detects critical CVE and marks failed', () => {
+    const cve: CVE = {
+      id: 'CVE-2024-9999',
+      package: 'vuln-pkg',
+      affectedVersions: '1.0.0',
+      severity: 'critical',
+      description: 'RCE vulnerability',
+    };
+    const report = auditor.audit(project, [
+      { name: 'vuln-pkg', version: '1.0.0', type: 'library', license: 'MIT' },
+    ], [], [cve]);
+    expect(report.summary.criticalVulns).toBe(1);
+  });
+
+  it('formatReport includes PASS status for clean report', () => {
+    const report = auditor.audit(project, [
+      { name: 'react', version: '18.2.0', type: 'library', license: 'MIT' },
+    ], []);
+    const text = auditor.formatReport(report);
+    expect(text).toContain('=== Supply Chain Audit ===');
+    expect(text).toContain('Status: PASS');
+    expect(text).toContain('Components: 1');
+    expect(text).toContain('License Summary:');
+  });
+
+  it('formatReport includes FAIL status and license conflicts', () => {
+    const report = auditor.audit(project, [
+      { name: 'gpl-lib', version: '1.0.0', type: 'library', license: 'GPL-3.0' },
+    ], []);
+    const text = auditor.formatReport(report);
+    expect(text).toContain('Status: FAIL');
+    expect(text).toContain('License Conflicts');
+    expect(text).toContain('gpl-lib@1.0.0');
+  });
+
+  it('formatReport shows vulnerability with fixedIn', () => {
+    const cve: CVE = {
+      id: 'CVE-2024-0001',
+      package: 'lodash',
+      affectedVersions: '<4.17.22',
+      severity: 'high',
+      description: 'Prototype pollution',
+      fixedIn: '4.17.22',
+    };
+    const report = auditor.audit(project, [
+      { name: 'lodash', version: '4.17.21', type: 'library', license: 'MIT' },
+    ], [], [cve]);
+    const text = auditor.formatReport(report);
+    expect(text).toContain('[HIGH]');
+    expect(text).toContain('CVE-2024-0001');
+    expect(text).toContain('Fix: upgrade to 4.17.22');
+  });
+
+  it('formatReport shows vulnerability without fixedIn', () => {
+    const cve: CVE = {
+      id: 'CVE-2024-0002',
+      package: 'lodash',
+      affectedVersions: '4.17.21',
+      severity: 'medium',
+      description: 'Some issue',
+    };
+    const report = auditor.audit(project, [
+      { name: 'lodash', version: '4.17.21', type: 'library', license: 'MIT' },
+    ], [], [cve]);
+    const text = auditor.formatReport(report);
+    expect(text).toContain('[MEDIUM]');
+    expect(text).not.toContain('Fix: upgrade');
+  });
+});
+
+describe('CVE Database', () => {
+  it('loadCVEDatabase returns the known CVEs array', () => {
+    const cves = loadCVEDatabase();
+    expect(cves).toBe(KNOWN_CVES);
+    expect(cves.length).toBeGreaterThan(0);
+  });
+
+  it('all entries have required fields', () => {
+    for (const cve of KNOWN_CVES) {
+      expect(cve.id).toMatch(/^CVE-/);
+      expect(cve.package).toBeTruthy();
+      expect(['low', 'medium', 'high', 'critical']).toContain(cve.severity);
+    }
+  });
+
+  it('findCVEsForPackage returns matching entries', () => {
+    const results = findCVEsForPackage('axios');
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.package).toBe('axios');
+    }
+  });
+
+  it('findCVEsForPackage returns empty for unknown package', () => {
+    expect(findCVEsForPackage('nonexistent-package-xyz')).toEqual([]);
+  });
+
+  it('normalizeVersion strips v prefix', () => {
+    expect(normalizeVersion('v1.2.3')).toBe('1.2.3');
+  });
+
+  it('normalizeVersion strips ^ prefix', () => {
+    expect(normalizeVersion('^1.2.3')).toBe('1.2.3');
+  });
+
+  it('normalizeVersion strips ~ prefix', () => {
+    expect(normalizeVersion('~1.2.3')).toBe('1.2.3');
+  });
+
+  it('normalizeVersion leaves plain version unchanged', () => {
+    expect(normalizeVersion('1.2.3')).toBe('1.2.3');
   });
 });

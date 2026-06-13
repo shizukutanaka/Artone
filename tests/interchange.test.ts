@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { otio, type ArtoneTimeline, type OTIOImportLoss, type OTIOImportResult } from '../interchange/otio';
 import { interchange } from '../interchange/legacy-formats';
 import { sampleTimeline } from './fixtures/timelines';
+import { pad, escapeXML, uuid, safeParseJSON } from '../interchange/utils';
 
 describe('OTIO Round-trip', () => {
   it('exports to valid OTIO JSON', () => {
@@ -442,5 +443,66 @@ describe('OTIO Transition round-trip', () => {
     const second = restored.videoTracks[0].clips[1];
     expect(second.transitionIn?.type).toBe('dissolve');
     expect(second.transitionIn?.inFrames).toBe(12);
+  });
+});
+
+describe('interchange/utils — pad', () => {
+  it('pads single digit to width 2', () => {
+    expect(pad(5)).toBe('05');
+  });
+
+  it('pads to specified width', () => {
+    expect(pad(42, 4)).toBe('0042');
+  });
+
+  it('does not truncate wide numbers', () => {
+    expect(pad(1234, 2)).toBe('1234');
+  });
+});
+
+describe('interchange/utils — escapeXML', () => {
+  it('escapes ampersand', () => {
+    expect(escapeXML('a & b')).toBe('a &amp; b');
+  });
+
+  it('escapes less than and greater than', () => {
+    expect(escapeXML('<tag>')).toBe('&lt;tag&gt;');
+  });
+
+  it('escapes double quotes', () => {
+    expect(escapeXML('"hello"')).toBe('&quot;hello&quot;');
+  });
+
+  it('escapes single quotes', () => {
+    expect(escapeXML("it's")).toBe('it&apos;s');
+  });
+
+  it('returns unchanged string with no special chars', () => {
+    expect(escapeXML('hello world')).toBe('hello world');
+  });
+});
+
+describe('interchange/utils — uuid', () => {
+  it('returns a UUID-format string', () => {
+    const id = uuid();
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  });
+
+  it('returns unique values', () => {
+    expect(uuid()).not.toBe(uuid());
+  });
+});
+
+describe('interchange/utils — safeParseJSON', () => {
+  it('parses valid JSON', () => {
+    expect(safeParseJSON<{ a: number }>('{"a":1}')).toEqual({ a: 1 });
+  });
+
+  it('returns null for invalid JSON', () => {
+    expect(safeParseJSON('{invalid}')).toBeNull();
+  });
+
+  it('parses JSON arrays', () => {
+    expect(safeParseJSON('[1,2,3]')).toEqual([1, 2, 3]);
   });
 });

@@ -138,6 +138,75 @@ describe('WebGPURenderEngine — construction', () => {
     expect(stats.fps).toBe(0);
     expect(stats.cacheHitRate).toBe(0);
   });
+
+  it('estimateMemory sums width*height*4 over cached textures, reported as MiB', async () => {
+    // Memory-accounting logic (drives stats.textureMemoryMB during the render
+    // loop). Tested directly: the loop body is pure arithmetic over the cache.
+    const { engine } = primedEngine();
+    await engine.importTexture({ width: 100, height: 100 } as unknown as ImageBitmap, 'a');
+    await engine.importTexture({ width: 200, height: 100 } as unknown as ImageBitmap, 'b');
+    const mb = (engine as unknown as { estimateMemory(): number }).estimateMemory();
+    expect(mb).toBeCloseTo((100 * 100 * 4 + 200 * 100 * 4) / (1024 * 1024), 5);
+  });
+
+  it('estimateMemory is zero with an empty texture cache', () => {
+    const mb = (new WebGPURenderEngine() as unknown as { estimateMemory(): number }).estimateMemory();
+    expect(mb).toBe(0);
+  });
+});
+
+// ============================================================
+// initialize — fallback contract (documented: WebGPU 失敗時は false を返し
+// 呼び出し側 RenderBackend が WebGL2 にフォールバックする)
+//
+// The shader/pipeline creation on the success path is irreducible GPUDevice
+// API that only real hardware can validate (render/CLAUDE.md routes that to
+// per-vendor + leak tests), so it is deliberately NOT faked here — doing so
+// would assert only that fakes get stored in maps. These tests cover the
+// genuinely meaningful contract: initialize must RETURN false, never throw,
+// when WebGPU is unavailable.
+// ============================================================
+
+describe('WebGPURenderEngine — initialize fallback contract', () => {
+  const canvas = { getContext: () => ({ configure: () => {} }) } as unknown as HTMLCanvasElement;
+  // Restore only navigator (not vi.unstubAllGlobals, which would wipe the
+  // setup.ts stubs like GPUTextureUsage / ImageData that later tests rely on).
+  const realNavigator = globalThis.navigator;
+  const restoreNavigator = () => vi.stubGlobal('navigator', realNavigator);
+
+  it('returns false when navigator.gpu is unavailable', async () => {
+    vi.stubGlobal('navigator', {});
+    try {
+      expect(await new WebGPURenderEngine().initialize(canvas)).toBe(false);
+    } finally {
+      restoreNavigator();
+    }
+  });
+
+  it('returns false (not throws) when no adapter is available', async () => {
+    vi.stubGlobal('navigator', {
+      gpu: { requestAdapter: async () => null, getPreferredCanvasFormat: () => 'bgra8unorm' },
+    });
+    try {
+      expect(await new WebGPURenderEngine().initialize(canvas)).toBe(false);
+    } finally {
+      restoreNavigator();
+    }
+  });
+
+  it('returns false (not throws) when device acquisition throws', async () => {
+    vi.stubGlobal('navigator', {
+      gpu: {
+        requestAdapter: async () => { throw new Error('GPU device lost'); },
+        getPreferredCanvasFormat: () => 'bgra8unorm',
+      },
+    });
+    try {
+      expect(await new WebGPURenderEngine().initialize(canvas)).toBe(false);
+    } finally {
+      restoreNavigator();
+    }
+  });
 });
 
 // ============================================================

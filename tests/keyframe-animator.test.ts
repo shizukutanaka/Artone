@@ -5,7 +5,7 @@
  * getValue() の補間精度を検証。
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { KeyframeAnimator, type EasingType } from '../animation/keyframe-animator';
 
 // ============================================================
@@ -227,5 +227,38 @@ describe('Edge cases', () => {
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('test').id;
     expect(anim.getValue(id, 'nonexistent', 0.5)).toBe(0);
+  });
+});
+
+// ─── subscribe / notify ───────────────────────────────────────────────────────
+
+describe('KeyframeAnimator — subscribe / notify', () => {
+  it('listener is called when a keyframe is added', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('bounce').id;
+    const listener = vi.fn();
+    anim.subscribe(listener);
+    anim.addKeyframe(id, 'x', { time: 0, value: 0, easing: 'linear' });
+    expect(listener).toHaveBeenCalled();
+  });
+
+  it('unsubscribe stops notifications', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('test').id;
+    const listener = vi.fn();
+    const unsub = anim.subscribe(listener);
+    unsub();
+    anim.addKeyframe(id, 'x', { time: 0, value: 10, easing: 'linear' });
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('listener is called when a keyframe is deleted', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('test').id;
+    const kf = anim.addKeyframe(id, 'y', { time: 0, value: 5, easing: 'easeIn' });
+    const listener = vi.fn();
+    anim.subscribe(listener);
+    anim.deleteKeyframe(id, 'y', kf.id);
+    expect(listener).toHaveBeenCalled();
   });
 });

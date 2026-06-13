@@ -537,3 +537,75 @@ describe('AutoQualityAdjuster — warning and optimal branches', () => {
     expect(q).toBeGreaterThanOrEqual(0.5);
   });
 });
+
+// ============================================================
+// PerformanceMonitor — analyzeBottleneck() missing branches
+// ============================================================
+
+describe('PerformanceMonitor — analyzeBottleneck() memory branch', () => {
+  it('returns "memory" when a memory leak is detected', () => {
+    const monitor = new PerformanceMonitor();
+    const mp = (monitor as unknown as { memoryProfiler: MemoryProfiler }).memoryProfiler;
+    vi.spyOn(mp, 'detectLeaks').mockReturnValue(true);
+    const result = monitor.analyzeBottleneck();
+    expect(result.bottleneck).toBe('memory');
+    expect(result.suggestions.length).toBeGreaterThan(0);
+    vi.restoreAllMocks();
+  });
+});
+
+describe('PerformanceMonitor — analyzeBottleneck() gc branch', () => {
+  it('returns "gc" when memory is growing and frametime variance is high', () => {
+    const monitor = new PerformanceMonitor();
+    const mp = (monitor as unknown as { memoryProfiler: MemoryProfiler }).memoryProfiler;
+    vi.spyOn(mp, 'detectLeaks').mockReturnValue(false);
+    vi.spyOn(mp, 'getMemoryTrend').mockReturnValue('growing');
+    // Alternating very short / very long frametimes → high variance
+    let fakeNow = 0;
+    vi.spyOn(globalThis.performance, 'now').mockImplementation(() => fakeNow);
+    try {
+      for (let i = 0; i < 30; i++) {
+        fakeNow = i * 100;
+        monitor.beginFrame();
+        fakeNow = i * 100 + (i % 2 === 0 ? 1 : 99);
+        monitor.endFrame();
+      }
+      const result = monitor.analyzeBottleneck();
+      expect(result.bottleneck).toBe('gc');
+      expect(result.suggestions.length).toBeGreaterThan(0);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
+
+describe('PerformanceMonitor — analyzeBottleneck() gpu branch', () => {
+  it('returns "gpu" when gpuTime exceeds 0.8× frametime', () => {
+    const monitor = new PerformanceMonitor();
+    let fakeNow = 0;
+    vi.spyOn(globalThis.performance, 'now').mockImplementation(() => fakeNow);
+    try {
+      // Normal frametimes (~16ms each)
+      for (let i = 0; i < 20; i++) {
+        fakeNow = i * 16;
+        monitor.beginFrame();
+        fakeNow = i * 16 + 16;
+        monitor.endFrame();
+      }
+      // Inject high GPU time (>0.8 × 16 = 12.8ms)
+      (monitor as unknown as { lastGPUTime: number }).lastGPUTime = 14;
+      const result = monitor.analyzeBottleneck();
+      expect(result.bottleneck).toBe('gpu');
+      expect(result.suggestions.length).toBeGreaterThan(0);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
+
+describe('PerformanceMonitor — dispose()', () => {
+  it('calls gpuProfiler.dispose() without throwing', () => {
+    const monitor = new PerformanceMonitor();
+    expect(() => monitor.dispose()).not.toThrow();
+  });
+});

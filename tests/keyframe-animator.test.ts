@@ -356,3 +356,87 @@ describe('getKeyframesInRange', () => {
     expect(properties).toContain('y');
   });
 });
+
+// ============================================================
+// pasteKeyframes
+// ============================================================
+
+describe('KeyframeAnimator — pasteKeyframes', () => {
+  let anim: KeyframeAnimator;
+  let id: string;
+
+  beforeEach(() => {
+    anim = new KeyframeAnimator();
+    id = anim.createAnimation('paste-test').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addKeyframe(id, 'x', 0.0, 10, 'linear');
+    anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
+    anim.addKeyframe(id, 'x', 1.0, 100, 'linear');
+  });
+
+  it('pastes keyframes at target time with correct offset', () => {
+    const copied = anim.copyKeyframes(id, 'x', 0.0, 1.0);
+    const countBefore = anim.getKeyframesInRange(id, 0.0, 5.0).length;
+    anim.pasteKeyframes(id, 'x', copied, 2.0);
+    const countAfter = anim.getKeyframesInRange(id, 0.0, 5.0).length;
+    expect(countAfter).toBeGreaterThan(countBefore);
+  });
+
+  it('paste with empty keyframes array is a no-op', () => {
+    const countBefore = anim.getKeyframesInRange(id, 0.0, 5.0).length;
+    anim.pasteKeyframes(id, 'x', [], 2.0);
+    expect(anim.getKeyframesInRange(id, 0.0, 5.0).length).toBe(countBefore);
+  });
+
+  it('pasted keyframes start at targetTime', () => {
+    const copied = anim.copyKeyframes(id, 'x', 0.0, 0.5);
+    anim.pasteKeyframes(id, 'x', copied, 3.0);
+    const pasted = anim.getKeyframesInRange(id, 3.0, 4.0);
+    expect(pasted.length).toBeGreaterThan(0);
+    expect(pasted[0].keyframe.time).toBeCloseTo(3.0, 2);
+  });
+});
+
+// ============================================================
+// reverseKeyframes
+// ============================================================
+
+describe('KeyframeAnimator — reverseKeyframes', () => {
+  let anim: KeyframeAnimator;
+  let id: string;
+
+  beforeEach(() => {
+    anim = new KeyframeAnimator();
+    id = anim.createAnimation('rev-test').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addKeyframe(id, 'x', 0.0, 10, 'linear');
+    anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
+    anim.addKeyframe(id, 'x', 1.0, 90, 'linear');
+  });
+
+  it('reverses values while keeping times unchanged', () => {
+    anim.reverseKeyframes(id, 'x');
+    // After reverse: times [0, 0.5, 1.0] with values [90, 50, 10]
+    expect(anim.getValue(id, 'x', 0.0)).toBeCloseTo(90, 1);
+    expect(anim.getValue(id, 'x', 1.0)).toBeCloseTo(10, 1);
+  });
+
+  it('notifies listeners after reversing', () => {
+    const listener = vi.fn();
+    anim.subscribe(listener);
+    anim.reverseKeyframes(id, 'x');
+    expect(listener).toHaveBeenCalled();
+  });
+
+  it('is a no-op for unknown animation', () => {
+    expect(() => anim.reverseKeyframes('nonexistent', 'x')).not.toThrow();
+  });
+
+  it('is a no-op when fewer than 2 keyframes exist', () => {
+    const id2 = anim.createAnimation('single').id;
+    anim.addProperty(id2, 'y', 0);
+    anim.addKeyframe(id2, 'y', 0.5, 42, 'linear');
+    expect(() => anim.reverseKeyframes(id2, 'y')).not.toThrow();
+    expect(anim.getValue(id2, 'y', 0.5)).toBeCloseTo(42, 1);
+  });
+});

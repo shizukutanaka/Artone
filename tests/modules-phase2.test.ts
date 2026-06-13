@@ -125,7 +125,7 @@ describe('MemoryProfiler', () => {
 // I18nManager
 // ============================================================
 
-import { I18nManager, type LocaleCode } from '../i18n/i18n-manager';
+import { I18nManager, i18n as getI18n, type LocaleCode } from '../i18n/i18n-manager';
 import enJson from '../i18n/en.json';
 import jaJson from '../i18n/ja.json';
 
@@ -215,6 +215,35 @@ describe('I18nManager', () => {
     // Find a key with {{param}} style, or test directly
     const result = i18n.t('app.name', { name: 'Test' });
     expect(typeof result).toBe('string');
+  });
+
+  it('parsePluralRules correctly parses one/other categories', () => {
+    const i18n = makeI18n('en');
+    type I18nPrivate = {
+      parsePluralRules(rules: string): Map<string, string>;
+      selectPlural(count: number, rules: string, locale: LocaleCode): string;
+    };
+    const priv = i18n as unknown as I18nPrivate;
+    const map = priv.parsePluralRules('one {# item} other {# items}');
+    expect(map.get('one')).toBe('# item');
+    expect(map.get('other')).toBe('# items');
+  });
+
+  it('selectPlural uses parsePluralRules and substitutes count', () => {
+    const i18n = makeI18n('en');
+    type I18nPrivate = { selectPlural(count: number, rules: string, locale: LocaleCode): string };
+    const priv = i18n as unknown as I18nPrivate;
+    const oneResult = priv.selectPlural(1, 'one {# item} other {# items}', 'en');
+    const manyResult = priv.selectPlural(5, 'one {# item} other {# items}', 'en');
+    expect(oneResult).toContain('1');
+    expect(manyResult).toContain('5');
+  });
+});
+
+describe('i18n() — throws when not initialized', () => {
+  it('throws if setupI18n() has not been called in this module scope', () => {
+    // In this test file, setupI18n() is never called → globalInstance is null
+    expect(() => getI18n()).toThrow('I18n not initialized');
   });
 });
 

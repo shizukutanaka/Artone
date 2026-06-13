@@ -789,3 +789,65 @@ describe('HistoryManager — clear() with mocked IndexedDB', () => {
     expect(history.canUndo()).toBe(false);
   });
 });
+
+// ─── autoPersist paths ────────────────────────────────────────────────────────
+
+describe('HistoryManager — autoPersist execute() path', () => {
+  it('execute() takes the autoPersist branch (saveToDB no-op when db=null)', () => {
+    // autoPersist: true triggers this.saveToDB() in execute()
+    // saveToDB() early-returns when this.db is null, so no IDB needed.
+    const h = new HistoryManager({ autoPersist: true, maxCommands: 100 });
+    expect(() => h.execute(makeCmd('auto-exec', () => {}, () => {}))).not.toThrow();
+    expect(h.getStats().count).toBe(1);
+  });
+});
+
+describe('HistoryManager — autoPersist endGroup() path', () => {
+  it('endGroup() takes the autoPersist branch (saveToDB no-op when db=null)', () => {
+    const h = new HistoryManager({ autoPersist: true, maxCommands: 100 });
+    h.beginGroup();
+    h.execute(makeCmd('auto-group', () => {}, () => {}));
+    expect(() => h.endGroup('auto-group-op')).not.toThrow();
+    expect(h.getStats().count).toBe(1);
+  });
+});
+
+// ─── merge path (execute replaces last command via canMergeWith/merge) ─────────
+
+describe('HistoryManager — execute() merge path', () => {
+  it('merges a mergeable command into the previous one (no new history entry)', () => {
+    const h = new HistoryManager({ autoPersist: false });
+    let v = 0;
+
+    // First command: not mergeable by default
+    const first: Command = {
+      id: 'm1', timestamp: Date.now(), description: 'set 1', type: 'merge.test',
+      execute() { v = 1; }, undo() { v = 0; }, redo() { v = 1; },
+      getDelta() { return { before: 0, after: 1, path: ['v'] }; },
+      canMergeWith(other: Command) { return other.type === 'merge.test'; },
+      merge(other: Command): Command {
+        // Return a merged command that applies the other's value
+        const after = other.getDelta().after as number;
+        return {
+          id: 'merged', timestamp: Date.now(), description: `set ${after}`, type: 'merge.test',
+          execute() { v = after; }, undo() { v = 0; }, redo() { v = after; },
+          getDelta() { return { before: 0, after, path: ['v'] }; },
+        };
+      },
+    };
+    h.execute(first);
+    expect(h.getStats().count).toBe(1);
+
+    // Second command merges into the first
+    const second: Command = {
+      id: 'm2', timestamp: Date.now(), description: 'set 2', type: 'merge.test',
+      execute() { v = 2; }, undo() { v = 1; }, redo() { v = 2; },
+      getDelta() { return { before: 1, after: 2, path: ['v'] }; },
+    };
+    h.execute(second);
+
+    // Merge replaces in place → still 1 command, value reflects merged execute()
+    expect(h.getStats().count).toBe(1);
+    expect(v).toBe(2);
+  });
+});

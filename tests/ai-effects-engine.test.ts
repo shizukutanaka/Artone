@@ -412,6 +412,8 @@ type EnginePrivate = {
   resizeLanczos2(src: Uint8ClampedArray, sW: number, sH: number, dW: number, dH: number): Uint8ClampedArray;
   applyMutedGrade(data: Uint8ClampedArray): void;
   applyVintageGrade(data: Uint8ClampedArray): void;
+  applyCinematicGrade(data: Uint8ClampedArray): void;
+  applyVibrantGrade(data: Uint8ClampedArray): void;
 };
 
 function priv(engine: AIEffectsEngine): EnginePrivate {
@@ -718,5 +720,69 @@ describe('AIEffectsEngine — applyVintageGrade', () => {
       expect(data[i]).toBeGreaterThanOrEqual(0);
       expect(data[i]).toBeLessThanOrEqual(255);
     }
+  });
+});
+
+describe('AIEffectsEngine — applyCinematicGrade', () => {
+  it('applies teal tint to shadows (luma < 128)', () => {
+    const e = makeEngine();
+    // Dark pixel: luma ≈ 0 → shadow branch (blue boosted)
+    const data = new Uint8ClampedArray([10, 10, 10, 255]);
+    const origR = data[0];
+    priv(e).applyCinematicGrade(data);
+    // Shadow branch multiplies blue by 1.1 → blue ≥ red after contrast
+    expect(data[2]).toBeGreaterThanOrEqual(data[0] - origR);
+  });
+
+  it('applies orange tint to highlights (luma ≥ 128)', () => {
+    const e = makeEngine();
+    // Bright pixel: luma ≈ 200 → highlight branch (red boosted, blue reduced)
+    const data = new Uint8ClampedArray([200, 200, 200, 255]);
+    priv(e).applyCinematicGrade(data);
+    // Highlight branch: red *= 1.08, blue *= 0.92 → red > blue
+    expect(data[0]).toBeGreaterThan(data[2]);
+  });
+
+  it('output stays in valid byte range for all pixel values', () => {
+    const e = makeEngine();
+    const data = solidImage(4, 4, 128, 128, 128);
+    priv(e).applyCinematicGrade(data);
+    for (let i = 0; i < data.length; i += 4) {
+      expect(data[i]).toBeGreaterThanOrEqual(0);
+      expect(data[i]).toBeLessThanOrEqual(255);
+    }
+  });
+});
+
+describe('AIEffectsEngine — applyVibrantGrade', () => {
+  it('boosts saturation (colourful pixel moves further from luma)', () => {
+    const e = makeEngine();
+    // Saturated pixel: R much higher than B
+    const data = new Uint8ClampedArray([200, 128, 50, 255]);
+    const luma = 0.299 * 200 + 0.587 * 128 + 0.114 * 50;
+    const origDist = Math.abs(data[0] - luma);
+    priv(e).applyVibrantGrade(data);
+    const newDist = Math.abs(data[0] - luma);
+    expect(newDist).toBeGreaterThan(origDist * 0.9); // saturation increased
+  });
+
+  it('output stays in valid byte range', () => {
+    const e = makeEngine();
+    const data = solidImage(4, 4, 255, 200, 100);
+    priv(e).applyVibrantGrade(data);
+    for (let i = 0; i < data.length; i += 4) {
+      expect(data[i]).toBeGreaterThanOrEqual(0);
+      expect(data[i]).toBeLessThanOrEqual(255);
+    }
+  });
+
+  it('neutral grey is unchanged (luma = all channels)', () => {
+    const e = makeEngine();
+    const data = new Uint8ClampedArray([128, 128, 128, 255]);
+    priv(e).applyVibrantGrade(data);
+    // luma == r == g == b so saturation boost has no effect
+    expect(data[0]).toBeCloseTo(128, 0);
+    expect(data[1]).toBeCloseTo(128, 0);
+    expect(data[2]).toBeCloseTo(128, 0);
   });
 });

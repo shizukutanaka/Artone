@@ -2,7 +2,7 @@
  * OTIO 互換層のテスト
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { otio, type ArtoneTimeline, type OTIOImportLoss, type OTIOImportResult } from '../interchange/otio';
 import { interchange } from '../interchange/legacy-formats';
 import { sampleTimeline } from './fixtures/timelines';
@@ -490,6 +490,18 @@ describe('interchange/utils — uuid', () => {
 
   it('returns unique values', () => {
     expect(uuid()).not.toBe(uuid());
+  });
+});
+
+describe('interchange/utils — uuid fallback (no crypto.randomUUID)', () => {
+  it('falls back to Math.random UUID when crypto.randomUUID is unavailable', () => {
+    vi.stubGlobal('crypto', {});
+    try {
+      const id = uuid();
+      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

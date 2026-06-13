@@ -454,3 +454,62 @@ describe('MagneticTimeline — subscribe / unsubscribe', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+// ─── stepFrame ───────────────────────────────────────────────
+
+describe('MagneticTimeline — stepFrame', () => {
+  let tl: MagneticTimeline;
+  beforeEach(() => { tl = new MagneticTimeline(); });
+
+  it('stepFrame(true) advances playhead by 1/30 second', () => {
+    tl.setPlayhead(0);
+    tl.stepFrame(true);
+    expect(tl.getState().playhead).toBeCloseTo(1 / 30, 5);
+  });
+
+  it('stepFrame(false) moves playhead back by 1/30 second', () => {
+    tl.setPlayhead(1.0);
+    tl.stepFrame(false);
+    expect(tl.getState().playhead).toBeCloseTo(1.0 - 1 / 30, 5);
+  });
+
+  it('stepFrame(false) clamps to 0 at start of timeline', () => {
+    tl.setPlayhead(0);
+    tl.stepFrame(false);
+    expect(tl.getState().playhead).toBe(0);
+  });
+});
+
+// ─── play / pause / stopPlayback ────────────────────────────
+
+describe('MagneticTimeline — play / pause', () => {
+  let tl: MagneticTimeline;
+  beforeEach(() => { tl = new MagneticTimeline(); });
+
+  it('pause() stops playback when interval is active', () => {
+    vi.useFakeTimers();
+    try {
+      tl.play();
+      tl.pause(); // calls stopPlayback() with active interval
+      // Advance fake time — playhead should NOT move after pause
+      const headBefore = tl.getState().playhead;
+      vi.advanceTimersByTime(500);
+      expect(tl.getState().playhead).toBe(headBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('togglePlayPause toggles between play and pause', () => {
+    vi.useFakeTimers();
+    try {
+      tl.togglePlayPause(); // play
+      tl.togglePlayPause(); // pause
+      const head = tl.getState().playhead;
+      vi.advanceTimersByTime(500);
+      expect(tl.getState().playhead).toBe(head);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

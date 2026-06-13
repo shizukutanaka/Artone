@@ -1,9 +1,10 @@
 /**
- * Render backend テスト — FrameCache (3層) + WebGLFallbackRenderer
+ * Render backend テスト — FrameCache (3層) + WebGLFallbackRenderer + RenderBackend
  *
  * arXiv/業界知見ベースの新規モジュールを検証:
  * - FrameCache: 3層昇降格, LRU eviction, sink 保持, hit rate
  * - WebGLFallbackRenderer: 初期化, テクスチャ管理
+ * - RenderBackend: facade (webgl2 stats, cache, renderLayers)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -167,5 +168,144 @@ describe('WebGLFallbackRenderer', () => {
   it('clearCache does not throw when uninitialized', () => {
     const renderer = new WebGLFallbackRenderer();
     expect(() => renderer.clearCache()).not.toThrow();
+  });
+});
+
+// ============================================================
+// RenderBackend — facade (WebGPU → WebGL2 フォールバック)
+// ============================================================
+
+import { RenderBackend, type ActiveBackend } from '../render/render-backend';
+
+type RBPrivate = {
+  webgl: WebGLFallbackRenderer | null;
+  webgpu: null;
+  active: ActiveBackend;
+};
+
+describe('RenderBackend — construction', () => {
+  it('constructs without throwing', () => {
+    expect(() => new RenderBackend()).not.toThrow();
+  });
+
+  it('initial backend is none', () => {
+    const rb = new RenderBackend();
+    expect(rb.getActiveBackend()).toBe('none');
+  });
+});
+
+describe('RenderBackend — getStats (none backend)', () => {
+  it('fps and frameTime are 0 when no renderer is active', () => {
+    const rb = new RenderBackend();
+    const stats = rb.getStats();
+    expect(stats.backend).toBe('none');
+    expect(stats.fps).toBe(0);
+    expect(stats.frameTime).toBe(0);
+    expect(stats.cache).toBeDefined();
+  });
+});
+
+describe('RenderBackend — getStats (webgl2 branch)', () => {
+  it('delegates to WebGLFallbackRenderer.getStats() when active=webgl2', () => {
+    const rb = new RenderBackend();
+    const priv = rb as unknown as RBPrivate;
+    const renderer = new WebGLFallbackRenderer();
+    priv.webgl = renderer;
+    priv.active = 'webgl2';
+
+    const stats = rb.getStats();
+    expect(stats.backend).toBe('webgl2');
+    expect(typeof stats.fps).toBe('number');
+    expect(typeof stats.frameTime).toBe('number');
+  });
+});
+
+describe('RenderBackend — frame cache', () => {
+  let rb: RenderBackend;
+  beforeEach(() => { rb = new RenderBackend(); });
+
+  it('getCachedFrame returns null for uncached frame', () => {
+    expect(rb.getCachedFrame(99)).toBeNull();
+  });
+
+  it('cacheFrame / getCachedFrame round-trip', () => {
+    const bmp = makeBitmap();
+    rb.cacheFrame(7, bmp, 512);
+    expect(rb.getCachedFrame(7)).toBe(bmp);
+  });
+
+  it('getPrefetchTargets returns non-negative frame indices', () => {
+    const targets = rb.getPrefetchTargets(10, 5);
+    expect(Array.isArray(targets)).toBe(true);
+    expect(targets.every((t) => t >= 0)).toBe(true);
+  });
+
+  it('clearCache empties the frame cache', () => {
+    const bmp = makeBitmap();
+    rb.cacheFrame(3, bmp, 512);
+    rb.clearCache();
+    expect(rb.getCachedFrame(3)).toBeNull();
+  });
+});
+
+describe('RenderBackend — clearCache calls webgl.clearCache()', () => {
+  it('calls webgl.clearCache() when webgl renderer is set', () => {
+    const rb = new RenderBackend();
+    const priv = rb as unknown as RBPrivate;
+    const renderer = new WebGLFallbackRenderer();
+    const spy = vi.spyOn(renderer, 'clearCache');
+    priv.webgl = renderer;
+    rb.clearCache();
+    expect(spy).toHaveBeenCalled();
+  });
+});
+
+describe('RenderBackend — renderLayers', () => {
+  it('resolves without error in none mode', async () => {
+    const rb = new RenderBackend();
+    await expect(rb.renderLayers([])).resolves.toBeUndefined();
+  });
+
+  it('calls webgl.renderFrame() when active=webgl2', async () => {
+    const rb = new RenderBackend();
+    const priv = rb as unknown as RBPrivate;
+    const renderer = new WebGLFallbackRenderer();
+    const spy = vi.spyOn(renderer, 'renderFrame').mockImplementation(() => {});
+    priv.webgl = renderer;
+    priv.active = 'webgl2';
+    await rb.renderLayers([]);
+    expect(spy).toHaveBeenCalled();
+  });
+});
+
+describe('RenderBackend — bundleCache', () => {
+  it('getBundleStats returns an object', () => {
+    const rb = new RenderBackend();
+    expect(rb.getBundleStats()).toBeDefined();
+  });
+
+  it('invalidateBundles does not throw', () => {
+    const rb = new RenderBackend();
+    expect(() => rb.invalidateBundles()).not.toThrow();
+  });
+});
+
+describe('RenderBackend — destroy', () => {
+  it('resets active to none', () => {
+    const rb = new RenderBackend();
+    const priv = rb as unknown as RBPrivate;
+    priv.active = 'webgl2';
+    rb.destroy();
+    expect(rb.getActiveBackend()).toBe('none');
+  });
+
+  it('calls webgl.destroy() when webgl renderer is set', () => {
+    const rb = new RenderBackend();
+    const priv = rb as unknown as RBPrivate;
+    const renderer = new WebGLFallbackRenderer();
+    const spy = vi.spyOn(renderer, 'destroy');
+    priv.webgl = renderer;
+    rb.destroy();
+    expect(spy).toHaveBeenCalled();
   });
 });

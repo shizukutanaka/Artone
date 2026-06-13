@@ -2,7 +2,7 @@
  * app/utils.ts テスト — 純粋関数なので全ケースが決定論的
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   safeStorageGet, safeStorageSet, safeStorageRemove,
   safeJsonParse,
@@ -108,4 +108,26 @@ describe('formatTimecode', () => {
   it('one minute', () => expect(formatTimecode(60, 30)).toBe('01:00:00'));
   it('one hour', () => expect(formatTimecode(3600, 30)).toBe('60:00:00'));
   it('with frames', () => expect(formatTimecode(1.5, 30)).toBe('00:01:15'));
+});
+
+describe('uuid — fallback path (no crypto.randomUUID)', () => {
+  it('produces a valid UUID via Math.random when crypto.randomUUID is absent', () => {
+    vi.stubGlobal('crypto', {});
+    try {
+      const id = uuid();
+      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('safeStorageSet — throw path', () => {
+  it('returns false when localStorage.setItem throws', () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    expect(safeStorageSet('__throw_test__', 'x')).toBe(false);
+    spy.mockRestore();
+  });
 });

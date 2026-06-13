@@ -600,3 +600,192 @@ describe('CommandFactory.audioVolume', () => {
     expect(clip.audioVolume).toBeCloseTo(1.0);
   });
 });
+
+// ─── HistoryPanelUI ───────────────────────────────────────────────────────────
+
+import { HistoryPanelUI } from '../undo/history-manager';
+
+describe('HistoryPanelUI()', () => {
+  let history: HistoryManager;
+
+  beforeEach(() => {
+    history = new HistoryManager({ autoPersist: false });
+  });
+
+  it('returns a non-empty HTML string', () => {
+    const html = HistoryPanelUI({ history });
+    expect(typeof html).toBe('string');
+    expect(html.length).toBeGreaterThan(0);
+    expect(html).toContain('history-panel');
+  });
+
+  it('shows 0 / 0 header counts when history is empty', () => {
+    const html = HistoryPanelUI({ history });
+    expect(html).toContain('0 / 0');
+  });
+
+  it('renders one history item per executed command', () => {
+    history.execute(makeCmd('alpha', () => {}, () => {}));
+    history.execute(makeCmd('beta', () => {}, () => {}));
+    const html = HistoryPanelUI({ history });
+    expect(html).toContain('alpha');
+    expect(html).toContain('beta');
+  });
+
+  it('shows undo/redo buttons (disabled when nothing to undo/redo)', () => {
+    const html = HistoryPanelUI({ history });
+    expect(html).toContain('Undo');
+    expect(html).toContain('Redo');
+    expect(html).toContain('disabled');
+  });
+
+  it('undo button not disabled after executing a command', () => {
+    history.execute(makeCmd('x', () => {}, () => {}));
+    const html = HistoryPanelUI({ history });
+    // canUndo() is true — the undo button should NOT have disabled attribute
+    const undoButtonBlock = html.match(/<button[^>]*Undo[^<]*<\/button>/s)?.[0] ?? '';
+    expect(undoButtonBlock).not.toContain('disabled');
+  });
+
+  it('includes type icon for clip.move command', () => {
+    const cmd: Command = {
+      id: 'move1', timestamp: Date.now(), description: 'Move', type: 'clip.move',
+      execute() {}, undo() {}, redo() {},
+      getDelta() { return { before: null, after: null, path: [] }; },
+    };
+    history.execute(cmd);
+    const html = HistoryPanelUI({ history });
+    expect(html).toContain('↔'); // getTypeIcon('clip.move')
+  });
+
+  it('includes type icon for clip.delete command', () => {
+    const cmd: Command = {
+      id: 'del1', timestamp: Date.now(), description: 'Delete', type: 'clip.delete',
+      execute() {}, undo() {}, redo() {},
+      getDelta() { return { before: null, after: null, path: [] }; },
+    };
+    history.execute(cmd);
+    const html = HistoryPanelUI({ history });
+    expect(html).toContain('×'); // getTypeIcon('clip.delete')
+  });
+
+  it('includes fallback icon for unknown type', () => {
+    const cmd: Command = {
+      id: 'unk1', timestamp: Date.now(), description: 'Unknown', type: 'unknown.op',
+      execute() {}, undo() {}, redo() {},
+      getDelta() { return { before: null, after: null, path: [] }; },
+    };
+    history.execute(cmd);
+    const html = HistoryPanelUI({ history });
+    expect(html).toContain('•'); // fallback icon
+  });
+
+  it('includes timestamp formatted as "just now" for recent commands', () => {
+    history.execute(makeCmd('recent', () => {}, () => {}));
+    const html = HistoryPanelUI({ history });
+    expect(html).toContain('just now');
+  });
+});
+
+describe('HistoryPanelUI() — formatTime edge cases', () => {
+  it('shows "Xm ago" for commands 2 minutes old', () => {
+    const history = new HistoryManager({ autoPersist: false });
+    const cmd: Command = {
+      id: 'old', timestamp: Date.now() - 2 * 60 * 1000, description: 'Old op', type: 'clip.move',
+      execute() {}, undo() {}, redo() {},
+      getDelta() { return { before: null, after: null, path: [] }; },
+    };
+    history.execute(cmd);
+    const html = HistoryPanelUI({ history });
+    expect(html).toContain('m ago');
+  });
+
+  it('shows "Xh ago" for commands 2 hours old', () => {
+    const history = new HistoryManager({ autoPersist: false });
+    const cmd: Command = {
+      id: 'older', timestamp: Date.now() - 2 * 3600 * 1000, description: 'Older op', type: 'clip.add',
+      execute() {}, undo() {}, redo() {},
+      getDelta() { return { before: null, after: null, path: [] }; },
+    };
+    history.execute(cmd);
+    const html = HistoryPanelUI({ history });
+    expect(html).toContain('h ago');
+  });
+
+  it('shows localized time for commands older than 24 hours', () => {
+    const history = new HistoryManager({ autoPersist: false });
+    const cmd: Command = {
+      id: 'oldest', timestamp: Date.now() - 25 * 3600 * 1000, description: 'Yesterday op', type: 'color.grade',
+      execute() {}, undo() {}, redo() {},
+      getDelta() { return { before: null, after: null, path: [] }; },
+    };
+    history.execute(cmd);
+    const html = HistoryPanelUI({ history });
+    // Should NOT show "just now" or "m ago" or "h ago"
+    expect(html).not.toContain('just now');
+    expect(html).not.toContain('m ago');
+    expect(html).not.toContain('h ago');
+  });
+});
+
+describe('HistoryManager — goToPosition forward (redo path)', () => {
+  it('goToPosition forwards to target via redo', () => {
+    const history = new HistoryManager({ autoPersist: false });
+    let v = 0;
+    const makeV = (n: number): Command => ({
+      id: `set_${n}`, timestamp: Date.now(), description: `set ${n}`, type: 'test',
+      execute() { v = n; }, undo() { v = n - 1; }, redo() { v = n; },
+      getDelta() { return { before: n - 1, after: n, path: [] }; },
+    });
+    history.execute(makeV(1));
+    history.execute(makeV(2));
+    history.execute(makeV(3));
+    history.goToPosition(0); // undo to pos 0
+    expect(v).toBe(1);
+    history.goToPosition(2); // redo forward to pos 2
+    expect(v).toBe(3);
+  });
+
+  it('goToPosition is no-op for out-of-range values', () => {
+    const history = new HistoryManager({ autoPersist: false });
+    history.execute(makeCmd('a', () => {}, () => {}));
+    expect(() => history.goToPosition(-2)).not.toThrow();
+    expect(() => history.goToPosition(999)).not.toThrow();
+  });
+});
+
+describe('HistoryManager — subscribe/unsubscribe', () => {
+  it('subscribe listener is called on execute', () => {
+    const history = new HistoryManager({ autoPersist: false });
+    const listener = vi.fn();
+    const unsub = history.subscribe(listener);
+    history.execute(makeCmd('sub-test', () => {}, () => {}));
+    expect(listener).toHaveBeenCalled();
+    const state = listener.mock.calls[0][0] as { position: number };
+    expect(state.position).toBe(0);
+    unsub();
+    // After unsubscribe, further executes should not call listener
+    history.execute(makeCmd('after-unsub', () => {}, () => {}));
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('HistoryManager — clear() with mocked IndexedDB', () => {
+  it('calls store.delete when db is set', () => {
+    const history = new HistoryManager({ autoPersist: false });
+    history.execute(makeCmd('a', () => {}, () => {}));
+
+    // Inject a mock IDBDatabase with transaction chain
+    const deleteRequest = { result: undefined };
+    const store = { delete: vi.fn().mockReturnValue(deleteRequest) };
+    const tx = { objectStore: vi.fn().mockReturnValue(store) };
+    const mockDb = { transaction: vi.fn().mockReturnValue(tx) };
+    (history as unknown as { db: unknown }).db = mockDb;
+
+    history.clear();
+
+    expect(mockDb.transaction).toHaveBeenCalledWith('history', 'readwrite');
+    expect(store.delete).toHaveBeenCalled();
+    expect(history.canUndo()).toBe(false);
+  });
+});

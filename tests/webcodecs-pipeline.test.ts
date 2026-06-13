@@ -329,6 +329,92 @@ describe('VideoPipeline — batch decode/encode completion & cleanup', () => {
 });
 
 // ============================================================
+// VideoPipeline — extractFrameAtTime (timestamp-based seeking)
+//
+// A fake decoder emits one frame per decoded chunk (optionally reordered to
+// model B-frame decode≠presentation order). These verify seeking is correct
+// for ranges that the previous frame-ordinal implementation got wrong:
+// sub-range clips not starting at frame 0, between-frame targets, and
+// reordered output.
+// ============================================================
+
+describe('VideoPipeline — extractFrameAtTime (timestamp seeking)', () => {
+  function configuredDecoder(): VideoPipeline {
+    const p = new VideoPipeline();
+    (p as unknown as { decoderConfig: unknown }).decoderConfig = { codec: 'avc1.42001E' };
+    return p;
+  }
+
+  const ck = (timestamp: number, type: 'key' | 'delta' = 'delta') =>
+    ({ type, timestamp }) as unknown as EncodedVideoChunk;
+
+  /** Fake decoder that emits a frame (timestamp + close spy) per decoded chunk. */
+  function makeSeekDecoder(instances: Array<{ state: string }>, reorder = false) {
+    return class {
+      state = 'unconfigured';
+      private init: FakeInit;
+      private decoded: Array<{ timestamp: number }> = [];
+      constructor(init: FakeInit) { this.init = init; instances.push(this); }
+      configure(): void { this.state = 'configured'; }
+      decode(chunk: { timestamp: number }): void { this.decoded.push(chunk); }
+      async flush(): Promise<void> {
+        const order = reorder ? [...this.decoded].reverse() : this.decoded;
+        for (const c of order) this.init.output({ timestamp: c.timestamp, close: vi.fn() });
+      }
+      close(): void { this.state = 'closed'; }
+    };
+  }
+
+  // A 2-second clip starting at t=10s — a sub-range NOT beginning at frame 0,
+  // the exact case the old frame-ordinal math returned null for.
+  const clip = () => [
+    ck(10_000_000, 'key'),
+    ck(10_033_000),
+    ck(10_066_000),
+    ck(10_100_000),
+  ];
+
+  it('returns the exact frame at the target timestamp on a sub-range clip', async () => {
+    const instances: Array<{ state: string }> = [];
+    vi.stubGlobal('VideoDecoder', makeSeekDecoder(instances));
+    const p = configuredDecoder();
+    const frame = await p.extractFrameAtTime(clip(), 10_066_000);
+    expect(frame?.timestamp).toBe(10_066_000);
+    expect(instances[0].state).toBe('closed'); // decoder released
+  });
+
+  it('returns the frame on screen (greatest ts <= target) for a between-frame target', async () => {
+    vi.stubGlobal('VideoDecoder', makeSeekDecoder([]));
+    const p = configuredDecoder();
+    const frame = await p.extractFrameAtTime(clip(), 10_080_000);
+    expect(frame?.timestamp).toBe(10_066_000);
+  });
+
+  it('selects correctly even when decode output is reordered (B-frames)', async () => {
+    vi.stubGlobal('VideoDecoder', makeSeekDecoder([], /* reorder */ true));
+    const p = configuredDecoder();
+    const frame = await p.extractFrameAtTime(clip(), 10_066_000);
+    expect(frame?.timestamp).toBe(10_066_000);
+  });
+
+  it('returns null when the target precedes all frames', async () => {
+    const instances: Array<{ state: string }> = [];
+    vi.stubGlobal('VideoDecoder', makeSeekDecoder(instances));
+    const p = configuredDecoder();
+    const frame = await p.extractFrameAtTime(clip(), 5_000_000);
+    expect(frame).toBeNull();
+    expect(instances[0].state).toBe('closed'); // still released, no leak
+  });
+
+  it('returns the last frame when target is at/after the end', async () => {
+    vi.stubGlobal('VideoDecoder', makeSeekDecoder([]));
+    const p = configuredDecoder();
+    const frame = await p.extractFrameAtTime(clip(), 999_000_000);
+    expect(frame?.timestamp).toBe(10_100_000);
+  });
+});
+
+// ============================================================
 // VideoPipeline — processors & stats
 // ============================================================
 

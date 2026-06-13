@@ -574,16 +574,31 @@ export class VideoPipeline {
   // Frame Extraction
   // ============================================================
 
+  /**
+   * Decode and return the frame displayed at `targetTime` (microseconds), or
+   * null when no frame at or before that time exists.
+   *
+   * Selection is by timestamp, not by frame ordinal. The previous version
+   * compared a chunk *array index* (`keyFrameIndex`, `frameCount`) against a
+   * frame number derived from time (`floor(targetTime * fps / 1e6)`) — two
+   * different coordinate systems that only coincided when `chunks` was the
+   * whole stream from frame 0, one chunk per frame, constant fps, and no
+   * B-frame reordering. Any sub-range, variable frame rate, mismatched `fps`,
+   * or B-frames returned null or the wrong frame. Timestamps put chunks,
+   * decoded frames, and the target on one axis, so seeking is correct for all
+   * of those cases — and `fps` is no longer needed.
+   */
   async extractFrameAtTime(
     chunks: EncodedVideoChunk[],
-    targetTime: number,
-    fps = 30
+    targetTime: number
   ): Promise<VideoFrame | null> {
     if (!this.decoderConfig) {
       throw new Error('Decoder not configured');
     }
+    const config = this.decoderConfig;
 
-    // Find nearest keyframe before target time
+    // Decoding must start at a keyframe; pick the latest one at or before the
+    // target so we decode as few frames as possible.
     let keyFrameIndex = 0;
     for (let i = chunks.length - 1; i >= 0; i--) {
       if (chunks[i].type === 'key' && chunks[i].timestamp <= targetTime) {
@@ -592,37 +607,38 @@ export class VideoPipeline {
       }
     }
 
-    // Decode from keyframe to target
-    const targetIndex = Math.floor(targetTime * fps / 1_000_000);
-    let targetFrame: VideoFrame | null = null;
+    // Keep the frame with the greatest timestamp <= target (the one on screen
+    // at targetTime) and close every other decoded frame. Tracking by
+    // timestamp is robust to decode/presentation reordering (B-frames).
+    let best: VideoFrame | null = null;
+    const decoder = new VideoDecoder({
+      output: (frame) => {
+        this.stats.decodedFrames++;
+        if (frame.timestamp <= targetTime && (!best || frame.timestamp > best.timestamp)) {
+          if (best) best.close();
+          best = frame;
+        } else {
+          frame.close();
+        }
+      },
+      error: (e) => log.error('Decode error:', e)
+    });
 
-    return new Promise((resolve, reject) => {
-      let frameCount = keyFrameIndex;
-
-      const decoder = new VideoDecoder({
-        output: (frame) => {
-          if (frameCount === targetIndex) {
-            targetFrame = frame;
-          } else {
-            frame.close();
-          }
-          frameCount++;
-        },
-        error: reject
-      });
-
-      decoder.configure(this.decoderConfig!);
-
-      // Decode chunks from keyframe to target
-      for (let i = keyFrameIndex; i <= targetIndex && i < chunks.length; i++) {
+    try {
+      decoder.configure(config);
+      let i = keyFrameIndex;
+      for (; i < chunks.length && chunks[i].timestamp <= targetTime; i++) {
         decoder.decode(chunks[i]);
       }
+      // Feed one chunk past the target so a B-frame at the target can resolve
+      // its forward reference; that later frame is discarded by the selector.
+      if (i < chunks.length) decoder.decode(chunks[i]);
+      await decoder.flush();
+    } finally {
+      closeQuietly(decoder);
+    }
 
-      decoder.flush().then(() => {
-        decoder.close();
-        resolve(targetFrame);
-      });
-    });
+    return best;
   }
 
   // ============================================================
@@ -654,8 +670,7 @@ export class VideoPipeline {
       // target timestamp, so no keyframe lookup is needed here.
       const frame = await this.extractFrameAtTime(
         chunks,
-        chunks[chunkIndex].timestamp,
-        30
+        chunks[chunkIndex].timestamp
       );
 
       if (frame) {

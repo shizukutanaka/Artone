@@ -12,6 +12,7 @@ Artone v3 の全変更を記録。
 - **GIF 書き出しパス** (`export/export-engine.ts`): `export()` が GIF フォーマット時に WebCodecs をバイパスし `exportGif()` → `videoFrameToImageData()` → `encodeGif()` を呼ぶ専用ルートを追加。
 
 ### Fixed
+- **`core/webcodecs-pipeline.ts` `extractFrameAtTime` の座標系混在によるシーク不正を修正** (リスクゾーン core、看板機能「フレーム精度シーク」)。フレーム選択が「チャンク配列インデックス」(`keyFrameIndex`/`frameCount`) と「時刻由来のフレーム序数」(`floor(targetTime*fps/1e6)`) という別座標系を比較しており、両者が一致するのは「ストリーム全体を frame 0 から・1チャンク1フレーム・固定 fps・B フレーム並び替えなし」の理想ケースのみ。サブレンジ (クリップ)・可変フレームレート・`fps` 引数の不一致・B フレームでは null または誤フレームを返していた。タイムスタンプ基準の選択 (target 以下で最大 ts のフレームを採用、それ以外は close) に変更し、チャンク・復号フレーム・target を単一軸に統一。復号/再生順の並び替え (B フレーム) にも頑健。不要になった `fps` 引数を削除し唯一の呼び出し元 (`generateThumbnails`) を更新。サブレンジ/中間時刻/並び替え/範囲外を検証する 5 テスト追加。
 - **`core/webcodecs-pipeline.ts` バッチ復号/符号化のハング+コーデックリークを修正** (リスクゾーン core)。`decodeFrame(s)`/`encodeFrame(s)` が「出力数 == 入力数」で完了判定していたため、B フレーム並び替え・破損/ドロップ・エンコーダのチャンク統合などで出力数が入力数と異なると Promise が永久に解決されず (ハング)、`decoder/encoder.close()` も呼ばれずインスタンスがリーク。完了判定を WebCodecs の正規シグナルである `flush()` 完了に変更し、`closeQuietly()` で `finally` から必ずコーデックを解放 (エラー経路含む)。余剰 `VideoFrame` も close してリーク防止。WebCodecs 契約に忠実なフェイク (output/flush/close) で完了・解放を検証する 7 テストを追加 (旧実装ではタイムアウトで落ちる)。
 - `core/webcodecs-pipeline.ts`: `generateThumbnails` が後方走査で `keyFrameIndex` を算出していたが未使用の dead code だった (`extractFrameAtTime` が内部で同等のキーフレーム探索を実施済み) を除去。
 - `export/export-engine.ts`: GIF フォーマット判定が WebCodecs 音声エンコードパスに残存していた (到達不能な dead code) を除去。

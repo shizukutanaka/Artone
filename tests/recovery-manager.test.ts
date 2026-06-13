@@ -252,6 +252,34 @@ describe('RecoveryManager — enforceLimit', () => {
     // Newest (playhead 3) must be retained
     expect((snaps[0].data as RecoveryData).playhead).toBe(3);
   });
+
+  it('deletes snapshots older than maxAge (data-loss-critical purge path)', async () => {
+    // maxAge must straddle the two saves: larger than one enforceLimit() cycle
+    // (so the just-saved snapshot survives) yet smaller than the gap between
+    // saves (so the first ages out and is purged via deleteSnapshot()).
+    const mgr = makeManager({ maxAge: 40, maxSnapshots: 100 });
+    await mgr.init();
+    const first = await mgr.saveSnapshot('manual', 'p', 'P', makeData({ playhead: 1 }));
+    expect(first).not.toBeNull();
+    await new Promise(r => setTimeout(r, 150)); // age the first past maxAge
+    await mgr.saveSnapshot('manual', 'p', 'P', makeData({ playhead: 2 }));
+
+    const snaps = await mgr.getSnapshots();
+    // The aged-out first snapshot must be gone; the fresh one remains.
+    expect(snaps.some(s => s.id === first)).toBe(false);
+    expect(snaps.some(s => (s.data as RecoveryData).playhead === 2)).toBe(true);
+  });
+
+  it('retains snapshots within maxAge (no premature purge)', async () => {
+    const mgr = makeManager({ maxAge: 60_000, maxSnapshots: 100 });
+    await mgr.init();
+    const first = await mgr.saveSnapshot('manual', 'p', 'P', makeData({ playhead: 1 }));
+    await new Promise(r => setTimeout(r, 5));
+    await mgr.saveSnapshot('manual', 'p', 'P', makeData({ playhead: 2 }));
+    const snaps = await mgr.getSnapshots();
+    // Both are well within maxAge → first must survive.
+    expect(snaps.some(s => s.id === first)).toBe(true);
+  });
 });
 
 // ============================================================
@@ -373,5 +401,37 @@ describe('RecoveryDialogUI', () => {
     const html = RecoveryDialogUI({ snapshots: many, onRestore: () => {}, onDiscard: () => {} });
     const count = (html.match(/data-id=/g) || []).length;
     expect(count).toBe(10);
+  });
+
+  it('formatAge renders "min ago" for snapshots minutes old', () => {
+    const html = RecoveryDialogUI({
+      snapshots: [snap({ timestamp: Date.now() - 5 * 60_000 })],
+      onRestore: () => {}, onDiscard: () => {},
+    });
+    expect(html).toContain('min ago');
+  });
+
+  it('formatAge renders "hr ago" for snapshots hours old', () => {
+    const html = RecoveryDialogUI({
+      snapshots: [snap({ timestamp: Date.now() - 3 * 3_600_000 })],
+      onRestore: () => {}, onDiscard: () => {},
+    });
+    expect(html).toContain('hr ago');
+  });
+
+  it('formatAge renders "days ago" for snapshots days old', () => {
+    const html = RecoveryDialogUI({
+      snapshots: [snap({ timestamp: Date.now() - 2 * 86_400_000 })],
+      onRestore: () => {}, onDiscard: () => {},
+    });
+    expect(html).toContain('days ago');
+  });
+
+  it('formatAge renders "just now" for fresh snapshots', () => {
+    const html = RecoveryDialogUI({
+      snapshots: [snap({ timestamp: Date.now() })],
+      onRestore: () => {}, onDiscard: () => {},
+    });
+    expect(html).toContain('just now');
   });
 });

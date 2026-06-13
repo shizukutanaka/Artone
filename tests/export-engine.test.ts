@@ -238,6 +238,32 @@ describe('exportAudioWAV()', () => {
 // via white-box inspection of the fixed source.
 // ============================================================
 
+describe('ExportEngine — download()', () => {
+  it('creates and clicks an anchor element then revokes the object URL', () => {
+    const engine = new ExportEngine();
+    const createObjectURL = vi.fn(() => 'blob:mock-url');
+    const revokeObjectURL = vi.fn();
+    const clickFn = vi.fn();
+
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });
+
+    const anchor = { href: '', download: '', click: clickFn } as unknown as HTMLAnchorElement;
+    vi.spyOn(document, 'createElement').mockReturnValueOnce(anchor);
+
+    const blob = new Blob(['test'], { type: 'video/mp4' });
+    engine.download(blob, 'output.mp4');
+
+    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    expect(anchor.href).toBe('blob:mock-url');
+    expect(anchor.download).toBe('output.mp4');
+    expect(clickFn).toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+});
+
 describe('REGRESSION: encodeAudio planar layout', () => {
   it('planar layout fix: data[ch * length + i] not data[i * channels + ch]', async () => {
     // We cannot call private encodeAudio directly without a real AudioEncoder,

@@ -410,6 +410,8 @@ type EnginePrivate = {
   findFaceCandidates(d: Uint8ClampedArray, w: number, h: number): Array<{ x: number; y: number; w: number; h: number; density: number }>;
   lanczos2Kernel(x: number): number;
   resizeLanczos2(src: Uint8ClampedArray, sW: number, sH: number, dW: number, dH: number): Uint8ClampedArray;
+  applyMutedGrade(data: Uint8ClampedArray): void;
+  applyVintageGrade(data: Uint8ClampedArray): void;
 };
 
 function priv(engine: AIEffectsEngine): EnginePrivate {
@@ -645,6 +647,76 @@ describe('AIEffectsEngine — resizeLanczos2', () => {
       expect(dst[i * 4]).toBeCloseTo(200, -1);     // R ±16
       expect(dst[i * 4 + 1]).toBeCloseTo(100, -1); // G ±16
       expect(dst[i * 4 + 2]).toBeCloseTo(50, -1);  // B ±16
+    }
+  });
+});
+
+// ============================================================
+// Color grading private methods (muted, vintage)
+// ============================================================
+
+describe('AIEffectsEngine — applyMutedGrade', () => {
+  it('reduces saturation toward gray', () => {
+    const e = makeEngine();
+    const data = solidImage(1, 1, 200, 50, 50);
+    const before = [data[0], data[1], data[2]];
+    priv(e).applyMutedGrade(data);
+    // Saturation reduction: values should move closer to each other
+    const luma = 0.299 * before[0] + 0.587 * before[1] + 0.114 * before[2];
+    const diff = Math.abs(data[0] - luma) + Math.abs(data[1] - luma) + Math.abs(data[2] - luma);
+    const origDiff = Math.abs(before[0] - luma) + Math.abs(before[1] - luma) + Math.abs(before[2] - luma);
+    expect(diff).toBeLessThan(origDiff);
+  });
+
+  it('lifts shadows (increases all channels slightly)', () => {
+    const e = makeEngine();
+    // Very dark pixel — shadow lift should bring it up
+    const data = new Uint8ClampedArray([0, 0, 0, 255]);
+    priv(e).applyMutedGrade(data);
+    expect(data[0]).toBeGreaterThan(0);
+    expect(data[1]).toBeGreaterThan(0);
+    expect(data[2]).toBeGreaterThan(0);
+  });
+
+  it('output stays within valid byte range', () => {
+    const e = makeEngine();
+    const data = solidImage(4, 4, 255, 255, 255);
+    priv(e).applyMutedGrade(data);
+    for (let i = 0; i < data.length; i += 4) {
+      expect(data[i]).toBeGreaterThanOrEqual(0);
+      expect(data[i]).toBeLessThanOrEqual(255);
+    }
+  });
+});
+
+describe('AIEffectsEngine — applyVintageGrade', () => {
+  it('applies warm tint (boosts red, reduces blue)', () => {
+    const e = makeEngine();
+    const data = solidImage(1, 1, 100, 100, 100);
+    const origB = data[2];
+    priv(e).applyVintageGrade(data);
+    // Blue should be reduced relative to red
+    expect(data[0]).toBeGreaterThan(data[2]);
+    expect(data[2]).toBeLessThanOrEqual(origB + 10 + 20); // b*0.8 + 10 lift
+  });
+
+  it('fades blacks (dark pixel gets lifted)', () => {
+    const e = makeEngine();
+    const data = new Uint8ClampedArray([0, 0, 0, 255]);
+    priv(e).applyVintageGrade(data);
+    // All channels lifted
+    expect(data[0]).toBeGreaterThan(0);
+    expect(data[1]).toBeGreaterThan(0);
+    expect(data[2]).toBeGreaterThan(0);
+  });
+
+  it('output stays within valid byte range', () => {
+    const e = makeEngine();
+    const data = solidImage(4, 4, 255, 255, 255);
+    priv(e).applyVintageGrade(data);
+    for (let i = 0; i < data.length; i += 4) {
+      expect(data[i]).toBeGreaterThanOrEqual(0);
+      expect(data[i]).toBeLessThanOrEqual(255);
     }
   });
 });

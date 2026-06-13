@@ -100,4 +100,17 @@ export default [
       'max-params': ['warn', 4],
     },
   },
+  {
+    // Console output is intentional in the logger sink (it wraps console),
+    // CLI tools (bench/security report to stdout), and tests/e2e diagnostics.
+    files: [
+      'app/logger.ts',
+      'bench/**/*.{ts,tsx}',
+      'security/generate.ts',
+      'tests/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'no-console': 'off',
+    },
+  },
 ];

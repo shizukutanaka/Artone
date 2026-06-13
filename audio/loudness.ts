@@ -266,24 +266,82 @@ function loudnessRange(weightedChannels: Float32Array[], sampleRate: number): nu
 // True peak (4x oversampling approximation)
 // ============================================================
 
+/** True-peak 4x オーバーサンプリングの sinc 半幅 (タップ数の半分)。 */
+const TRUE_PEAK_HALF = 8;
+/** True-peak オーバーサンプリング係数 (BS.1770-4 Annex 2 は 4x を規定)。 */
+const TRUE_PEAK_OS = 4;
+
 /**
- * True Peak (dBTP) を 4x 線形オーバーサンプリングで近似する。
- * 注: BS.1770-4 Annex 2 は専用 FIR を規定。本実装は inter-sample peak を
- * 線形補間で近似 (サンプルピークより安全側だが規格 FIR より控えめ)。
+ * Hann 窓付き sinc のタップ重み。窓は [-halfWidth, halfWidth]。
+ * 線形補間と違い帯域制限補間は隣接サンプルの絶対値を超える inter-sample 値を
+ * 復元できる — これが true-peak の本質。
+ */
+function sincTap(x: number, halfWidth: number): number {
+  if (x === 0) return 1;
+  if (Math.abs(x) >= halfWidth) return 0;
+  const px = Math.PI * x;
+  const sinc = Math.sin(px) / px;
+  const hann = 0.5 * (1 + Math.cos((Math.PI * x) / halfWidth));
+  return sinc * hann;
+}
+
+/**
+ * 分数位相 (1/OS, 2/OS, …) ごとの正規化済みポリフェーズ FIR カーネルを生成。
+ * 単位 DC ゲインに正規化し、ホットループから三角関数を排除する。
+ */
+function buildTruePeakKernels(): Float32Array[] {
+  const taps = TRUE_PEAK_HALF * 2;
+  const kernels: Float32Array[] = [];
+  for (let s = 1; s < TRUE_PEAK_OS; s++) {
+    const frac = s / TRUE_PEAK_OS;
+    const ker = new Float32Array(taps);
+    let wsum = 0;
+    for (let t = 0; t < taps; t++) {
+      const k = t - TRUE_PEAK_HALF + 1; // k ∈ [-HALF+1, HALF]
+      const w = sincTap(k - frac, TRUE_PEAK_HALF);
+      ker[t] = w;
+      wsum += w;
+    }
+    for (let t = 0; t < taps; t++) ker[t] /= wsum;
+    kernels.push(ker);
+  }
+  return kernels;
+}
+
+/** 位相非依存なので一度だけ構築して再利用 (process() 外なので GC 問題なし)。 */
+const TRUE_PEAK_KERNELS = buildTruePeakKernels();
+
+/**
+ * True Peak (dBTP) を 4x 帯域制限 (windowed-sinc) オーバーサンプリングで近似する。
+ *
+ * BS.1770-4 Annex 2 は専用 FIR を規定。旧実装は線形補間を用いていたが、線形補間は
+ * 2 サンプル間で単調なため |a + (b-a)t| ≤ max(|a|,|b|) となり inter-sample peak を
+ * 一切検出できず true-peak がサンプルピークと常に一致していた。帯域制限補間に置換し
+ * サンプル間のオーバーシュートを実際に検出する。
  */
 function truePeakDbtp(channels: Float32Array[]): number {
-  const OS = 4;
+  const half = TRUE_PEAK_HALF;
+  const taps = half * 2;
   let peak = 0;
+
   for (const ch of channels) {
-    for (let i = 0; i < ch.length; i++) {
+    const n = ch.length;
+    // 整数位置 (サンプルピーク)。
+    for (let i = 0; i < n; i++) {
       const a = Math.abs(ch[i]);
       if (a > peak) peak = a;
-      if (i + 1 < ch.length) {
-        const next = ch[i + 1];
-        for (let s = 1; s < OS; s++) {
-          const interp = Math.abs(ch[i] + ((next - ch[i]) * s) / OS);
-          if (interp > peak) peak = interp;
+    }
+    // サンプル間の OS-1 個の分数位置。
+    for (let phase = 0; phase < TRUE_PEAK_KERNELS.length; phase++) {
+      const ker = TRUE_PEAK_KERNELS[phase];
+      for (let i = 0; i < n - 1; i++) {
+        let acc = 0;
+        for (let t = 0; t < taps; t++) {
+          const idx = i + (t - half + 1);
+          if (idx >= 0 && idx < n) acc += ch[idx] * ker[t];
         }
+        const v = acc < 0 ? -acc : acc;
+        if (v > peak) peak = v;
       }
     }
   }

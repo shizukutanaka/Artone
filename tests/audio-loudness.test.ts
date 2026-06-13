@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AudioEngine, LOUDNESS_TARGETS, type LoudnessReading } from '../audio/audio-engine';
+import { measureLoudness } from '../audio/loudness';
 
 /** テスト用 AudioBuffer モック (正弦波 or 一定振幅) */
 function makeBuffer(amplitude: number, samples = 48000, sampleRate = 48000): AudioBuffer {
@@ -77,6 +78,48 @@ describe('AudioEngine.analyzeLoudness', () => {
   it('range is non-negative', async () => {
     const r = await ae.analyzeLoudness(makeBuffer(0.5));
     expect(r.range).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('measureLoudness — true peak (inter-sample)', () => {
+  // A tone at fs/4 phased by π/4 lands every sample on ±0.707, so the sample
+  // peak is ≈ -3 dBFS while the continuous waveform crests at 1.0 (0 dBFS)
+  // exactly between samples. Linear oversampling (the old impl) is monotonic
+  // and can never see this; band-limited oversampling must.
+  function fsQuarterTone(n = 2048): Float32Array {
+    const ch = new Float32Array(n);
+    for (let i = 0; i < n; i++) ch[i] = Math.sin((Math.PI / 2) * i + Math.PI / 4);
+    return ch;
+  }
+
+  it('detects an inter-sample peak above the sample peak', () => {
+    const m = measureLoudness([fsQuarterTone()], 48000);
+    expect(m.samplePeak).toBeGreaterThan(-3.5);
+    expect(m.samplePeak).toBeLessThan(-2.5);            // ≈ -3.01 dBFS
+    expect(m.truePeak - m.samplePeak).toBeGreaterThan(2); // recovers the crest
+    expect(m.truePeak).toBeGreaterThan(-1.0);           // near 0 dBFS
+    expect(m.truePeak).toBeLessThan(0.5);               // without wild overshoot
+  });
+
+  it('true peak is never below the sample peak', () => {
+    const m = measureLoudness([fsQuarterTone()], 48000);
+    expect(m.truePeak).toBeGreaterThanOrEqual(m.samplePeak);
+  });
+
+  it('does not invent overshoot on a densely-sampled tone', () => {
+    // 440 Hz at 48 kHz: ~109 samples/cycle, so samples sit near the crest and
+    // there is little inter-sample peak to recover.
+    const n = 48000;
+    const ch = new Float32Array(n);
+    for (let i = 0; i < n; i++) ch[i] = 0.9 * Math.sin((2 * Math.PI * 440 * i) / 48000);
+    const m = measureLoudness([ch], 48000);
+    expect(m.truePeak).toBeGreaterThanOrEqual(m.samplePeak);
+    expect(m.truePeak - m.samplePeak).toBeLessThan(0.5);
+  });
+
+  it('returns -Infinity true peak for silence', () => {
+    const m = measureLoudness([new Float32Array(1024)], 48000);
+    expect(m.truePeak).toBe(-Infinity);
   });
 });
 

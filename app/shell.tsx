@@ -29,7 +29,77 @@ function tierFromLevel(level: ExperienceLevel): FeatureTier {
   return level === 'beginner' ? 'essential' : level === 'intermediate' ? 'standard' : 'pro';
 }
 
+type EngineActions = ReturnType<typeof useEngine>['actions'];
 
+/** Global keyboard shortcut dispatcher. Extracted to keep EditorUI complexity low. */
+function buildKeydownHandler(
+  actions: EngineActions,
+  setCmdOpen: React.Dispatch<React.SetStateAction<boolean>>,
+): (e: KeyboardEvent) => void {
+  return (e: KeyboardEvent) => {
+    const tag = (e.target as Element).tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key === 'k') {
+      e.preventDefault();
+      setCmdOpen((v) => !v);
+    } else if (e.key === ' ') {
+      e.preventDefault();
+      actions.togglePlayPause();
+    } else if (mod && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      actions.undo();
+    } else if (mod && e.key === 'z' && e.shiftKey) {
+      e.preventDefault();
+      actions.redo();
+    } else if (mod && e.key === 's') {
+      e.preventDefault();
+      actions.save();
+    }
+  };
+}
+
+/** Routes app.emit commands to UI state. Extracted to keep EditorUI complexity low. */
+function dispatchAppCommand(
+  name: string,
+  payload: unknown,
+  setActivePanel: React.Dispatch<React.SetStateAction<string | null>>,
+  importFiles: (files: File[]) => void,
+): void {
+  switch (name) {
+    case 'togglePanel':
+      setActivePanel((p) => (p === payload ? null : (payload as string)));
+      break;
+    case 'showExport':
+      setActivePanel('export');
+      break;
+    case 'showImport': {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = 'video/*,audio/*,image/*';
+      input.onchange = () => {
+        const files = Array.from(input.files ?? []);
+        if (files.length > 0) importFiles(files);
+      };
+      input.click();
+      break;
+    }
+    case 'toggleFullscreen':
+      if (document.fullscreenEnabled) {
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => undefined);
+        } else {
+          document.documentElement.requestFullscreen().catch(() => undefined);
+        }
+      }
+      break;
+    default:
+      // Future extensibility: addMarker, nextMarker, prevMarker, toggleSnap, etc.
+      break;
+  }
+}
 
 // ============================================================
 // ArtoneShell — 最外層 (First-Run 判定 + EngineProvider)
@@ -87,27 +157,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
 
   // グローバルショートカット
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as Element).tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setCmdOpen((v) => !v);
-      } else if (e.key === ' ') {
-        e.preventDefault();
-        actions.togglePlayPause();
-      } else if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        actions.undo();
-      } else if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
-        e.preventDefault();
-        actions.redo();
-      } else if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault();
-        actions.save();
-      }
-    };
+    const handler = buildKeydownHandler(actions, setCmdOpen);
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [actions]);
@@ -116,48 +166,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
   useEffect(() => {
     const cmd = engine.lastCommand;
     if (!cmd) return;
-    const { name, payload } = cmd.cmd;
-    switch (name) {
-      case 'togglePanel':
-        setActivePanel((p) => (p === payload ? null : (payload as string)));
-        break;
-      case 'showExport':
-        setActivePanel('export');
-        break;
-      case 'showImport': {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.multiple = true;
-        input.accept = 'video/*,audio/*,image/*';
-        input.onchange = () => {
-          const files = Array.from(input.files ?? []);
-          if (files.length > 0) actions.importFiles(files);
-        };
-        input.click();
-        break;
-      }
-      case 'addMarker':
-      case 'nextMarker':
-      case 'prevMarker':
-      case 'toggleSnap':
-      case 'zoomTimeline':
-      case 'zoomTimelineFit':
-      case 'switchCamera':
-      case 'newProject':
-      case 'openProject':
-      case 'saveAs':
-        // Emit to any future subscriber (no-op for now; events are typed for extensibility)
-        break;
-      case 'toggleFullscreen':
-        if (document.fullscreenEnabled) {
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(() => undefined);
-          } else {
-            document.documentElement.requestFullscreen().catch(() => undefined);
-          }
-        }
-        break;
-    }
+    dispatchAppCommand(cmd.cmd.name, cmd.cmd.payload, setActivePanel, actions.importFiles);
   }, [engine.lastCommand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // コマンドパレット — エンジンの実アクションを渡す

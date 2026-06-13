@@ -262,3 +262,97 @@ describe('KeyframeAnimator — subscribe / notify', () => {
     expect(listener).toHaveBeenCalled();
   });
 });
+
+// ============================================================
+// hasKeyframeAt
+// ============================================================
+
+describe('hasKeyframeAt', () => {
+  let anim: KeyframeAnimator;
+  let id: string;
+
+  beforeEach(() => {
+    anim = new KeyframeAnimator();
+    id = anim.createAnimation('test').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
+  });
+
+  it('returns true for exact keyframe time', () => {
+    expect(anim.hasKeyframeAt(id, 'x', 0.5)).toBe(true);
+  });
+
+  it('returns true within tolerance of 0.001', () => {
+    expect(anim.hasKeyframeAt(id, 'x', 0.5009)).toBe(true);
+  });
+
+  it('returns false when no keyframe at time', () => {
+    expect(anim.hasKeyframeAt(id, 'x', 0.9)).toBe(false);
+  });
+
+  it('returns false for unknown animation', () => {
+    expect(anim.hasKeyframeAt('nonexistent', 'x', 0.5)).toBe(false);
+  });
+
+  it('returns false for unknown property', () => {
+    expect(anim.hasKeyframeAt(id, 'y', 0.5)).toBe(false);
+  });
+});
+
+// ============================================================
+// getKeyframesInRange
+// ============================================================
+
+describe('getKeyframesInRange', () => {
+  let anim: KeyframeAnimator;
+  let id: string;
+
+  beforeEach(() => {
+    anim = new KeyframeAnimator();
+    id = anim.createAnimation('test').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addProperty(id, 'y', 0);
+    anim.addKeyframe(id, 'x', 0.0, 0, 'linear');
+    anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
+    anim.addKeyframe(id, 'x', 1.0, 100, 'linear');
+    anim.addKeyframe(id, 'y', 0.3, 30, 'linear');
+    anim.addKeyframe(id, 'y', 0.7, 70, 'linear');
+  });
+
+  it('returns all keyframes within range', () => {
+    const result = anim.getKeyframesInRange(id, 0.2, 0.8);
+    expect(result.length).toBeGreaterThanOrEqual(3); // x@0.5, y@0.3, y@0.7
+    const times = result.map(r => r.keyframe.time);
+    expect(times).toContain(0.5);
+    expect(times).toContain(0.3);
+    expect(times).toContain(0.7);
+  });
+
+  it('returns keyframes sorted by time', () => {
+    const result = anim.getKeyframesInRange(id, 0.0, 1.0);
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i].keyframe.time).toBeGreaterThanOrEqual(result[i - 1].keyframe.time);
+    }
+  });
+
+  it('includes boundary times (inclusive)', () => {
+    const result = anim.getKeyframesInRange(id, 0.5, 0.5);
+    expect(result.some(r => r.keyframe.time === 0.5)).toBe(true);
+  });
+
+  it('returns empty array for unknown animation', () => {
+    expect(anim.getKeyframesInRange('nonexistent', 0, 1)).toEqual([]);
+  });
+
+  it('returns empty array when no keyframes in range', () => {
+    const result = anim.getKeyframesInRange(id, 5.0, 10.0);
+    expect(result).toHaveLength(0);
+  });
+
+  it('result includes property name', () => {
+    const result = anim.getKeyframesInRange(id, 0.0, 1.0);
+    const properties = result.map(r => r.property);
+    expect(properties).toContain('x');
+    expect(properties).toContain('y');
+  });
+});

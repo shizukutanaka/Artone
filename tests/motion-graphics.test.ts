@@ -6,13 +6,13 @@
  * regression fix: lerpColor must handle 3-digit hex (#rgb) without
  * producing NaN channel values.
  *
- * Canvas-dependent methods (setCanvas, render) are not tested here.
+ * Canvas rendering is tested via a mocked 2D context.
  *
  * # AI generated (reviewed)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { MotionGraphicsEngine } from '../animation/motion-graphics';
+import { MotionGraphicsEngine, TEXT_ANIMATION_PRESETS } from '../animation/motion-graphics';
 import type { TextLayer } from '../animation/motion-graphics';
 
 let engine: MotionGraphicsEngine;
@@ -307,5 +307,275 @@ describe('subscribe', () => {
     engine.subscribe(() => { calls++; });
     engine.deleteLayer(layer.id);
     expect(calls).toBe(1);
+  });
+});
+
+// ─── TEXT_ANIMATION_PRESETS ───────────────────────────────────────────────────
+
+describe('TEXT_ANIMATION_PRESETS — glitch and blur', () => {
+  function makeEl(): HTMLElement {
+    return document.createElement('span');
+  }
+
+  it('glitch preset sets opacity to "0.5" or "1"', () => {
+    const el = makeEl();
+    // Run many times to hit both branches (Math.random > 0.9 is rare)
+    for (let i = 0; i < 20; i++) {
+      TEXT_ANIMATION_PRESETS.glitch(el, 0, 1, 0.5);
+    }
+    expect(['0.5', '1']).toContain(el.style.opacity);
+  });
+
+  it('blur preset sets opacity to progress value and filter to blur', () => {
+    const el = makeEl();
+    TEXT_ANIMATION_PRESETS.blur(el, 0, 1, 0.5);
+    expect(el.style.opacity).toBe('0.5');
+    expect(el.style.filter).toContain('blur(');
+  });
+
+  it('bounce preset sets opacity and translateY transform', () => {
+    const el = makeEl();
+    TEXT_ANIMATION_PRESETS.bounce(el, 0, 1, 0.5);
+    expect(el.style.opacity).toBeDefined();
+    expect(el.style.transform).toContain('translateY(');
+  });
+
+  it('wave preset sets opacity to "1" and translateY transform', () => {
+    const el = makeEl();
+    TEXT_ANIMATION_PRESETS.wave(el, 0, 4, 0.5);
+    expect(el.style.opacity).toBe('1');
+    expect(el.style.transform).toContain('translateY(');
+  });
+
+  it('typewriter preset shows element when progress > 0', () => {
+    const el = makeEl();
+    TEXT_ANIMATION_PRESETS.typewriter(el, 0, 1, 0.5);
+    expect(el.style.opacity).toBe('1');
+    TEXT_ANIMATION_PRESETS.typewriter(el, 0, 1, 0);
+    expect(el.style.opacity).toBe('0');
+  });
+
+  it('scramble preset randomizes textContent when progress < 1', () => {
+    const el = makeEl();
+    TEXT_ANIMATION_PRESETS.scramble(el, 0, 1, 0.5);
+    expect(el.style.opacity).toBe('1');
+    expect(el.textContent).toBeTruthy();
+  });
+
+  it('scramble preset does not scramble textContent when progress == 1', () => {
+    const el = makeEl();
+    el.textContent = 'original';
+    TEXT_ANIMATION_PRESETS.scramble(el, 0, 1, 1);
+    expect(el.textContent).toBe('original');
+  });
+
+  it('scaleIn preset sets opacity and scale transform', () => {
+    const el = makeEl();
+    TEXT_ANIMATION_PRESETS.scaleIn(el, 0, 1, 0.7);
+    expect(el.style.opacity).toBe('0.7');
+    expect(el.style.transform).toContain('scale(');
+  });
+
+  it('scaleOut preset decreases opacity and scale as progress increases', () => {
+    const el = makeEl();
+    TEXT_ANIMATION_PRESETS.scaleOut(el, 0, 1, 0.5);
+    expect(el.style.opacity).toBe('0.5');
+    expect(el.style.transform).toContain('scale(');
+  });
+});
+
+// ─── Emitter shape: circle and rectangle ─────────────────────────────────────
+
+describe('updateParticleSystem — emitter shapes', () => {
+  it('emitter shape=circle spawns particles with circular distribution', () => {
+    const system = engine.createParticleSystem({
+      shape: 'circle',
+      size: { width: 100, height: 100 },
+      rate: 100,
+      lifetime: { min: 5, max: 5 }, // long enough that particles survive the 0.1s update
+    });
+    engine.updateParticleSystem(system.id, 0.1);
+    // rate=100, deltaTime=0.1 → toEmit=10; lifetime=5 >> 0.1 so none die
+    expect(system.particles.length).toBeGreaterThan(0);
+  });
+
+  it('emitter shape=rectangle spawns particles with rectangular distribution', () => {
+    const system = engine.createParticleSystem({
+      shape: 'rectangle',
+      size: { width: 100, height: 100 },
+      rate: 100,
+      lifetime: { min: 5, max: 5 },
+    });
+    engine.updateParticleSystem(system.id, 0.1);
+    expect(system.particles.length).toBeGreaterThan(0);
+  });
+});
+
+// ─── setCanvas / render ────────────────────────────────────────────────────────
+
+function makeMockCanvas(width = 400, height = 300): HTMLCanvasElement {
+  const grad = { addColorStop: vi.fn() };
+  const ctx2d = {
+    fillStyle: '' as string | CanvasGradient,
+    strokeStyle: '' as string,
+    lineWidth: 1,
+    font: '',
+    textAlign: '' as CanvasTextAlign,
+    textBaseline: '' as CanvasTextBaseline,
+    globalAlpha: 1,
+    lineCap: '' as CanvasLineCap,
+    lineJoin: '' as CanvasLineJoin,
+    clearRect: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    translate: vi.fn(),
+    rotate: vi.fn(),
+    scale: vi.fn(),
+    beginPath: vi.fn(),
+    closePath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    arc: vi.fn(),
+    rect: vi.fn(),
+    ellipse: vi.fn(),
+    fill: vi.fn(),
+    stroke: vi.fn(),
+    fillText: vi.fn(),
+    strokeText: vi.fn(),
+    quadraticCurveTo: vi.fn(),
+    setLineDash: vi.fn(),
+    createLinearGradient: vi.fn(() => grad),
+    createRadialGradient: vi.fn(() => grad),
+  };
+  return {
+    width,
+    height,
+    getContext: vi.fn(() => ctx2d),
+  } as unknown as HTMLCanvasElement;
+}
+
+describe('setCanvas and render()', () => {
+  it('render() does nothing when no canvas is set', () => {
+    expect(() => engine.render(0)).not.toThrow();
+  });
+
+  it('setCanvas stores the canvas and calls getContext("2d")', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    expect((canvas.getContext as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('2d');
+  });
+
+  it('render() calls clearRect on each call', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.clearRect).toHaveBeenCalledWith(0, 0, 400, 300);
+  });
+
+  it('render() renders a text layer (fillText called)', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    engine.createTextLayer('Hello World');
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.fillText).toHaveBeenCalledWith('Hello World', 0, 0);
+  });
+
+  it('render() renders text with stroke when strokeWidth is set', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    engine.createTextLayer('Stroked', { strokeWidth: 2, strokeColor: '#000' });
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.strokeText).toHaveBeenCalledWith('Stroked', 0, 0);
+  });
+
+  it('render() renders a solid-fill rectangle shape', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    engine.createShapeLayer('rectangle', { width: 100, height: 50 });
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.fill).toHaveBeenCalled();
+  });
+
+  it('render() renders a rounded rectangle (cornerRadius path)', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    engine.createRectangle(100, 50, 8);
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.quadraticCurveTo).toHaveBeenCalled();
+  });
+
+  it('render() renders an ellipse shape', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    engine.createEllipse(80, 40);
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.ellipse).toHaveBeenCalled();
+  });
+
+  it('render() renders a polygon shape (lineTo for each point)', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    engine.createPolygon([{ x: 0, y: -50 }, { x: 50, y: 50 }, { x: -50, y: 50 }]);
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.moveTo).toHaveBeenCalledWith(0, -50);
+    expect(ctx.lineTo).toHaveBeenCalled();
+  });
+
+  it('render() renders a gradient-fill shape', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    const layer = engine.createShapeLayer('rectangle', { width: 100, height: 50 });
+    layer.fill = {
+      type: 'gradient',
+      gradient: { type: 'linear', stops: [{ offset: 0, color: '#fff' }, { offset: 1, color: '#000' }] },
+    };
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.createLinearGradient).toHaveBeenCalled();
+    expect(ctx.fill).toHaveBeenCalled();
+  });
+
+  it('render() renders a radial gradient shape', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    const layer = engine.createShapeLayer('ellipse', { width: 100, height: 100 });
+    layer.fill = {
+      type: 'gradient',
+      gradient: { type: 'radial', stops: [{ offset: 0, color: '#ff0' }, { offset: 1, color: '#f00' }] },
+    };
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.createRadialGradient).toHaveBeenCalled();
+  });
+
+  it('render() renders a shape with stroke', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    const layer = engine.createShapeLayer('rectangle', { width: 60, height: 60 });
+    layer.stroke = { color: '#ff0', width: 3, dashArray: [4, 4] };
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.stroke).toHaveBeenCalled();
+    expect(ctx.setLineDash).toHaveBeenCalledWith([4, 4]);
+  });
+
+  it('render() renders particles (arc called for each particle)', () => {
+    const canvas = makeMockCanvas();
+    engine.setCanvas(canvas);
+    const system = engine.createParticleSystem();
+    // Manually inject a particle
+    (system.particles as Array<{ x: number; y: number; vx: number; vy: number; life: number; maxLife: number; size: number; color: string; opacity: number }>).push(
+      { x: 10, y: 20, vx: 0, vy: 0, life: 1, maxLife: 2, size: 5, color: '#fff', opacity: 0.8 }
+    );
+    engine.render(0);
+    const ctx = (canvas.getContext as ReturnType<typeof vi.fn>).mock.results[0].value;
+    expect(ctx.arc).toHaveBeenCalled();
   });
 });

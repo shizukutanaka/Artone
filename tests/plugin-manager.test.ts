@@ -8,7 +8,7 @@
  * # AI generated (reviewed)
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   PluginManager,
   type PluginManifest,
@@ -250,5 +250,79 @@ describe('subscribe()', () => {
     unsub();
     pm.enablePlugin('blur', false);
     expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// executeSandboxed — Worker-based sandbox (security boundary)
+// ============================================================
+//
+// jsdom has no Worker, so we inject a controllable fake to drive each
+// resolution path. This is the sandbox the CLAUDE.md mandates: untrusted
+// plugin code runs only inside a terminable Worker with a 5s timeout.
+
+type SandboxPrivate = {
+  executeSandboxed<T>(code: string, context: Record<string, unknown>): Promise<T>;
+  sandbox: unknown;
+};
+
+class FakeWorker {
+  onmessage: ((e: { data: unknown }) => void) | null = null;
+  onerror: ((e: { message: string }) => void) | null = null;
+  posted: unknown[] = [];
+  terminated = false;
+  postMessage(msg: unknown): void { this.posted.push(msg); }
+  terminate(): void { this.terminated = true; }
+}
+
+describe('PluginManager — executeSandboxed', () => {
+  let workers: FakeWorker[];
+
+  beforeEach(() => {
+    workers = [];
+    vi.stubGlobal('Worker', vi.fn(() => { const w = new FakeWorker(); workers.push(w); return w; }));
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:fake'), revokeObjectURL: vi.fn() });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+  it('resolves with the worker result and clears the sandbox reference', async () => {
+    const pm = makeManager() as unknown as SandboxPrivate;
+    const p = pm.executeSandboxed<number>('return 1', { a: 1 });
+    // Worker created synchronously; code/context forwarded
+    expect(workers).toHaveLength(1);
+    expect(workers[0].posted).toEqual([{ code: 'return 1', context: { a: 1 } }]);
+    workers[0].onmessage!({ data: { success: true, result: 42 } });
+    await expect(p).resolves.toBe(42);
+    expect(workers[0].terminated).toBe(true);
+    expect(pm.sandbox).toBeNull();
+  });
+
+  it('rejects with the plugin error message on { success: false }', async () => {
+    const pm = makeManager() as unknown as SandboxPrivate;
+    const p = pm.executeSandboxed('boom', {});
+    workers[0].onmessage!({ data: { success: false, error: 'plugin blew up' } });
+    await expect(p).rejects.toThrow('plugin blew up');
+    expect(workers[0].terminated).toBe(true);
+    expect(pm.sandbox).toBeNull();
+  });
+
+  it('rejects and clears the sandbox on worker onerror', async () => {
+    const pm = makeManager() as unknown as SandboxPrivate;
+    const p = pm.executeSandboxed('return 1', {});
+    workers[0].onerror!({ message: 'worker crashed' });
+    await expect(p).rejects.toThrow('worker crashed');
+    expect(workers[0].terminated).toBe(true);
+    expect(pm.sandbox).toBeNull();
+  });
+
+  it('terminates the worker and rejects after the 5s timeout', async () => {
+    vi.useFakeTimers();
+    const pm = makeManager() as unknown as SandboxPrivate;
+    const p = pm.executeSandboxed('while(true){}', {});
+    const assertion = expect(p).rejects.toThrow('Plugin execution timeout');
+    vi.advanceTimersByTime(5000);
+    await assertion;
+    expect(workers[0].terminated).toBe(true);
+    expect(pm.sandbox).toBeNull();
   });
 });

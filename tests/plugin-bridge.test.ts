@@ -625,3 +625,167 @@ describe('PluginBridge — openPluginUI', () => {
     expect(valueEl?.textContent).toBe('1000 Hz'); // integer, not 1000.0
   });
 });
+
+// ============================================================
+// getImports — sandbox import surface (security boundary)
+// ============================================================
+
+type BridgePrivate = {
+  getImports(): WebAssembly.Imports;
+  loadFactoryPresets(instance: PluginInstance): Promise<void>;
+};
+
+describe('PluginBridge — getImports (sandbox import surface)', () => {
+  it('exposes only an env namespace with memory + whitelisted math functions', () => {
+    const env = (makeBridge() as unknown as BridgePrivate).getImports().env as Record<string, unknown>;
+    expect(Object.keys((makeBridge() as unknown as BridgePrivate).getImports())).toEqual(['env']);
+    expect(env.memory).toBeInstanceOf(WebAssembly.Memory);
+    for (const fn of ['sin', 'cos', 'tan', 'exp', 'log', 'pow', 'sqrt', 'floor', 'ceil', 'abs', 'min', 'max']) {
+      expect(typeof env[fn]).toBe('function');
+    }
+  });
+
+  it('does NOT expose ambient host capabilities (no eval/Function/fetch/process/etc.)', () => {
+    // CLAUDE.md: ホスト API は明示的 import のみ提供 (ambient access 禁止) / eval・Function 禁止
+    const env = (makeBridge() as unknown as BridgePrivate).getImports().env as Record<string, unknown>;
+    for (const forbidden of [
+      'eval', 'Function', 'fetch', 'process', 'require', 'XMLHttpRequest',
+      'importScripts', 'open', 'WebSocket', 'localStorage', 'indexedDB',
+    ]) {
+      expect(env[forbidden]).toBeUndefined();
+    }
+  });
+
+  it('the import surface is exactly memory + 12 math functions (no extras)', () => {
+    const env = (makeBridge() as unknown as BridgePrivate).getImports().env as Record<string, unknown>;
+    expect(Object.keys(env).sort()).toEqual(
+      ['abs', 'ceil', 'cos', 'exp', 'floor', 'log', 'max', 'memory', 'min', 'pow', 'sin', 'sqrt', 'tan'].sort()
+    );
+  });
+
+  it('provides a bounded memory (256 pages, not unbounded)', () => {
+    const env = (makeBridge() as unknown as BridgePrivate).getImports().env as Record<string, unknown>;
+    const mem = env.memory as WebAssembly.Memory;
+    expect(mem.buffer.byteLength).toBe(256 * 65536); // 256 pages × 64 KiB
+  });
+});
+
+// ============================================================
+// scanPlugins — discovery via fetched index
+// ============================================================
+
+describe('PluginBridge — scanPlugins', () => {
+  it('fetches the directory index and registers every descriptor', async () => {
+    const bridge = makeBridge();
+    const descs = [makeDescriptor({ id: 'a:1' }), makeDescriptor({ id: 'b:2' })];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => descs }) as unknown as Response));
+    try {
+      const result = await bridge.scanPlugins('/plugins');
+      expect(result).toHaveLength(2);
+      const ids = bridge.getAvailablePlugins().map(p => p.id);
+      expect(ids).toEqual(expect.arrayContaining(['a:1', 'b:2']));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('requests <directory>/index.json', async () => {
+    const bridge = makeBridge();
+    const fetchSpy = vi.fn(async () => ({ json: async () => [] }) as unknown as Response);
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      await bridge.scanPlugins('/my/plugins');
+      expect(fetchSpy).toHaveBeenCalledWith('/my/plugins/index.json');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+// ============================================================
+// loadFactoryPresets — both success and failure branches
+// ============================================================
+
+describe('PluginBridge — loadFactoryPresets', () => {
+  it('loads presets from the <wasm>.presets.json sidecar on success', async () => {
+    const bridge = makeBridge();
+    const inst = injectInstance(bridge);
+    const presets = [{ name: 'Warm', parameters: { gain: 3 } }];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => presets }) as unknown as Response));
+    try {
+      await (bridge as unknown as BridgePrivate).loadFactoryPresets(inst);
+      expect(inst.presets).toEqual(presets);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('leaves presets empty when the sidecar fetch fails (no factory presets)', async () => {
+    const bridge = makeBridge();
+    const inst = injectInstance(bridge);
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('404'); }));
+    try {
+      await (bridge as unknown as BridgePrivate).loadFactoryPresets(inst);
+      expect(inst.presets).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+// ============================================================
+// loadPlugin — WASM compile + instantiate (Node has WebAssembly)
+// ============================================================
+
+describe('PluginBridge — loadPlugin', () => {
+  // Smallest valid WASM module: magic header + version, no imports/exports.
+  const MINIMAL_WASM = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+
+  it('compiles/instantiates the WASM and registers a usable instance', async () => {
+    const bridge = makeBridge();
+    bridge.registerPlugin(makeDescriptor({ id: 'wasm:1', wasmUrl: '/plugins/x.wasm' }));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('.wasm')) {
+        return { arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
+      }
+      return { json: async () => [] } as unknown as Response; // presets sidecar
+    }));
+    try {
+      const instanceId = await bridge.loadPlugin('wasm:1');
+      expect(typeof instanceId).toBe('string');
+      expect(instanceId.length).toBeGreaterThan(0);
+      // Parameters initialized from descriptor defaults (gain=0, mix=0.5)
+      expect(bridge.getParameter(instanceId, 'gain')).toBe(0);
+      expect(bridge.getParameter(instanceId, 'mix')).toBe(0.5);
+      // loadFactoryPresets ran with an empty sidecar
+      expect(bridge.getPresets(instanceId)).toEqual([]);
+      // Instance is retrievable
+      expect(bridge.getInstance(instanceId)?.descriptor.id).toBe('wasm:1');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rejects when the plugin id is unknown', async () => {
+    const bridge = makeBridge();
+    await expect(bridge.loadPlugin('does-not-exist')).rejects.toThrow('not found');
+  });
+
+  it('loads factory presets discovered alongside the WASM', async () => {
+    const bridge = makeBridge();
+    bridge.registerPlugin(makeDescriptor({ id: 'wasm:2', wasmUrl: '/plugins/y.wasm' }));
+    const presets = [{ name: 'Default', parameters: { gain: 6 } }];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('.wasm')) {
+        return { arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
+      }
+      return { json: async () => presets } as unknown as Response;
+    }));
+    try {
+      const instanceId = await bridge.loadPlugin('wasm:2');
+      expect(bridge.getPresets(instanceId)).toEqual(presets);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

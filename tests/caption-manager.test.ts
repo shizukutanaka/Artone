@@ -415,3 +415,42 @@ describe('subscribe()', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+// ─── wrapText (private) ───────────────────────────────────────────────────────
+
+describe('CaptionManager — wrapText (private)', () => {
+  type CMPrivate = { wrapText(ctx: { measureText(t: string): { width: number } }, text: string, maxWidth: number): string[] };
+
+  function mockCtx(charWidth = 10): { measureText(t: string): { width: number } } {
+    return { measureText: (t: string) => ({ width: t.length * charWidth }) };
+  }
+
+  function makePrivate(): CMPrivate {
+    return makeManager() as unknown as CMPrivate;
+  }
+
+  it('returns single line when text fits', () => {
+    const result = makePrivate().wrapText(mockCtx(5), 'Hello', 100);
+    expect(result).toEqual(['Hello']);
+  });
+
+  it('wraps long text into multiple lines', () => {
+    // Each char = 10px, maxWidth = 50 → 5 chars per line
+    const result = makePrivate().wrapText(mockCtx(10), 'one two three', 50);
+    expect(result.length).toBeGreaterThan(1);
+    expect(result.join(' ')).toContain('one');
+    expect(result.join(' ')).toContain('two');
+  });
+
+  it('splits on newlines into separate paragraphs', () => {
+    const result = makePrivate().wrapText(mockCtx(5), 'line one\nline two', 500);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe('line one');
+    expect(result[1]).toBe('line two');
+  });
+
+  it('handles empty string', () => {
+    const result = makePrivate().wrapText(mockCtx(5), '', 100);
+    expect(result).toEqual([]);
+  });
+});

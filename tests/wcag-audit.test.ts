@@ -89,7 +89,8 @@ describe('ColorContrast — parseColor', () => {
 // WCAG 2.2 新基準 — JSDOM ベースの監査
 // ============================================================
 
-import { A11yAuditor } from '../accessibility/wcag-auditor';
+import { A11yAuditor, AuditReporter, a11y } from '../accessibility/wcag-auditor';
+import type { AuditReport } from '../accessibility/wcag-auditor';
 
 /** 最小限の DOMHost モックを作る */
 function makeHost(html: string) {
@@ -146,5 +147,87 @@ describe('A11yAuditor — image alt text', () => {
     const report = auditor.audit();
     const altIssue = report.issues.find((i) => i.rule.includes('1.1.1'));
     expect(altIssue).toBeUndefined();
+  });
+});
+
+// ─── AuditReporter ───────────────────────────────────────────────────────────
+
+describe('AuditReporter — format()', () => {
+  const passReport: AuditReport = {
+    level: 'AA',
+    passed: true,
+    issues: [],
+    stats: { totalChecks: 10, passed: 10, failed: 0 },
+  };
+
+  it('includes PASS status for a clean report', () => {
+    const text = AuditReporter.format(passReport);
+    expect(text).toContain('=== WCAG Accessibility Audit ===');
+    expect(text).toContain('Status: PASS');
+    expect(text).toContain('Level: AA');
+    expect(text).toContain('Checks: 10 | Passed: 10 | Failed: 0');
+  });
+
+  it('includes FAIL status and issue details', () => {
+    const failReport: AuditReport = {
+      level: 'AA',
+      passed: false,
+      issues: [
+        { rule: '1.4.3', element: 'button', message: 'Low contrast', severity: 'critical', fix: 'Increase contrast' },
+        { rule: '2.4.3', element: 'input', message: 'Missing label', severity: 'major' },
+      ],
+      stats: { totalChecks: 5, passed: 3, failed: 2 },
+    };
+    const text = AuditReporter.format(failReport);
+    expect(text).toContain('Status: FAIL');
+    expect(text).toContain('[CRITICAL]');
+    expect(text).toContain('[MAJOR]');
+    expect(text).toContain('button: Low contrast');
+    expect(text).toContain('Fix: Increase contrast');
+    expect(text).toContain('input: Missing label');
+  });
+
+  it('omits severity group when no issues of that type', () => {
+    const report: AuditReport = {
+      level: 'A',
+      passed: false,
+      issues: [{ rule: '1.1.1', element: 'img', message: 'No alt', severity: 'minor' }],
+      stats: { totalChecks: 1, passed: 0, failed: 1 },
+    };
+    const text = AuditReporter.format(report);
+    expect(text).toContain('[MINOR]');
+    expect(text).not.toContain('[CRITICAL]');
+    expect(text).not.toContain('[MAJOR]');
+  });
+});
+
+describe('AuditReporter — toJSON()', () => {
+  it('returns parseable JSON with report fields', () => {
+    const report: AuditReport = {
+      level: 'AAA',
+      passed: true,
+      issues: [],
+      stats: { totalChecks: 3, passed: 3, failed: 0 },
+    };
+    const json = AuditReporter.toJSON(report);
+    const parsed = JSON.parse(json);
+    expect(parsed.level).toBe('AAA');
+    expect(parsed.passed).toBe(true);
+    expect(parsed.stats.totalChecks).toBe(3);
+  });
+});
+
+describe('a11y factory', () => {
+  it('a11y.auditor() returns an A11yAuditor instance', () => {
+    expect(a11y.auditor()).toBeInstanceOf(A11yAuditor);
+  });
+
+  it('a11y.contrast is ColorContrast', () => {
+    expect(a11y.contrast).toBeDefined();
+    expect(typeof a11y.contrast.contrast).toBe('function');
+  });
+
+  it('a11y.reporter is AuditReporter', () => {
+    expect(a11y.reporter).toBe(AuditReporter);
   });
 });

@@ -214,7 +214,7 @@ describe('VideoPipeline — REGRESSION: generateThumbnails edge cases', () => {
 // ============================================================
 
 interface FakeInit {
-  output: (item: unknown) => void;
+  output: (item: unknown, meta?: unknown) => void;
   error: (e: Error) => void;
 }
 
@@ -411,6 +411,94 @@ describe('VideoPipeline — extractFrameAtTime (timestamp seeking)', () => {
     const p = configuredDecoder();
     const frame = await p.extractFrameAtTime(clip(), 999_000_000);
     expect(frame?.timestamp).toBe(10_100_000);
+  });
+});
+
+// ============================================================
+// VideoPipeline — transcode (processor chain wiring)
+//
+// Streaming fakes: the decoder emits one frame per decoded chunk, the encoder
+// emits one chunk per frame. These verify that configured processors are
+// actually applied — the previous wiring built the processor chain off a
+// stale decoder.readable reference, so processors were dropped and any
+// configured processor double-locked the stream and threw.
+// ============================================================
+
+describe('VideoPipeline — transcode processor wiring', () => {
+  function fullyConfigured(): VideoPipeline {
+    const p = new VideoPipeline();
+    (p as unknown as { decoderConfig: unknown }).decoderConfig = { codec: 'avc1.42001E' };
+    (p as unknown as { encoderConfig: unknown }).encoderConfig = { codec: 'avc1.42001E' };
+    return p;
+  }
+
+  class FakeStreamDecoder {
+    state = 'unconfigured';
+    private init: FakeInit;
+    constructor(init: FakeInit) { this.init = init; }
+    configure(): void { this.state = 'configured'; }
+    decode(chunk: { timestamp: number }): void {
+      this.init.output({ timestamp: chunk.timestamp, duration: 1000, close: vi.fn() });
+    }
+    async flush(): Promise<void> {}
+    close(): void { this.state = 'closed'; }
+  }
+
+  class FakeStreamEncoder {
+    state = 'unconfigured';
+    private init: FakeInit;
+    constructor(init: FakeInit) { this.init = init; }
+    configure(): void { this.state = 'configured'; }
+    encode(frame: { timestamp: number }, opts: { keyFrame: boolean }): void {
+      this.init.output({ timestamp: frame.timestamp, type: opts.keyFrame ? 'key' : 'delta' }, {});
+    }
+    async flush(): Promise<void> {}
+    close(): void { this.state = 'closed'; }
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal('VideoDecoder', FakeStreamDecoder);
+    vi.stubGlobal('VideoEncoder', FakeStreamEncoder);
+  });
+
+  const chunks = () => ([
+    { type: 'key', timestamp: 0 },
+    { type: 'delta', timestamp: 1000 },
+    { type: 'delta', timestamp: 2000 },
+  ]) as unknown as EncodedVideoChunk[];
+
+  it('transcodes every input chunk with no processors', async () => {
+    const p = fullyConfigured();
+    const out = await p.transcode(chunks());
+    expect(out).toHaveLength(3);
+  });
+
+  it('applies a configured processor to every frame (previously dropped)', async () => {
+    const p = fullyConfigured();
+    const seen: number[] = [];
+    p.addProcessor(async (frame) => { seen.push(frame.timestamp); return frame; });
+    const out = await p.transcode(chunks());
+    expect(seen).toEqual([0, 1000, 2000]); // processor ran on each frame
+    expect(out).toHaveLength(3);
+  });
+
+  it('threads multiple processors in order without locking the stream', async () => {
+    const p = fullyConfigured();
+    const order: string[] = [];
+    p.addProcessor(async (f) => { order.push('a'); return f; });
+    p.addProcessor(async (f) => { order.push('b'); return f; });
+    const out = await p.transcode(chunks());
+    expect(out).toHaveLength(3);
+    // Each frame passes a before b.
+    expect(order).toEqual(['a', 'b', 'a', 'b', 'a', 'b']);
+  });
+
+  it('reports progress for an array input', async () => {
+    const p = fullyConfigured();
+    const progress: number[] = [];
+    await p.transcode(chunks(), (x) => progress.push(x));
+    expect(progress.at(-1)).toBeCloseTo(1);
+    expect(progress).toHaveLength(3);
   });
 });
 

@@ -134,7 +134,8 @@ export class VideoDecoderStream extends TransformStream<EncodedVideoChunk, Decod
   private decoder: VideoDecoder | null = null;
 
   constructor(config: VideoDecoderConfig) {
-    let decoder: VideoDecoder;
+    // Definite assignment: start() sets `decoder` synchronously inside super().
+    let decoder!: VideoDecoder;
     let frameIndex = 0;
     const pendingResolves: Array<(frame: DecodedFrame) => void> = [];
 
@@ -164,9 +165,8 @@ export class VideoDecoderStream extends TransformStream<EncodedVideoChunk, Decod
           error: (e) => controller.error(e)
         });
         decoder.configure(config);
-        this.decoder = decoder;
       },
-      
+
       transform: async (chunk, controller) => {
         return new Promise((resolve) => {
           pendingResolves.push((decodedFrame) => {
@@ -176,12 +176,17 @@ export class VideoDecoderStream extends TransformStream<EncodedVideoChunk, Decod
           decoder.decode(chunk);
         });
       },
-      
+
       flush: async () => {
         await decoder.flush();
         decoder.close();
       }
     });
+
+    // start() runs synchronously inside super(), so `decoder` is initialized
+    // here. It cannot be assigned to `this` from within start() — `this` is
+    // not yet available before super() returns.
+    this.decoder = decoder;
   }
 
   getDecoder(): VideoDecoder | null {
@@ -197,7 +202,8 @@ export class VideoEncoderStream extends TransformStream<VideoFrame, EncodedChunk
   private encoder: VideoEncoder | null = null;
 
   constructor(config: VideoEncoderConfig) {
-    let encoder: VideoEncoder;
+    // Definite assignment: start() sets `encoder` synchronously inside super().
+    let encoder!: VideoEncoder;
     let chunkIndex = 0;
     const keyFrameInterval = 30;
     let frameCount = 0;
@@ -216,21 +222,24 @@ export class VideoEncoderStream extends TransformStream<VideoFrame, EncodedChunk
           error: (e) => controller.error(e)
         });
         encoder.configure(config);
-        this.encoder = encoder;
       },
-      
+
       transform: (frame, _controller) => {
         const isKeyFrame = frameCount % keyFrameInterval === 0;
         encoder.encode(frame, { keyFrame: isKeyFrame });
         frame.close();
         frameCount++;
       },
-      
+
       flush: async () => {
         await encoder.flush();
         encoder.close();
       }
     });
+
+    // See VideoDecoderStream: assign after super() since start() (which sets
+    // `encoder`) runs synchronously during construction.
+    this.encoder = encoder;
   }
 
   getEncoder(): VideoEncoder | null {
@@ -513,14 +522,6 @@ export class VideoPipeline {
     const decoder = new VideoDecoderStream(this.decoderConfig);
     const encoder = new VideoEncoderStream(this.encoderConfig);
 
-    // Build processor chain
-    let stream: ReadableStream<DecodedFrame> = decoder.readable;
-    
-    for (const processor of this.processors) {
-      const processorStream = new FrameProcessorStream(processor);
-      stream = stream.pipeThrough(processorStream);
-    }
-
     // Create frame-to-encoder adapter
     const frameAdapter = new TransformStream<DecodedFrame, VideoFrame>({
       transform: (item, controller) => {
@@ -560,9 +561,17 @@ export class VideoPipeline {
           }
         });
 
-    // Run pipeline
-    await inputStream
-      .pipeThrough(decoder)
+    // Run pipeline: decode → processors → frames → encode → collect.
+    // The processor chain must be threaded onto the live decoded stream.
+    // Building it off a second reference to decoder.readable both dropped the
+    // processors and double-locked the stream (throwing whenever any
+    // processor was configured).
+    let frameStream: ReadableStream<DecodedFrame> = inputStream.pipeThrough(decoder);
+    for (const processor of this.processors) {
+      frameStream = frameStream.pipeThrough(new FrameProcessorStream(processor));
+    }
+
+    await frameStream
       .pipeThrough(frameAdapter)
       .pipeThrough(encoder)
       .pipeTo(outputCollector);

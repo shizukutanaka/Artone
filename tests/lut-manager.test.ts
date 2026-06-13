@@ -498,6 +498,82 @@ describe('LUTManager — cube export→import round-trip', () => {
   });
 });
 
+// ─── applyLUT (trilinearInterpolate) ─────────────────────────────────────────
+
+describe('LUTManager — applyLUT', () => {
+  let lm: LUTManager;
+
+  beforeEach(() => { lm = new LUTManager(); });
+
+  it('returns original imageData when LUT id is unknown', () => {
+    const img = new ImageData(new Uint8ClampedArray([128, 64, 32, 255]), 1, 1);
+    const result = lm.applyLUT(img, 'nonexistent', 1);
+    expect(result).toBe(img);
+    expect(result.data[0]).toBe(128);
+  });
+
+  it('identity LUT preserves pixel values', () => {
+    const lut = makeLUT({ id: 'identity' });
+    addLUT(lm, lut);
+    const data = new Uint8ClampedArray([255, 0, 0, 255]); // pure red
+    const img = new ImageData(data, 1, 1);
+    const out = lm.applyLUT(img, 'identity', 1);
+    // Identity LUT: red pixel stays red
+    expect(out.data[0]).toBeCloseTo(255, -1);
+    expect(out.data[1]).toBeCloseTo(0, -1);
+    expect(out.data[2]).toBeCloseTo(0, -1);
+    expect(out.data[3]).toBe(255); // alpha unchanged
+  });
+
+  it('applies trilinear interpolation for non-corner pixel values', () => {
+    const lut = makeLUT({ id: 'interp' });
+    addLUT(lm, lut);
+    // Mid-gray: should interpolate between LUT corners
+    const data = new Uint8ClampedArray([128, 128, 128, 255]);
+    const img = new ImageData(data, 1, 1);
+    const out = lm.applyLUT(img, 'interp', 1);
+    // With the identity-like 2x2x2 LUT, mid-gray → approximately 0.5, 0.5, 0.5
+    expect(out.data[0]).toBeCloseTo(128, -1);
+    expect(out.data[1]).toBeCloseTo(128, -1);
+    expect(out.data[2]).toBeCloseTo(128, -1);
+  });
+
+  it('respects intensity parameter (0 = no change, 1 = full LUT)', () => {
+    // Non-identity LUT: maps everything to blue (0, 0, 1 in all corners)
+    const allBlue = new Float32Array(8 * 3).fill(0);
+    for (let i = 2; i < allBlue.length; i += 3) allBlue[i] = 1; // blue channel = 1
+    const blueLUT = makeLUT({ id: 'blue', data: allBlue });
+    addLUT(lm, blueLUT);
+
+    // intensity = 0: pixel unchanged
+    const data0 = new Uint8ClampedArray([255, 0, 0, 255]);
+    const img0 = new ImageData(data0, 1, 1);
+    const out0 = lm.applyLUT(img0, 'blue', 0);
+    expect(out0.data[0]).toBeCloseTo(255, -1); // red unchanged
+
+    // intensity = 1: pixel fully LUT-mapped to blue
+    const data1 = new Uint8ClampedArray([255, 0, 0, 255]);
+    const img1 = new ImageData(data1, 1, 1);
+    const out1 = lm.applyLUT(img1, 'blue', 1);
+    expect(out1.data[0]).toBeCloseTo(0, -1);   // red → 0
+    expect(out1.data[2]).toBeCloseTo(255, -1); // blue → 255
+  });
+
+  it('processes multiple pixels', () => {
+    const lut = makeLUT({ id: 'multi' });
+    addLUT(lm, lut);
+    // 2 pixels: black and white
+    const data = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]);
+    const img = new ImageData(data, 2, 1);
+    const out = lm.applyLUT(img, 'multi', 1);
+    expect(out.data.length).toBe(8);
+    // Black stays black in identity LUT
+    expect(out.data[0]).toBeCloseTo(0, -1);
+    // White stays white
+    expect(out.data[4]).toBeCloseTo(255, -1);
+  });
+});
+
 // ─── generateWGSLShader ───────────────────────────────────────────────────────
 
 describe('LUTManager — generateWGSLShader', () => {

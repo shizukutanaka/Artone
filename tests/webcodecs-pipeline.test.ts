@@ -203,6 +203,132 @@ describe('VideoPipeline — REGRESSION: generateThumbnails edge cases', () => {
 });
 
 // ============================================================
+// VideoPipeline — batch decode/encode completion & cleanup
+//
+// VideoDecoder/VideoEncoder don't exist in jsdom, so we install faithful
+// fakes of the WebCodecs contract: output() is delivered per the configured
+// script, flush() resolves once all queued work is drained (or rejects on
+// error), and close() transitions state to 'closed'. These verify OUR
+// completion/cleanup logic — not the codec — and would hang (timeout) under
+// the previous count-gated implementation.
+// ============================================================
+
+interface FakeInit {
+  output: (item: unknown) => void;
+  error: (e: Error) => void;
+}
+
+/**
+ * Build a fake VideoDecoder/VideoEncoder class that emits `emit` outputs on
+ * flush(). Set `flushError` to model a codec that fails during flush.
+ * Created instances are pushed to `instances` so tests can assert cleanup.
+ */
+function makeFakeCodec(
+  emit: () => unknown[],
+  instances: Array<{ state: string }>,
+  flushError?: Error,
+) {
+  return class FakeCodec {
+    state = 'unconfigured';
+    private init: FakeInit;
+    constructor(init: FakeInit) {
+      this.init = init;
+      instances.push(this);
+    }
+    configure(): void { this.state = 'configured'; }
+    decode(): void { /* output is delivered on flush */ }
+    encode(): void { /* output is delivered on flush */ }
+    async flush(): Promise<void> {
+      if (flushError) {
+        this.init.error(flushError);
+        throw flushError;
+      }
+      for (const item of emit()) this.init.output(item);
+    }
+    close(): void { this.state = 'closed'; }
+  };
+}
+
+describe('VideoPipeline — batch decode/encode completion & cleanup', () => {
+  function configuredDecoder(): VideoPipeline {
+    const p = new VideoPipeline();
+    (p as unknown as { decoderConfig: unknown }).decoderConfig = { codec: 'avc1.42001E' };
+    return p;
+  }
+  function configuredEncoder(): VideoPipeline {
+    const p = new VideoPipeline();
+    (p as unknown as { encoderConfig: unknown }).encoderConfig = { codec: 'avc1.42001E' };
+    return p;
+  }
+  const chunk = () => ({ type: 'key', timestamp: 0 }) as unknown as EncodedVideoChunk;
+
+  it('decodeFrames resolves with fewer outputs than inputs (no hang)', async () => {
+    const instances: Array<{ state: string }> = [];
+    // 3 chunks in, only 2 frames out — the old count-gated code would hang.
+    vi.stubGlobal('VideoDecoder', makeFakeCodec(() => [fakeFrame(), fakeFrame()], instances));
+    const p = configuredDecoder();
+    const frames = await p.decodeFrames([chunk(), chunk(), chunk()]);
+    expect(frames).toHaveLength(2);
+    expect(instances[0].state).toBe('closed'); // decoder released, no leak
+    expect(p.getStats().decodedFrames).toBe(2);
+  });
+
+  it('decodeFrames closes the decoder even when flush rejects', async () => {
+    const instances: Array<{ state: string }> = [];
+    vi.stubGlobal('VideoDecoder', makeFakeCodec(() => [], instances, new Error('decode fail')));
+    const p = configuredDecoder();
+    await expect(p.decodeFrames([chunk()])).rejects.toThrow('decode fail');
+    expect(instances[0].state).toBe('closed');
+  });
+
+  it('decodeFrame returns the first frame and closes extras', async () => {
+    const extra = fakeFrame();
+    const instances: Array<{ state: string }> = [];
+    vi.stubGlobal('VideoDecoder', makeFakeCodec(() => [fakeFrame(), extra], instances));
+    const p = configuredDecoder();
+    const frame = await p.decodeFrame(chunk());
+    expect(frame).toBeDefined();
+    expect(extra.close).toHaveBeenCalled(); // surplus frame not leaked
+    expect(instances[0].state).toBe('closed');
+  });
+
+  it('decodeFrame throws when the decoder produces no frame', async () => {
+    const instances: Array<{ state: string }> = [];
+    vi.stubGlobal('VideoDecoder', makeFakeCodec(() => [], instances));
+    const p = configuredDecoder();
+    await expect(p.decodeFrame(chunk())).rejects.toThrow('no frame');
+    expect(instances[0].state).toBe('closed'); // still released
+  });
+
+  it('encodeFrames resolves with a differing chunk count (no hang)', async () => {
+    const instances: Array<{ state: string }> = [];
+    const out = () => ({ type: 'key', timestamp: 0 });
+    vi.stubGlobal('VideoEncoder', makeFakeCodec(() => [out()], instances)); // 2 in, 1 out
+    const p = configuredEncoder();
+    const chunks = await p.encodeFrames([fakeFrame(), fakeFrame()]);
+    expect(chunks).toHaveLength(1);
+    expect(instances[0].state).toBe('closed');
+    expect(p.getStats().encodedFrames).toBe(1);
+  });
+
+  it('encodeFrame throws when the encoder produces no chunk', async () => {
+    const instances: Array<{ state: string }> = [];
+    vi.stubGlobal('VideoEncoder', makeFakeCodec(() => [], instances));
+    const p = configuredEncoder();
+    await expect(p.encodeFrame(fakeFrame())).rejects.toThrow('no chunk');
+    expect(instances[0].state).toBe('closed');
+  });
+
+  it('encodeFrames closes the encoder even when flush rejects', async () => {
+    const instances: Array<{ state: string }> = [];
+    vi.stubGlobal('VideoEncoder', makeFakeCodec(() => [], instances, new Error('encode fail')));
+    const p = configuredEncoder();
+    await expect(p.encodeFrames([fakeFrame()])).rejects.toThrow('encode fail');
+    expect(instances[0].state).toBe('closed');
+  });
+});
+
+// ============================================================
 // VideoPipeline — processors & stats
 // ============================================================
 

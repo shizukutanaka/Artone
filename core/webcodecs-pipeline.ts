@@ -271,6 +271,21 @@ export class FrameProcessorStream extends TransformStream<DecodedFrame, DecodedF
 // Video Pipeline
 // ============================================================
 
+/**
+ * Close a decoder/encoder without throwing if it is already closed.
+ *
+ * Batch decode/encode must always release the underlying codec — even on the
+ * error path — to avoid leaking the (often hardware-backed) instance. close()
+ * throws in some states, so guard on `state` and swallow races.
+ */
+function closeQuietly(codec: VideoDecoder | VideoEncoder): void {
+  try {
+    if (codec.state !== 'closed') codec.close();
+  } catch {
+    // Already closing/closed — nothing left to release.
+  }
+}
+
 export class VideoPipeline {
   private decoderConfig: VideoDecoderConfig | null = null;
   private encoderConfig: VideoEncoderConfig | null = null;
@@ -346,51 +361,66 @@ export class VideoPipeline {
     if (!this.decoderConfig) {
       throw new Error('Decoder not configured');
     }
+    const config = this.decoderConfig;
 
-    return new Promise((resolve, reject) => {
-      const decoder = new VideoDecoder({
-        output: (frame) => {
-          this.stats.decodedFrames++;
-          resolve(frame);
-        },
-        error: reject
-      });
-
-      decoder.configure(this.decoderConfig!);
-      decoder.decode(chunk);
-      decoder.flush().then(() => decoder.close());
+    // Completion is driven by flush() — the only reliable "all output
+    // delivered" signal — not by the first output callback, which may never
+    // fire for a delta chunk that the decoder cannot produce a frame from.
+    const frames: VideoFrame[] = [];
+    const decoder = new VideoDecoder({
+      output: (frame) => {
+        this.stats.decodedFrames++;
+        frames.push(frame);
+      },
+      error: (e) => log.error('Decode error:', e)
     });
+
+    try {
+      decoder.configure(config);
+      decoder.decode(chunk);
+      await decoder.flush();
+    } finally {
+      closeQuietly(decoder);
+    }
+
+    if (frames.length === 0) {
+      throw new Error('Decoder produced no frame for chunk');
+    }
+    // Return the first frame; close any extras so they are not leaked.
+    for (let i = 1; i < frames.length; i++) frames[i].close();
+    return frames[0];
   }
 
   async decodeFrames(chunks: EncodedVideoChunk[]): Promise<VideoFrame[]> {
     if (!this.decoderConfig) {
       throw new Error('Decoder not configured');
     }
+    const config = this.decoderConfig;
 
+    // Resolve when flush() reports all queued work is drained. Gating on
+    // output-count == input-count hangs forever (and leaks the decoder) when
+    // the codec emits a different number of frames — normal with B-frame
+    // reordering or dropped/corrupt input.
     const frames: VideoFrame[] = [];
+    const decoder = new VideoDecoder({
+      output: (frame) => {
+        this.stats.decodedFrames++;
+        frames.push(frame);
+      },
+      error: (e) => log.error('Decode error:', e)
+    });
 
-    return new Promise((resolve, reject) => {
-      const decoder = new VideoDecoder({
-        output: (frame) => {
-          this.stats.decodedFrames++;
-          frames.push(frame);
-          
-          if (frames.length === chunks.length) {
-            decoder.close();
-            resolve(frames);
-          }
-        },
-        error: reject
-      });
-
-      decoder.configure(this.decoderConfig!);
-      
+    try {
+      decoder.configure(config);
       for (const chunk of chunks) {
         decoder.decode(chunk);
       }
-      
-      decoder.flush();
-    });
+      await decoder.flush();
+    } finally {
+      closeQuietly(decoder);
+    }
+
+    return frames;
   }
 
   // ============================================================
@@ -401,51 +431,62 @@ export class VideoPipeline {
     if (!this.encoderConfig) {
       throw new Error('Encoder not configured');
     }
+    const config = this.encoderConfig;
 
-    return new Promise((resolve, reject) => {
-      const encoder = new VideoEncoder({
-        output: (chunk) => {
-          this.stats.encodedFrames++;
-          resolve(chunk);
-        },
-        error: reject
-      });
-
-      encoder.configure(this.encoderConfig!);
-      encoder.encode(frame, { keyFrame });
-      encoder.flush().then(() => encoder.close());
+    // See decodeFrame: completion is driven by flush(), and the encoder is
+    // always released via finally so a failed encode cannot leak it.
+    const chunks: EncodedVideoChunk[] = [];
+    const encoder = new VideoEncoder({
+      output: (chunk) => {
+        this.stats.encodedFrames++;
+        chunks.push(chunk);
+      },
+      error: (e) => log.error('Encode error:', e)
     });
+
+    try {
+      encoder.configure(config);
+      encoder.encode(frame, { keyFrame });
+      await encoder.flush();
+    } finally {
+      closeQuietly(encoder);
+    }
+
+    if (chunks.length === 0) {
+      throw new Error('Encoder produced no chunk for frame');
+    }
+    return chunks[0];
   }
 
   async encodeFrames(frames: VideoFrame[], keyFrameInterval = 30): Promise<EncodedVideoChunk[]> {
     if (!this.encoderConfig) {
       throw new Error('Encoder not configured');
     }
+    const config = this.encoderConfig;
 
+    // Resolve on flush() rather than output-count == frame-count: an encoder
+    // may emit a different number of chunks (e.g. coalescing), which would
+    // otherwise hang forever and leak the encoder.
     const chunks: EncodedVideoChunk[] = [];
+    const encoder = new VideoEncoder({
+      output: (chunk) => {
+        this.stats.encodedFrames++;
+        chunks.push(chunk);
+      },
+      error: (e) => log.error('Encode error:', e)
+    });
 
-    return new Promise((resolve, reject) => {
-      const encoder = new VideoEncoder({
-        output: (chunk) => {
-          this.stats.encodedFrames++;
-          chunks.push(chunk);
-          
-          if (chunks.length === frames.length) {
-            encoder.close();
-            resolve(chunks);
-          }
-        },
-        error: reject
-      });
-
-      encoder.configure(this.encoderConfig!);
-      
+    try {
+      encoder.configure(config);
       frames.forEach((frame, i) => {
         encoder.encode(frame, { keyFrame: i % keyFrameInterval === 0 });
       });
-      
-      encoder.flush();
-    });
+      await encoder.flush();
+    } finally {
+      closeQuietly(encoder);
+    }
+
+    return chunks;
   }
 
   // ============================================================
@@ -608,13 +649,9 @@ export class VideoPipeline {
 
     for (let i = 0; i < count; i++) {
       const chunkIndex = Math.min(i * interval, chunks.length - 1);
-      
-      // Find nearest keyframe
-      let keyFrameIndex = chunkIndex;
-      while (keyFrameIndex > 0 && chunks[keyFrameIndex].type !== 'key') {
-        keyFrameIndex--;
-      }
 
+      // extractFrameAtTime already seeks from the nearest keyframe ≤ the
+      // target timestamp, so no keyframe lookup is needed here.
       const frame = await this.extractFrameAtTime(
         chunks,
         chunks[chunkIndex].timestamp,

@@ -12,6 +12,8 @@ Artone v3 の全変更を記録。
 - **GIF 書き出しパス** (`export/export-engine.ts`): `export()` が GIF フォーマット時に WebCodecs をバイパスし `exportGif()` → `videoFrameToImageData()` → `encodeGif()` を呼ぶ専用ルートを追加。
 
 ### Fixed
+- **`core/webcodecs-pipeline.ts` バッチ復号/符号化のハング+コーデックリークを修正** (リスクゾーン core)。`decodeFrame(s)`/`encodeFrame(s)` が「出力数 == 入力数」で完了判定していたため、B フレーム並び替え・破損/ドロップ・エンコーダのチャンク統合などで出力数が入力数と異なると Promise が永久に解決されず (ハング)、`decoder/encoder.close()` も呼ばれずインスタンスがリーク。完了判定を WebCodecs の正規シグナルである `flush()` 完了に変更し、`closeQuietly()` で `finally` から必ずコーデックを解放 (エラー経路含む)。余剰 `VideoFrame` も close してリーク防止。WebCodecs 契約に忠実なフェイク (output/flush/close) で完了・解放を検証する 7 テストを追加 (旧実装ではタイムアウトで落ちる)。
+- `core/webcodecs-pipeline.ts`: `generateThumbnails` が後方走査で `keyFrameIndex` を算出していたが未使用の dead code だった (`extractFrameAtTime` が内部で同等のキーフレーム探索を実施済み) を除去。
 - `export/export-engine.ts`: GIF フォーマット判定が WebCodecs 音声エンコードパスに残存していた (到達不能な dead code) を除去。
 - `perf/performance-monitor.ts`: `getMetrics()` の `gpuTime` が `0` にハードコードされ GPU バウンド検出が常に機能しない問題を修正。`recordGPUTime(queryId)` を追加し GPU タイムスタンプクエリ結果をキャッシュして `analyzeBottleneck()` に反映するようにした。
 

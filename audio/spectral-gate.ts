@@ -11,8 +11,10 @@
  *   3. In each frame: subtract α × noise estimate from the magnitude
  *      spectrum, floor remaining components at `floorDb` (prevents
  *      musical noise), and reconstruct with original phase.
- *   4. Weighted overlap-add (Hann analysis × Hann synthesis, per-sample
- *      normalisation via accumulated window-weight sum).
+ *   4. Overlap-add the reconstructed frames. A single Hann analysis window is
+ *      applied; at 50 % overlap it satisfies the COLA property (∑ hann = 1),
+ *      so the overlapped interior reconstructs at unity gain with no synthesis
+ *      window. The leading/trailing frame tapers (standard STFT edge effect).
  *
  * This is a *purely statistical* approach — no neural model required.
  * Suitable for removing consistent HVAC, microphone hiss, and room tone.
@@ -261,9 +263,10 @@ export function estimateNoiseProfile(noise: Float32Array, fftSize = 2048): Noise
 /**
  * Apply spectral subtraction noise reduction to a mono audio signal.
  *
- * Uses Weighted Overlap-Add (WOLA) with Hann analysis and Hann synthesis
- * windows plus per-sample normalisation for perfect reconstruction at
- * gain = 1.
+ * Uses a Hann analysis window with overlap-add at 50 % overlap. The window's
+ * COLA property (∑ hann = 1) gives unity-gain reconstruction across the
+ * overlapped interior without a synthesis window; the first and last frames
+ * taper (the usual STFT edge effect).
  *
  * @param input          Mono PCM to denoise.
  * @param noiseProfile   Pre-computed noise profile from `estimateNoiseProfile`.

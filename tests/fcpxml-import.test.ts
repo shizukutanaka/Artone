@@ -50,6 +50,46 @@ describe('FCPXML parsing', () => {
     expect(tl.videoTracks[0].clips[0].durationFrames).toBe(48);
   });
 
+  it('converts reduced rationals from real FCP (denominator ≠ fps)', () => {
+    // Real Final Cut reduces fractions: a 3 s clip at 30 fps is "3s", and a
+    // 1 s start offset is "1s" — not "90/30s"/"30/30s". The importer must
+    // convert by seconds×fps, not return the bare numerator.
+    const xml = [
+      '<fcpxml version="1.10">',
+      '  <resources><format id="r1" frameDuration="1/30s"/>',
+      '    <asset id="r2" name="A" src="a.mov"/></resources>',
+      '  <library><event name="E"><project name="P">',
+      '    <sequence format="r1"><spine>',
+      // offset 1 s = 30 frames, start 0.5 s = 15 frames, duration 3 s = 90 frames
+      '      <clip name="A" offset="1s" start="1/2s" duration="3s" ref="r2"/>',
+      '    </spine></sequence>',
+      '  </project></event></library>',
+      '</fcpxml>',
+    ].join('\n');
+    const clip = interchange.fcpxmlImporter().import(xml).videoTracks[0].clips[0];
+    expect(clip.startFrame).toBe(30);      // was 1 (bare numerator) before the fix
+    expect(clip.sourceInFrame).toBe(15);   // was 1
+    expect(clip.durationFrames).toBe(90);  // was 3
+  });
+
+  it('round-trips NTSC reduced frame durations (29.97 → fps 30)', () => {
+    // 100 frames at 29.97: real FCP writes 100×1001/30000 = 100100/30000 s.
+    const xml = [
+      '<fcpxml version="1.10">',
+      '  <resources><format id="r1" frameDuration="1001/30000s"/>',
+      '    <asset id="r2" name="A" src="a.mov"/></resources>',
+      '  <library><event name="E"><project name="P">',
+      '    <sequence format="r1"><spine>',
+      '      <clip name="A" offset="0s" start="0s" duration="100100/30000s" ref="r2"/>',
+      '    </spine></sequence>',
+      '  </project></event></library>',
+      '</fcpxml>',
+    ].join('\n');
+    const tl = interchange.fcpxmlImporter().import(xml);
+    expect(tl.fps).toBe(30);
+    expect(tl.videoTracks[0].clips[0].durationFrames).toBe(100);
+  });
+
   it('throws on malformed XML', () => {
     expect(() => interchange.fcpxmlImporter().import('<fcpxml><unclosed>')).toThrow();
   });

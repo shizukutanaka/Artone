@@ -365,9 +365,9 @@ export class FCPXMLImporter {
       clips.push({
         id: crypto.randomUUID(),
         name: el.getAttribute('name') ?? `Clip ${i + 1}`,
-        startFrame: this.parseFrames(el.getAttribute('offset')),
-        durationFrames: this.parseFrames(el.getAttribute('duration')),
-        sourceInFrame: this.parseFrames(el.getAttribute('start')),
+        startFrame: this.parseFrames(el.getAttribute('offset'), fps),
+        durationFrames: this.parseFrames(el.getAttribute('duration'), fps),
+        sourceInFrame: this.parseFrames(el.getAttribute('start'), fps),
         mediaUrl: assets.get(ref) ?? '',
         effects: [],
         markers: [],
@@ -380,11 +380,22 @@ export class FCPXMLImporter {
     return { name, fps, videoTracks, audioTracks: [], markers: [] };
   }
 
-  /** "N/Rs" または "Ns" 形式の rational 時間からフレーム番号 (分子) を取り出す。 */
-  private parseFrames(value: string | null): number {
+  /**
+   * "N/Ds" または "Ns" 形式の rational 秒をフレーム番号へ変換する。
+   *
+   * FCPXML の時間は「秒の有理数」であり、分母は fps と一致するとは限らない
+   * (実機 FCP は約分する: 30fps の 3 秒は "3s")。分子だけを返すと約分された値で
+   * 全タイミングが壊れるため、frames = round(N/D × fps) で正しく換算する。
+   * Artone 自身の出力 (分母 = fps) でも round(N/fps × fps) = N となり往復一致。
+   */
+  private parseFrames(value: string | null, fps: number): number {
     if (!value) return 0;
     const m = value.match(/^(-?\d+)(?:\/(\d+))?s$/);
-    return m ? Number(m[1]) : 0;
+    if (!m) return 0;
+    const numer = Number(m[1]);
+    const denom = m[2] !== undefined ? Number(m[2]) : 1; // "Ns" は N 秒
+    if (denom === 0) return 0;
+    return Math.round((numer / denom) * fps);
   }
 }
 

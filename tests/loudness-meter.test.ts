@@ -318,4 +318,47 @@ describe('createLoudnessMeter', () => {
     meter.process([sine(1000, 10, 0.1)]);
     expect(meter.getMeasurement().loudnessRange).toBeGreaterThanOrEqual(0);
   });
+
+  // ── lifecycle / bounded-state guarantees (24h continuous metering) ──
+
+  it('tiny-chunk streaming matches offline within tight tolerance (integrated/LRA)', () => {
+    // Persistent K-weighting state ⇒ chunked filtering == filtering the whole
+    // signal, so the bounded incremental meter should match offline closely.
+    const ch = sine(1000, 5, 0.25);
+    const offline = measureLoudness([ch]);
+    const meter = createLoudnessMeter();
+    const STEP = 137; // deliberately awkward chunk size, crosses 100 ms blocks
+    for (let i = 0; i < ch.length; i += STEP) meter.process([ch.subarray(i, i + STEP)]);
+    const m = meter.getMeasurement();
+    expect(Math.abs(m.integrated - offline.integrated)).toBeLessThan(0.1);
+    expect(Math.abs(m.loudnessRange - offline.loudnessRange)).toBeLessThan(0.1);
+    expect(Math.abs(m.momentary - offline.momentary)).toBeLessThan(0.1);
+  });
+
+  it('streaming recovers an inter-sample true peak fed in chunks', () => {
+    // fs/4 tone phased by π/4: samples sit on ±0.707 (sample peak ≈ -3 dBFS)
+    // while the waveform crests at 1.0 (0 dBFS) between samples.
+    const N = 4096;
+    const ch = new Float32Array(N);
+    for (let i = 0; i < N; i++) ch[i] = Math.sin((Math.PI / 2) * i + Math.PI / 4);
+    const meter = createLoudnessMeter(48000);
+    for (let i = 0; i < N; i += 100) meter.process([ch.subarray(i, i + 100)]);
+    const m = meter.getMeasurement();
+    expect(m.samplePeak).toBeLessThan(-2.5);
+    expect(m.samplePeak).toBeGreaterThan(-3.5);
+    expect(m.truePeak - m.samplePeak).toBeGreaterThan(2); // inter-sample crest recovered
+    expect(m.truePeak).toBeGreaterThanOrEqual(m.samplePeak);
+  });
+
+  it('result is independent of chunking granularity (1 vs 1000-sample chunks)', () => {
+    const ch = sine(440, 4, 0.3);
+    const big = createLoudnessMeter();
+    big.process([ch]);
+    const small = createLoudnessMeter();
+    for (let i = 0; i < ch.length; i += 1000) small.process([ch.subarray(i, i + 1000)]);
+    const a = big.getMeasurement();
+    const b = small.getMeasurement();
+    expect(Math.abs(a.integrated - b.integrated)).toBeLessThan(1e-6);
+    expect(Math.abs(a.truePeak - b.truePeak)).toBeLessThan(1e-6);
+  });
 });

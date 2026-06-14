@@ -243,9 +243,11 @@ function maxWindowLoudness(weightedChannels: Float32Array[], sampleRate: number,
   return max;
 }
 
-/** Loudness Range (LRA, EBU Tech 3342): 3s 窓 / 100ms hop, 相対 -20 LU, 10-95 パーセンタイル。 */
-function loudnessRange(weightedChannels: Float32Array[], sampleRate: number): number {
-  const energies = blockEnergies(weightedChannels, { sampleRate, windowSec: 3.0, hopSec: 0.1 });
+/**
+ * LRA from a precomputed 3s-window energy array (EBU Tech 3342: 相対 -20 LU,
+ * 10-95 パーセンタイル)。バッチ・ストリーミング双方が共有する。
+ */
+function loudnessRangeFromEnergies(energies: number[]): number {
   const absKept = energies.filter((z) => loudnessFromZ(z) >= ABSOLUTE_GATE);
   if (absKept.length < 2) return 0;
 
@@ -260,6 +262,23 @@ function loudnessRange(weightedChannels: Float32Array[], sampleRate: number): nu
   const p10 = loud[Math.floor(loud.length * 0.1)];
   const p95 = loud[Math.min(loud.length - 1, Math.floor(loud.length * 0.95))];
   return Math.max(0, p95 - p10);
+}
+
+/** Loudness Range (LRA, EBU Tech 3342): 3s 窓 / 100ms hop, 相対 -20 LU, 10-95 パーセンタイル。 */
+function loudnessRange(weightedChannels: Float32Array[], sampleRate: number): number {
+  const energies = blockEnergies(weightedChannels, { sampleRate, windowSec: 3.0, hopSec: 0.1 });
+  return loudnessRangeFromEnergies(energies);
+}
+
+/** 最大窓ラウドネス (momentary/short-term) を z 配列から。空配列は overall フォールバック。 */
+function maxLoudnessFromEnergies(energies: number[], overallZ: number): number {
+  if (energies.length === 0) return loudnessFromZ(overallZ);
+  let max = -Infinity;
+  for (const z of energies) {
+    const l = loudnessFromZ(z);
+    if (l > max) max = l;
+  }
+  return max;
 }
 
 // ============================================================
@@ -411,6 +430,12 @@ export function measureLoudness(channels: Float32Array[], sampleRate = 48000): L
 // Public: streaming meter
 // ============================================================
 
+/** Per-channel K-weighting filter state (2 cascaded biquads, transposed DF-II). */
+interface KWChannelState {
+  s1a: number; s2a: number; // stage 1
+  s1b: number; s2b: number; // stage 2
+}
+
 /**
  * Create a stateful streaming loudness meter.
  *
@@ -418,51 +443,172 @@ export function measureLoudness(channels: Float32Array[], sampleRate = 48000): L
  * {@link LoudnessMeter.getMeasurement} returns an aggregate over all blocks
  * processed so far. Call {@link LoudnessMeter.reset} to start a new session.
  *
+ * Memory is **bounded**: the meter keeps a persistent K-weighting filter state
+ * and accumulates one channel-weighted mean-square energy per 100 ms block
+ * (the BS.1770 base hop) — never the audio. A previous implementation stored a
+ * copy of every block forever and re-analysed the entire history on each
+ * getMeasurement() (O(total samples) memory, O(N²) time) — fatal for the
+ * 24-hour continuous-metering requirement. Integrated/momentary/LRA match the
+ * offline measureLoudness exactly because the persistent filter makes the
+ * K-weighted samples identical to filtering the whole signal at once.
+ *
  * @param sampleRate  Sample rate in Hz. Default: 48000.
  */
 export function createLoudnessMeter(sampleRate = 48000): LoudnessMeter {
-  const blocks: Array<Float32Array[]> = [];
+  const kw = kWeightingCoeffs(sampleRate);
+  const baseSamples = Math.max(1, Math.round(0.1 * sampleRate)); // 100 ms base block
+  const tpHalf = TRUE_PEAK_HALF;
+  const tpTaps = tpHalf * 2;
+
   let numChannels = 0;
-  let runningPeak = 0;
+  let chStates: KWChannelState[] = [];
+  let tpCarry: Float32Array[] = []; // recent raw samples per channel for inter-sample peak
+
+  // Channel-weighted sum of squared K-weighted samples for the in-progress block.
+  let curSum = 0;
+  let curCount = 0;
+  const baseEnergies: number[] = []; // one channel-weighted sum-of-squares per completed 100 ms block
+
+  let samplePeakAbs = 0;
+  let truePeakAbs = 0;
+
+  function ensureChannels(n: number): void {
+    if (numChannels !== 0) return;
+    numChannels = n;
+    chStates = Array.from({ length: n }, () => ({ s1a: 0, s2a: 0, s1b: 0, s2b: 0 }));
+    tpCarry = Array.from({ length: n }, () => new Float32Array(0));
+  }
+
+  /** One K-weighted sample (stage1 → stage2), updating per-channel state in place. */
+  function kWeightSample(st: KWChannelState, x: number): number {
+    const y1 = kw.stage1.b0 * x + st.s1a;
+    st.s1a = kw.stage1.b1 * x - kw.stage1.a1 * y1 + st.s2a;
+    st.s2a = kw.stage1.b2 * x - kw.stage1.a2 * y1;
+    const y2 = kw.stage2.b0 * y1 + st.s1b;
+    st.s1b = kw.stage2.b1 * y1 - kw.stage2.a1 * y2 + st.s2b;
+    st.s2b = kw.stage2.b2 * y1 - kw.stage2.a2 * y2;
+    return y2;
+  }
+
+  /** Streaming inter-sample (true) peak with a bounded per-channel carry. */
+  function updateTruePeak(ch: number, data: Float32Array): void {
+    const carry = tpCarry[ch];
+    const joined = new Float32Array(carry.length + data.length);
+    joined.set(carry, 0);
+    joined.set(data, carry.length);
+    for (let phase = 0; phase < TRUE_PEAK_KERNELS.length; phase++) {
+      const ker = TRUE_PEAK_KERNELS[phase];
+      // Only evaluate pairs with full kernel context; re-evaluating the carry
+      // overlap is harmless because we track a running max (idempotent).
+      for (let i = tpHalf - 1; i + tpHalf <= joined.length - 1; i++) {
+        let acc = 0;
+        for (let t = 0; t < tpTaps; t++) acc += joined[i + (t - tpHalf + 1)] * ker[t];
+        const v = acc < 0 ? -acc : acc;
+        if (v > truePeakAbs) truePeakAbs = v;
+      }
+    }
+    const keep = Math.min(joined.length, tpTaps);
+    tpCarry[ch] = joined.slice(joined.length - keep);
+  }
 
   function process(channels: Float32Array[]): void {
     if (channels.length === 0) return;
-    if (numChannels === 0) numChannels = channels.length;
-    blocks.push(channels.map((ch) => ch.slice()));
-    for (const ch of channels) {
-      for (let i = 0; i < ch.length; i++) {
-        const a = Math.abs(ch[i]);
-        if (a > runningPeak) runningPeak = a;
+    ensureChannels(channels.length);
+    const n = channels[0]?.length ?? 0;
+
+    // Sample peak + streaming inter-sample (true) peak.
+    for (let ch = 0; ch < numChannels; ch++) {
+      const data = channels[ch];
+      if (!data) continue;
+      for (let i = 0; i < data.length; i++) {
+        const a = Math.abs(data[i]);
+        if (a > samplePeakAbs) samplePeakAbs = a;
+      }
+      updateTruePeak(ch, data);
+    }
+
+    // K-weight each channel (persistent state) and accumulate per-block energy.
+    for (let i = 0; i < n; i++) {
+      let z = 0;
+      for (let ch = 0; ch < numChannels; ch++) {
+        const w = channelWeight(ch);
+        if (w === 0) continue; // LFE excluded (matches blockEnergies)
+        const data = channels[ch];
+        const x = data && i < data.length ? data[i] : 0;
+        const kwSample = kWeightSample(chStates[ch], x);
+        z += w * kwSample * kwSample;
+      }
+      curSum += z;
+      if (++curCount >= baseSamples) {
+        baseEnergies.push(curSum);
+        curSum = 0;
+        curCount = 0;
       }
     }
   }
 
-  function getMeasurement(): LoudnessMeasurement {
-    const empty: LoudnessMeasurement = {
-      momentary: -Infinity, shortTerm: -Infinity, integrated: -Infinity,
-      range: 0, loudnessRange: 0, truePeak: -Infinity, samplePeak: -Infinity,
-    };
-    if (blocks.length === 0 || numChannels === 0) return empty;
+  /** Window energies (mean square) from base-block partial sums. */
+  function windowEnergies(windowBlocks: number, hopBlocks: number): number[] {
+    const out: number[] = [];
+    const denom = windowBlocks * baseSamples;
+    for (let start = 0; start + windowBlocks <= baseEnergies.length; start += hopBlocks) {
+      let s = 0;
+      for (let k = 0; k < windowBlocks; k++) s += baseEnergies[start + k];
+      out.push(s / denom);
+    }
+    return out;
+  }
 
-    // Concatenate stored blocks into full-length per-channel arrays
-    const merged: Float32Array[] = [];
-    for (let c = 0; c < numChannels; c++) {
-      const parts = blocks.filter((blk) => c < blk.length).map((blk) => blk[c]);
-      const total = parts.reduce((s, p) => s + p.length, 0);
-      const data  = new Float32Array(total);
-      let off = 0;
-      for (const p of parts) { data.set(p, off); off += p.length; }
-      merged.push(data);
+  /** Overall channel-weighted mean square over all audio so far (short-clip fallback). */
+  function overallZ(): number {
+    let total = curSum;
+    for (const e of baseEnergies) total += e;
+    const count = baseEnergies.length * baseSamples + curCount;
+    return count > 0 ? total / count : 0;
+  }
+
+  function getMeasurement(): LoudnessMeasurement {
+    if (numChannels === 0 || (baseEnergies.length === 0 && curCount === 0)) {
+      return {
+        momentary: -Infinity, shortTerm: -Infinity, integrated: -Infinity,
+        range: 0, loudnessRange: 0, truePeak: -Infinity, samplePeak: -Infinity,
+      };
     }
 
-    const m = measureLoudness(merged, sampleRate);
-    return { ...m, samplePeak: runningPeak > 0 ? 20 * Math.log10(runningPeak) : -Infinity };
+    const oz = overallZ();
+    // 100 ms base ⇒ momentary 400 ms = 4 blocks, short-term/LRA 3 s = 30 blocks,
+    // all at 100 ms hop (1 block). Matches the offline windows for integrated /
+    // momentary / LRA; short-term uses a finer hop than offline (no strict test).
+    const momentary = windowEnergies(4, 1);
+    const shortTerm = windowEnergies(30, 1);
+    const integrated =
+      momentary.length > 0 ? gatedLoudness(momentary, RELATIVE_GATE_INTEGRATED) : loudnessFromZ(oz);
+    const lra = loudnessRangeFromEnergies(shortTerm);
+
+    const samplePeak = samplePeakAbs > 0 ? 20 * Math.log10(samplePeakAbs) : -Infinity;
+    const peakAbs = Math.max(samplePeakAbs, truePeakAbs);
+    const truePeak = peakAbs > 0 ? 20 * Math.log10(peakAbs) : -Infinity;
+
+    return {
+      momentary: maxLoudnessFromEnergies(momentary, oz),
+      shortTerm: maxLoudnessFromEnergies(shortTerm, oz),
+      integrated,
+      range: lra,
+      loudnessRange: lra,
+      truePeak,
+      samplePeak,
+    };
   }
 
   function reset(): void {
-    blocks.length = 0;
-    numChannels   = 0;
-    runningPeak   = 0;
+    numChannels = 0;
+    chStates = [];
+    tpCarry = [];
+    curSum = 0;
+    curCount = 0;
+    baseEnergies.length = 0;
+    samplePeakAbs = 0;
+    truePeakAbs = 0;
   }
 
   return { process, getMeasurement, reset };

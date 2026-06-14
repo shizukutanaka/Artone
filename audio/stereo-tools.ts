@@ -160,9 +160,15 @@ export function panGains(pan: number, law: PanLaw = 'constant-power'): PanGains 
       return { left: 1 - p, right: p };
 
     case 'balanced': {
-      // Equal-power blend: L·R sum constant, no boost at extremes
-      const g = 1 / (1 + Math.abs(2 * p - 1));
-      return { left: (1 - p) + p * g, right: p + (1 - p) * g };
+      // Equal-power (cos/sin) law normalised so L + R = 1 at every position:
+      // full-left → 1/0, centre → 0.5/0.5, full-right → 0/1. This honours the
+      // documented contract (constant sum, 0.5 at centre) and, unlike the old
+      // 1/(1+|2p-1|) form, actually pans hard — that version left the opposite
+      // channel at 0.5 even at the extremes, so "full left" still played right.
+      const cl  = Math.cos(p * HALF_PI);
+      const cr  = Math.sin(p * HALF_PI);
+      const sum = cl + cr; // ∈ [1, √2] for p ∈ [0, 1] — never zero
+      return { left: cl / sum, right: cr / sum };
     }
   }
 }

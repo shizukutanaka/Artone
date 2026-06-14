@@ -467,4 +467,24 @@ describe('Integration — stereo processing chain', () => {
       }
     }
   });
+
+  it('balanced pan law honours its documented contract (sum=1, hard pan)', () => {
+    // Contract from panGains docs: L + R = 1 at every position, centre = 0.5
+    // each, and the extremes pan fully (opposite channel → 0).
+    for (const p of [0, 0.25, 0.5, 0.75, 1]) {
+      const { left, right } = panGains(p, 'balanced');
+      expect(left + right).toBeCloseTo(1, 6);
+    }
+    const centre = panGains(0.5, 'balanced');
+    expect(centre.left).toBeCloseTo(0.5, 6);
+    expect(centre.right).toBeCloseTo(0.5, 6);
+
+    const fullLeft = panGains(0, 'balanced');
+    expect(fullLeft.left).toBeCloseTo(1, 6);
+    expect(fullLeft.right).toBeCloseTo(0, 6); // was 0.5 in the broken version
+
+    const fullRight = panGains(1, 'balanced');
+    expect(fullRight.left).toBeCloseTo(0, 6);
+    expect(fullRight.right).toBeCloseTo(1, 6);
+  });
 });

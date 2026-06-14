@@ -393,3 +393,78 @@ describe('otio factory', () => {
     expect(otio.validator()).toBeInstanceOf(OTIOValidator);
   });
 });
+
+describe('OTIOImporter — malformed/partial input (trust boundary)', () => {
+  const imp = () => new OTIOImporter();
+
+  it('throws a clear error (not a cryptic TypeError) when tracks Stack is missing', () => {
+    expect(() => imp().importFromString('{"OTIO_SCHEMA":"Timeline.1","name":"X"}'))
+      .toThrow(/tracks must be a Stack/i);
+  });
+
+  it('throws a clear error when tracks is not a Stack.1', () => {
+    const json = '{"OTIO_SCHEMA":"Timeline.1","name":"X","tracks":{"OTIO_SCHEMA":"Track.1","children":[]}}';
+    expect(() => imp().importFromString(json)).toThrow(/Stack/i);
+  });
+
+  it('tolerates a missing stack.markers array', () => {
+    const json = '{"OTIO_SCHEMA":"Timeline.1","name":"X","tracks":{"OTIO_SCHEMA":"Stack.1","children":[]}}';
+    const tl = imp().importFromString(json);
+    expect(tl.markers).toEqual([]);
+    expect(tl.videoTracks).toEqual([]);
+  });
+
+  it('does not crash on a clip missing source_range (defaults timing to 0)', () => {
+    const json = JSON.stringify({
+      OTIO_SCHEMA: 'Timeline.1', name: 'X',
+      tracks: { OTIO_SCHEMA: 'Stack.1', markers: [], children: [
+        { OTIO_SCHEMA: 'Track.1', kind: 'Video', children: [
+          { OTIO_SCHEMA: 'Clip.2', name: 'c', media_reference: { OTIO_SCHEMA: 'ExternalReference.1', target_url: 'a.mov' } },
+        ] },
+      ] },
+    });
+    const clip = imp().importFromString(json).videoTracks[0].clips[0];
+    expect(clip.durationFrames).toBe(0);
+    expect(clip.sourceInFrame).toBe(0);
+    expect(clip.mediaUrl).toBe('a.mov');
+    expect(clip.effects).toEqual([]);   // missing effects array tolerated
+    expect(clip.markers).toEqual([]);   // missing markers array tolerated
+  });
+
+  it('does not crash on a clip missing media_reference (empty mediaUrl)', () => {
+    const json = JSON.stringify({
+      OTIO_SCHEMA: 'Timeline.1', name: 'X',
+      tracks: { OTIO_SCHEMA: 'Stack.1', children: [
+        { OTIO_SCHEMA: 'Track.1', kind: 'Video', children: [
+          { OTIO_SCHEMA: 'Clip.2', name: 'c', source_range: {
+            OTIO_SCHEMA: 'TimeRange.1',
+            start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 0 },
+            duration: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 45 },
+          } },
+        ] },
+      ] },
+    });
+    const clip = imp().importFromString(json).videoTracks[0].clips[0];
+    expect(clip.mediaUrl).toBe('');
+    expect(clip.durationFrames).toBe(45);
+  });
+
+  it('treats a NaN/zero-rate rational as 0 frames rather than NaN/Infinity', () => {
+    const json = JSON.stringify({
+      OTIO_SCHEMA: 'Timeline.1', name: 'X',
+      tracks: { OTIO_SCHEMA: 'Stack.1', children: [
+        { OTIO_SCHEMA: 'Track.1', kind: 'Video', children: [
+          { OTIO_SCHEMA: 'Clip.2', name: 'c', media_reference: { OTIO_SCHEMA: 'MissingReference.1' }, source_range: {
+            OTIO_SCHEMA: 'TimeRange.1',
+            start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 0, value: 10 },
+            duration: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 30 },
+          } },
+        ] },
+      ] },
+    });
+    const clip = imp().importFromString(json).videoTracks[0].clips[0];
+    expect(Number.isFinite(clip.sourceInFrame)).toBe(true);
+    expect(clip.sourceInFrame).toBe(0); // rate 0 → 0, not Infinity
+    expect(clip.durationFrames).toBe(30);
+  });
+});

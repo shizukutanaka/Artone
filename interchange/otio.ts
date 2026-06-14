@@ -244,12 +244,15 @@ function timeRange(startFrame: number, durationFrames: number, fps: number): OTI
   };
 }
 
-function fromRationalTime(rt: OTIORationalTime, targetFps: number): number {
-  // レート差を吸収。targetFps に揃える
-  if (rt.rate === 0) return 0; // guard: invalid OTIO rate must not produce Infinity
-  if (rt.rate === targetFps) return Math.round(rt.value);
+function fromRationalTime(rt: OTIORationalTime | null | undefined, targetFps: number): number {
+  // レート差を吸収。targetFps に揃える。
+  // 外部/旧/破損 OTIO に備え、欠損・非有限値は 0 に倒す (入口バリデーション)。
+  if (!rt || typeof rt.value !== 'number' || !Number.isFinite(rt.value)) return 0;
+  const rate = rt.rate;
+  if (typeof rate !== 'number' || rate === 0 || !Number.isFinite(rate)) return 0;
+  if (rate === targetFps) return Math.round(rt.value);
   // 整数演算優先で誤差軽減: (value * targetFps) / rate
-  return Math.round((rt.value * targetFps) / rt.rate);
+  return Math.round((rt.value * targetFps) / rate);
 }
 
 // === エクスポート: Artone → OTIO ===
@@ -398,6 +401,19 @@ export class OTIOExporter {
 
 export class OTIOImporter {
   /**
+   * Validate and return the timeline's Stack. External/old/corrupt OTIO must
+   * fail with a clear message at the entry point rather than a cryptic
+   * "Cannot read properties of undefined" deep in the conversion.
+   */
+  private requireStack(tl: OTIOTimeline): OTIOStack {
+    const stack = tl?.tracks;
+    if (!stack || stack.OTIO_SCHEMA !== 'Stack.1' || !Array.isArray(stack.children)) {
+      throw new Error('Invalid OTIO: timeline.tracks must be a Stack.1 with a children array');
+    }
+    return stack;
+  }
+
+  /**
    * Import and return both the timeline and a list of elements that could not
    * be fully round-tripped (e.g. foreign tool effects, unsupported retiming).
    */
@@ -408,12 +424,12 @@ export class OTIOImporter {
     } catch (err) {
       throw new Error(`Invalid OTIO JSON: ${(err as Error).message}`);
     }
-    if (parsed.OTIO_SCHEMA !== 'Timeline.1') {
-      throw new Error(`Unsupported OTIO schema: ${parsed.OTIO_SCHEMA}`);
+    if (parsed?.OTIO_SCHEMA !== 'Timeline.1') {
+      throw new Error(`Unsupported OTIO schema: ${parsed?.OTIO_SCHEMA}`);
     }
+    const stack = this.requireStack(parsed);
     const losses: OTIOImportLoss[] = [];
     const fps = targetFps ?? parsed.global_start_time?.rate ?? 30;
-    const stack = parsed.tracks;
 
     const videoTracks: ArtoneTrack[] = [];
     const audioTracks: ArtoneTrack[] = [];
@@ -431,15 +447,15 @@ export class OTIOImporter {
         fps,
         videoTracks,
         audioTracks,
-        markers: stack.markers.map((m) => this.fromOTIOMarker(m, fps)),
+        markers: (stack.markers ?? []).map((m) => this.fromOTIOMarker(m, fps)),
       },
       losses,
     };
   }
 
   import(otio: OTIOTimeline, targetFps?: number): ArtoneTimeline {
+    const stack = this.requireStack(otio);
     const fps = targetFps ?? otio.global_start_time?.rate ?? 30;
-    const stack = otio.tracks;
 
     const videoTracks: ArtoneTrack[] = [];
     const audioTracks: ArtoneTrack[] = [];
@@ -455,7 +471,7 @@ export class OTIOImporter {
       fps,
       videoTracks,
       audioTracks,
-      markers: stack.markers.map((m) => this.fromOTIOMarker(m, fps)),
+      markers: (stack.markers ?? []).map((m) => this.fromOTIOMarker(m, fps)),
     };
   }
 
@@ -482,7 +498,7 @@ export class OTIOImporter {
     let pendingTransition: ArtoneTransition | null = null;
     const trackName = track.name ?? 'Track';
 
-    for (const child of track.children) {
+    for (const child of track.children ?? []) {
       if (child.OTIO_SCHEMA === 'Clip.1' || child.OTIO_SCHEMA === 'Clip.2') {
         const { clip: artoneClip, clipLosses } = this.fromOTIOClipWithReport(
           child as OTIOClip, cursor, fps, trackName,
@@ -496,10 +512,10 @@ export class OTIOImporter {
           pendingTransition = null;
         }
         clips.push(artoneClip);
-        cursor += fromRationalTime((child as OTIOClip).source_range.duration, fps);
+        cursor += fromRationalTime((child as OTIOClip).source_range?.duration, fps);
         losses.push(...clipLosses);
       } else if (child.OTIO_SCHEMA === 'Gap.1') {
-        cursor += fromRationalTime((child as OTIOGap).source_range.duration, fps);
+        cursor += fromRationalTime((child as OTIOGap).source_range?.duration, fps);
       } else if (child.OTIO_SCHEMA === 'Transition.1') {
         const tr = child as OTIOTransition;
         const inFrames = fromRationalTime(tr.in_offset, fps);
@@ -533,12 +549,12 @@ export class OTIOImporter {
   ): { clip: ArtoneClip; clipLosses: OTIOImportLoss[] } {
     const losses: OTIOImportLoss[] = [];
     const ref = clip.media_reference;
-    const url = ref.OTIO_SCHEMA === 'ExternalReference.1' ? ref.target_url ?? '' : '';
+    const url = ref?.OTIO_SCHEMA === 'ExternalReference.1' ? ref.target_url ?? '' : '';
     const artoneId =
       (clip.metadata?.artone as { clipId?: string } | undefined)?.clipId ??
       `imported-${Math.random().toString(36).slice(2, 11)}`;
 
-    if (ref.OTIO_SCHEMA === 'MissingReference.1') {
+    if (ref?.OTIO_SCHEMA === 'MissingReference.1') {
       losses.push({
         trackName,
         clipName: clip.name,
@@ -551,7 +567,7 @@ export class OTIOImporter {
     let speedFactor: number | undefined;
     const artoneEffects: ArtoneEffect[] = [];
 
-    for (const eff of clip.effects) {
+    for (const eff of clip.effects ?? []) {
       if (eff.OTIO_SCHEMA === 'LinearTimeWarp.1') {
         const ltw = eff as OTIOLinearTimeWarp;
         // Artone speedFactor is reciprocal of OTIO time_scalar
@@ -578,11 +594,11 @@ export class OTIOImporter {
         id: artoneId,
         name: clip.name,
         startFrame,
-        durationFrames: fromRationalTime(clip.source_range.duration, fps),
-        sourceInFrame: fromRationalTime(clip.source_range.start_time, fps),
+        durationFrames: fromRationalTime(clip.source_range?.duration, fps),
+        sourceInFrame: fromRationalTime(clip.source_range?.start_time, fps),
         mediaUrl: url,
         effects: artoneEffects,
-        markers: clip.markers.map((m) => this.fromOTIOMarker(m, fps)),
+        markers: (clip.markers ?? []).map((m) => this.fromOTIOMarker(m, fps)),
         enabled: clip.enabled ?? true,
         ...(speedFactor !== undefined ? { speedFactor } : {}),
       },
@@ -595,7 +611,7 @@ export class OTIOImporter {
     let cursor = 0;
     let pendingTransition: ArtoneTransition | null = null;
 
-    for (const child of track.children) {
+    for (const child of track.children ?? []) {
       if (child.OTIO_SCHEMA === 'Clip.1' || child.OTIO_SCHEMA === 'Clip.2') {
         const artoneClip = this.fromOTIOClip(child as OTIOClip, cursor, fps);
         if (pendingTransition) {
@@ -607,9 +623,9 @@ export class OTIOImporter {
           pendingTransition = null;
         }
         clips.push(artoneClip);
-        cursor += fromRationalTime(child.source_range.duration, fps);
+        cursor += fromRationalTime((child as OTIOClip).source_range?.duration, fps);
       } else if (child.OTIO_SCHEMA === 'Gap.1') {
-        cursor += fromRationalTime((child as OTIOGap).source_range.duration, fps);
+        cursor += fromRationalTime((child as OTIOGap).source_range?.duration, fps);
       } else if (child.OTIO_SCHEMA === 'Transition.1') {
         const tr = child as OTIOTransition;
         const inFrames = fromRationalTime(tr.in_offset, fps);
@@ -634,14 +650,14 @@ export class OTIOImporter {
 
   private fromOTIOClip(clip: OTIOClip, startFrame: number, fps: number): ArtoneClip {
     const ref = clip.media_reference;
-    const url = ref.OTIO_SCHEMA === 'ExternalReference.1' ? ref.target_url ?? '' : '';
+    const url = ref?.OTIO_SCHEMA === 'ExternalReference.1' ? ref.target_url ?? '' : '';
     const artoneId =
       (clip.metadata?.artone as { clipId?: string } | undefined)?.clipId ??
       `imported-${Math.random().toString(36).slice(2, 11)}`;
 
     let speedFactor: number | undefined;
     const effects: ArtoneEffect[] = [];
-    for (const eff of clip.effects) {
+    for (const eff of clip.effects ?? []) {
       if (eff.OTIO_SCHEMA === 'LinearTimeWarp.1') {
         const ltw = eff as OTIOLinearTimeWarp;
         speedFactor = ltw.time_scalar !== 0 ? 1 / ltw.time_scalar : 1;
@@ -654,11 +670,11 @@ export class OTIOImporter {
       id: artoneId,
       name: clip.name,
       startFrame,
-      durationFrames: fromRationalTime(clip.source_range.duration, fps),
-      sourceInFrame: fromRationalTime(clip.source_range.start_time, fps),
+      durationFrames: fromRationalTime(clip.source_range?.duration, fps),
+      sourceInFrame: fromRationalTime(clip.source_range?.start_time, fps),
       mediaUrl: url,
       effects,
-      markers: clip.markers.map((m) => this.fromOTIOMarker(m, fps)),
+      markers: (clip.markers ?? []).map((m) => this.fromOTIOMarker(m, fps)),
       enabled: clip.enabled ?? true,
       ...(speedFactor !== undefined ? { speedFactor } : {}),
     };
@@ -672,8 +688,8 @@ export class OTIOImporter {
 
   private fromOTIOMarker(m: OTIOMarker, fps: number): ArtoneMarker {
     return {
-      frame: fromRationalTime(m.marked_range.start_time, fps),
-      duration: fromRationalTime(m.marked_range.duration, fps),
+      frame: fromRationalTime(m.marked_range?.start_time, fps),
+      duration: fromRationalTime(m.marked_range?.duration, fps),
       color: COLOR_MAP_OTIO_TO_ARTONE[m.color] ?? 'red',
       name: m.name ?? '',
       comment: m.comment,

@@ -111,6 +111,30 @@ describe('RecoveryManager — saveSnapshot', () => {
     const snaps = await mgr.getSnapshots('p');
     expect(snaps[0].checksum).toMatch(/^[0-9a-f]{16}$/);
   });
+
+  // ── crash-safety: critical saves must not be dropped by an in-flight save ──
+
+  it('drops an auto save while another save is in flight (status=saving)', async () => {
+    (mgr as unknown as { status: string }).status = 'saving';
+    const id = await mgr.saveSnapshot('auto', 'p', 'P', makeData());
+    expect(id).toBeNull();
+  });
+
+  it('persists a CRASH snapshot even while a save is in flight', async () => {
+    // Simulate an uncaught error firing mid-autosave: the crash snapshot must
+    // still be written — losing it here defeats the whole recovery system.
+    (mgr as unknown as { status: string }).status = 'saving';
+    const id = await mgr.saveSnapshot('crash', 'p', 'P', makeData({ playhead: 7 }));
+    expect(id).toBeTruthy();
+    const snaps = await mgr.getSnapshots('p');
+    expect(snaps.some((s) => s.type === 'crash')).toBe(true);
+  });
+
+  it('persists a MANUAL snapshot even while a save is in flight', async () => {
+    (mgr as unknown as { status: string }).status = 'saving';
+    const id = await mgr.saveSnapshot('manual', 'p', 'P', makeData());
+    expect(id).toBeTruthy();
+  });
 });
 
 // ============================================================

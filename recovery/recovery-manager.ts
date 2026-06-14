@@ -213,7 +213,11 @@ export class RecoveryManager {
     data?: RecoveryData
   ): Promise<string | null> {
     if (!this.db || !data) return null;
-    if (this.status === 'saving') return null;
+    // Only auto-saves yield to an in-progress save. Crash and manual snapshots
+    // are critical and must never be dropped just because a periodic autosave
+    // happens to be mid-flight — that would lose recovery data at the exact
+    // moment (an uncaught error) it matters most.
+    if (type === 'auto' && this.status === 'saving') return null;
 
     // Throttle saves
     const now = Date.now();

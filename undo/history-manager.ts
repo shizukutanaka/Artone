@@ -144,8 +144,12 @@ export class CommandFactory {
       },
       
       canMergeWith(other: Command) {
-        return other.type === 'clip.move' && 
-               (other as Command & { clipId?: string }).clipId === clipId &&
+        // Compare by delta path (['clips', clipId]) as the other mergeable
+        // commands do. The previous check read `other.clipId`, a field the
+        // command never sets, so it was always undefined !== clipId → moves
+        // never merged and a drag bloated history with one entry per sub-move.
+        return other.type === 'clip.move' &&
+               other.getDelta().path.join('.') === this.getDelta().path.join('.') &&
                other.timestamp - this.timestamp < 500;
       },
       

@@ -461,6 +461,38 @@ describe('CommandFactory.clipMove', () => {
     expect((d.before as { trackId: string }).trackId).toBe('v1');
     expect((d.after as { startFrame: number }).startFrame).toBe(50);
   });
+
+  it('consecutive moves of the same clip merge (drag does not bloat history)', () => {
+    const a = CommandFactory.clipMove('c1', 'v1', 'v1', 0, 10, () => ({}), () => {});
+    const b = CommandFactory.clipMove('c1', 'v1', 'v1', 10, 20, () => ({}), () => {});
+    // Same clip + within the 500ms window → mergeable.
+    expect(a.canMergeWith?.(b)).toBe(true);
+    // Merged command spans the original start to the latest target.
+    const merged = a.merge!(b);
+    const d = merged.getDelta();
+    expect((d.before as { startFrame: number }).startFrame).toBe(0);
+    expect((d.after as { startFrame: number }).startFrame).toBe(20);
+  });
+
+  it('moves of DIFFERENT clips do not merge', () => {
+    const a = CommandFactory.clipMove('c1', 'v1', 'v1', 0, 10, () => ({}), () => {});
+    const b = CommandFactory.clipMove('c2', 'v1', 'v1', 0, 10, () => ({}), () => {});
+    expect(a.canMergeWith?.(b)).toBe(false); // different delta path
+  });
+
+  it('merges consecutive same-clip moves into one history entry via execute()', () => {
+    const history = new HistoryManager({ autoPersist: false });
+    let clip = { id: 'c1', trackId: 'v1', startFrame: 0 };
+    const get = () => clip;
+    const set = (c: unknown) => { clip = c as typeof clip; };
+    history.execute(CommandFactory.clipMove('c1', 'v1', 'v1', 0, 10, get, set));
+    history.execute(CommandFactory.clipMove('c1', 'v1', 'v1', 10, 20, get, set));
+    // Two sub-moves of one drag collapse to a single undoable entry.
+    expect(history.getHistory().length).toBe(1);
+    expect(clip.startFrame).toBe(20);
+    history.undo();
+    expect(clip.startFrame).toBe(0); // single undo returns to the drag start
+  });
 });
 
 describe('CommandFactory.clipTrim', () => {

@@ -375,25 +375,45 @@ export class RecoveryManager {
   }
 
   // ----- 制限適用 -----
+  /**
+   * Prune age-expired and excess snapshots in a SINGLE readwrite transaction.
+   *
+   * Per recovery/CLAUDE.md, "既存リカバリデータを削除するコードは必ず
+   * トランザクショナル設計": the previous version read once and then issued one
+   * separate transaction per delete (N+2 transactions), so an interruption
+   * mid-prune left a partially-deleted set, and a concurrent save could slip
+   * between the read and the deletes. Reading and deleting in one transaction
+   * makes the prune atomic (all-or-nothing) and consistent.
+   */
   private async enforceLimit(): Promise<void> {
-    const snapshots = await this.getSnapshots();
     const now = Date.now();
+    const { maxAge, maxSnapshots } = this.config;
 
-    // Remove old snapshots
-    for (const snapshot of snapshots) {
-      if (now - snapshot.timestamp > this.config.maxAge) {
-        await this.deleteSnapshot(snapshot.id);
-      }
+    // Decide the full deletion set from a single read (getSnapshots is sorted
+    // newest-first): age-expired, plus everything past the cap among survivors.
+    const snapshots = await this.getSnapshots();
+    const toDelete: string[] = [];
+    let kept = 0;
+    for (const s of snapshots) {
+      if (now - s.timestamp > maxAge) toDelete.push(s.id);
+      else if (kept >= maxSnapshots) toDelete.push(s.id);
+      else kept++;
     }
+    if (toDelete.length === 0) return;
 
-    // Remove excess snapshots (keep most recent)
-    const remaining = await this.getSnapshots();
-    if (remaining.length > this.config.maxSnapshots) {
-      const toRemove = remaining.slice(this.config.maxSnapshots);
-      for (const snapshot of toRemove) {
-        await this.deleteSnapshot(snapshot.id);
-      }
-    }
+    // Delete the whole set in ONE transaction. The previous code issued a
+    // separate transaction per id, so an interruption mid-prune left a
+    // partially-deleted set — recovery/CLAUDE.md requires deletion to be
+    // transactional (all-or-nothing).
+    const db = this.requireDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.config.storeName, 'readwrite');
+      const store = tx.objectStore(this.config.storeName);
+      for (const id of toDelete) store.delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error ?? new Error('enforceLimit transaction aborted'));
+    });
   }
 
   private async cleanup(): Promise<void> {

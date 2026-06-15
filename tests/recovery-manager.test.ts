@@ -304,6 +304,32 @@ describe('RecoveryManager — enforceLimit', () => {
     // Both are well within maxAge → first must survive.
     expect(snaps.some(s => s.id === first)).toBe(true);
   });
+
+  it('deletes many excess snapshots in a single transaction (atomic prune)', async () => {
+    // recovery/CLAUDE.md mandates transactional deletion. Build up 6 snapshots
+    // under a high cap, then tighten the cap so the next save must prune 5 at
+    // once — and verify that prune is ONE readwrite tx, not one per deletion.
+    const mgr = makeManager({ maxSnapshots: 100 });
+    await mgr.init();
+    for (let i = 0; i < 6; i++) await mgr.saveSnapshot('manual', 'p', 'P', makeData({ playhead: i }));
+    (mgr as unknown as { config: { maxSnapshots: number } }).config.maxSnapshots = 1;
+
+    const db = (mgr as unknown as { db: IDBDatabase }).db;
+    const realTx = db.transaction.bind(db);
+    let rwTx = 0;
+    vi.spyOn(db, 'transaction').mockImplementation((...args: Parameters<IDBDatabase['transaction']>) => {
+      if (args[1] === 'readwrite') rwTx++;
+      return realTx(...args);
+    });
+    await mgr.saveSnapshot('manual', 'p', 'P', makeData({ playhead: 99 }));
+    vi.restoreAllMocks();
+
+    const snaps = await mgr.getSnapshots();
+    expect(snaps.length).toBe(1); // pruned 6 down to the newest
+    // 1 write tx + exactly 1 batched delete tx. The old per-delete code would
+    // open one readwrite tx per pruned snapshot (7 total).
+    expect(rwTx).toBe(2);
+  });
 });
 
 // ============================================================

@@ -9,6 +9,7 @@ import {
   clamp, lerp, frameToSeconds, secondsToFrame,
   escapeXML, pad, uuid, formatBytes, formatTimecode,
 } from '../app/utils';
+import { logger } from '../app/logger';
 
 describe('safeStorage', () => {
   it('get returns null for missing key', () => {
@@ -129,5 +130,16 @@ describe('safeStorageSet — throw path', () => {
     });
     expect(safeStorageSet('__throw_test__', 'x')).toBe(false);
     spy.mockRestore();
+  });
+
+  it('logs a warning so the swallowed failure is observable (not silent)', () => {
+    const setSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    safeStorageSet('__obs_test__', 'x');
+    expect(warnSpy).toHaveBeenCalled();
+    setSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 });

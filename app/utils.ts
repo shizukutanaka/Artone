@@ -1,9 +1,15 @@
 /**
  * Artone v3 — Common Utilities
  *
- * アプリ全体で共有される純粋関数。
- * 副作用なし、ブラウザAPI依存なし → 全環境でテスト可能。
+ * アプリ全体で共有されるヘルパー群。
+ * Math/String セクションは純粋関数 (副作用なし・ブラウザ非依存)。
+ * Storage セクションは localStorage に依存し、失敗時はログを残しつつ安全に
+ * フォールバックする (throw しない)。
  */
+
+import { createLogger } from './logger';
+
+const log = createLogger('Storage');
 
 // ============================================================
 // Storage
@@ -16,7 +22,8 @@
 export function safeStorageGet(key: string): string | null {
   try {
     return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
-  } catch {
+  } catch (e) {
+    log.warn(`localStorage.getItem("${key}") failed`, e);
     return null;
   }
 }
@@ -26,7 +33,11 @@ export function safeStorageSet(key: string, value: string): boolean {
     if (typeof localStorage === 'undefined') return false;
     localStorage.setItem(key, value);
     return true;
-  } catch {
+  } catch (e) {
+    // Usually QuotaExceededError (storage full) or a privacy-mode block.
+    // Callers often ignore the return (e.g. recovery writes), so a silent
+    // failure would lose data invisibly — surface it for diagnosis.
+    log.warn(`localStorage.setItem("${key}") failed (quota exceeded or storage disabled?)`, e);
     return false;
   }
 }
@@ -34,7 +45,9 @@ export function safeStorageSet(key: string, value: string): boolean {
 export function safeStorageRemove(key: string): void {
   try {
     if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
-  } catch {}
+  } catch (e) {
+    log.warn(`localStorage.removeItem("${key}") failed`, e);
+  }
 }
 
 // ============================================================

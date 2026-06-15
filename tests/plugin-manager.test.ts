@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   PluginManager,
+  lockdownSandboxGlobals,
   type PluginManifest,
 } from '../plugins/plugin-manager';
 
@@ -324,5 +325,60 @@ describe('PluginManager — executeSandboxed', () => {
     await assertion;
     expect(workers[0].terminated).toBe(true);
     expect(pm.sandbox).toBeNull();
+  });
+
+  it('serialises the global lockdown into the worker bootstrap', () => {
+    // The Blob source must call lockdownSandboxGlobals so ambient capabilities
+    // are stripped before untrusted code runs. Capture the blob parts.
+    let blobSource = '';
+    vi.stubGlobal('Blob', class {
+      constructor(parts: string[]) { blobSource = parts.join(''); }
+    });
+    const pm = makeManager() as unknown as SandboxPrivate;
+    pm.executeSandboxed('return 1', {}).catch(() => { /* never resolved here */ });
+    expect(blobSource).toContain('lockdownSandboxGlobals'); // function name survives toString()
+    expect(blobSource).toContain('(self)');                  // invoked on the worker scope
+    // Lockdown happens after compiling fn but before calling it.
+    expect(blobSource.indexOf('new Function')).toBeLessThan(blobSource.indexOf('(self)'));
+    expect(blobSource.indexOf('(self)')).toBeLessThan(blobSource.indexOf('fn(context)'));
+  });
+});
+
+// ============================================================
+// lockdownSandboxGlobals — ambient-capability denial (least privilege)
+// ============================================================
+
+describe('lockdownSandboxGlobals', () => {
+  it('denies network, remote-code-loading and eval capabilities', () => {
+    const scope: Record<string, unknown> = {
+      fetch: () => 'net', XMLHttpRequest: function () {}, WebSocket: function () {},
+      EventSource: function () {}, importScripts: () => 'remote',
+      eval: () => 'evil', Function: function () {}, indexedDB: {}, caches: {},
+      // a benign capability the plugin is allowed to keep
+      postMessage: () => 'ok',
+    };
+    lockdownSandboxGlobals(scope);
+    for (const denied of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource',
+      'importScripts', 'eval', 'Function', 'indexedDB', 'caches']) {
+      expect(scope[denied]).toBeUndefined();
+    }
+    expect(scope.postMessage).toBeTypeOf('function'); // unrelated capability untouched
+  });
+
+  it('makes denied globals non-writable (cannot be restored by the plugin)', () => {
+    const scope: Record<string, unknown> = { fetch: () => 'net' };
+    lockdownSandboxGlobals(scope);
+    // A malicious plugin trying to re-assign fetch must not succeed.
+    try { scope.fetch = () => 'restored'; } catch { /* strict-mode throw is fine */ }
+    expect(scope.fetch).toBeUndefined();
+  });
+
+  it('is closure-free so it survives .toString() serialisation', () => {
+    const src = lockdownSandboxGlobals.toString();
+    // Reconstruct from source (as the worker blob does) and run it.
+    const rebuilt = new Function(`return (${src})`)() as typeof lockdownSandboxGlobals;
+    const scope: Record<string, unknown> = { fetch: () => 'net' };
+    rebuilt(scope);
+    expect(scope.fetch).toBeUndefined();
   });
 });

@@ -269,6 +269,42 @@ const BUILTIN_TRANSITIONS: TransitionPlugin[] = [
 ];
 
 // ============================================================
+// Sandbox lockdown (least privilege)
+// ============================================================
+
+/**
+ * Strip ambient host capabilities from an (untrusted) worker global scope.
+ *
+ * Per plugins/CLAUDE.md, plugins must not have ambient access: network
+ * (`fetch`/`XMLHttpRequest`/`WebSocket`) requires an explicit manifest grant,
+ * remote code loading (`importScripts`) and dynamic eval (`eval`/`Function`)
+ * are forbidden. This denies them by default inside the sandbox worker.
+ *
+ * Defense-in-depth, not a perfect capability jail: it raises the bar for a
+ * malicious plugin running in the worker. MUST stay closure-free — it is
+ * serialised via `.toString()` into the worker blob, so it may only reference
+ * its own parameter and worker globals (`Object`).
+ *
+ * # AI generated (reviewed)
+ */
+export function lockdownSandboxGlobals(scope: Record<string, unknown>): void {
+  const denied = [
+    'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', // network exfiltration
+    'importScripts',                                        // remote code loading
+    'eval', 'Function',                                     // dynamic code eval
+    'indexedDB', 'caches',                                  // persistence
+  ];
+  for (const name of denied) {
+    try {
+      Object.defineProperty(scope, name, { value: undefined, writable: false, configurable: false });
+    } catch {
+      // Non-configurable global that cannot be redefined — best-effort shadow.
+      try { scope[name] = undefined; } catch { /* frozen; nothing more to do */ }
+    }
+  }
+}
+
+// ============================================================
 // Plugin Manager
 // ============================================================
 
@@ -464,11 +500,15 @@ export class PluginManager {
 
   private async executeSandboxed<T>(code: string, context: Record<string, unknown>): Promise<T> {
     return new Promise((resolve, reject) => {
+      // The lockdown runs INSIDE the worker, after the plugin function is built
+      // (the host needs Function to compile it once) but BEFORE it executes, so
+      // untrusted code cannot reach ambient network/code-loading capabilities.
       const blob = new Blob([`
         self.onmessage = function(e) {
           try {
             const context = e.data.context;
             const fn = new Function('context', e.data.code);
+            (${lockdownSandboxGlobals.toString()})(self);
             const result = fn(context);
             self.postMessage({ success: true, result });
           } catch (error) {

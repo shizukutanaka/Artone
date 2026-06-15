@@ -78,6 +78,14 @@ describe('convolve', () => {
     expect(out[0]).toBe(50);
   });
 
+  it('an explicit divisor of 0 does not blow the image to Infinity/255', () => {
+    // A zero divisor would make invDiv = Infinity; guarded to 1 (identity).
+    const img = solid(2, 2, [100, 120, 140, 255]);
+    const out = convolve(img, 2, 2, { weights: [0,0,0,0,1,0,0,0,0], size: 3, divisor: 0 });
+    expect(out[0]).toBe(100); // treated as divisor 1, not Infinity → 255
+    for (let i = 0; i < out.length; i++) expect(Number.isFinite(out[i])).toBe(true);
+  });
+
   it('does not mutate input', () => {
     const img = edgeImage(4, 4);
     const copy = Uint8ClampedArray.from(img);

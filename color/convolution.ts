@@ -90,6 +90,10 @@ export function convolve(
     for (let k = 0; k < weights.length; k++) s += weights[k];
     divisor = s === 0 ? 1 : s;
   }
+  // An explicit divisor of 0 (e.g. a preset derived from a zero-sum kernel)
+  // would make invDiv Infinity and blow out the whole image — guard it like
+  // the auto-computed path above.
+  if (divisor === 0) divisor = 1;
   const bias = kernel.bias ?? 0;
   const invDiv = 1 / divisor;
 

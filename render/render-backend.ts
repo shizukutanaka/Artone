@@ -60,6 +60,18 @@ export class RenderBackend {
    * いずれも失敗したら active = 'none' (caller は capability tier で UI 制限)。
    */
   async initialize(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<ActiveBackend> {
+    // Idempotent: tear down any backend from a previous initialize() before
+    // creating a new one. Re-init is expected (WebGPU context loss → recover),
+    // and overwriting this.webgpu/this.webgl without destroying the old engine
+    // would orphan its GPU device/textures (destroy 漏れ — render/CLAUDE.md).
+    if (this.webgpu || this.webgl) {
+      this.webgpu?.destroy();
+      this.webgl?.destroy();
+      this.webgpu = null;
+      this.webgl = null;
+      this.active = 'none';
+    }
+
     // 1. WebGPU を試す
     if (typeof navigator !== 'undefined' && navigator.gpu) {
       const engine = new WebGPURenderEngine();

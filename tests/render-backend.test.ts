@@ -309,3 +309,24 @@ describe('RenderBackend — destroy', () => {
     expect(spy).toHaveBeenCalled();
   });
 });
+
+describe('RenderBackend — initialize is idempotent (no orphaned GPU backend)', () => {
+  it('destroys a previously-initialized backend before re-initializing', async () => {
+    const rb = new RenderBackend();
+    const priv = rb as unknown as RBPrivate;
+    // Simulate a backend left over from an earlier initialize() (e.g. before a
+    // WebGPU context-loss recovery). A naive re-init would orphan it.
+    const stale = new WebGLFallbackRenderer();
+    const destroySpy = vi.spyOn(stale, 'destroy');
+    priv.webgl = stale;
+    priv.active = 'webgl2';
+
+    // jsdom has no navigator.gpu; getContext returns null so re-init lands on
+    // 'none' — but the stale backend must be torn down regardless.
+    const canvas = { getContext: () => null } as unknown as OffscreenCanvas;
+    const result = await rb.initialize(canvas);
+    expect(destroySpy).toHaveBeenCalledTimes(1); // old engine released, not leaked
+    expect(priv.webgl).toBeNull();
+    expect(result).toBe('none');
+  });
+});

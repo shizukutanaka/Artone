@@ -591,7 +591,20 @@ export class HistogramScope {
     
     const { data } = imageData;
     const pixelCount = data.length / 4;
-    
+
+    // An empty/zero-dimension frame (a decode glitch or placeholder) would make
+    // every `/ pixelCount` below 0/0 = NaN, poisoning the realtime scope display
+    // and any auto-grade that reads average.y. Return neutral stats instead.
+    if (pixelCount === 0) {
+      return {
+        min: { r: 0, g: 0, b: 0, y: 0 },
+        max: { r: 0, g: 0, b: 0, y: 0 },
+        average: { r: 0, g: 0, b: 0, y: 0 },
+        clipping: { shadows: 0, highlights: 0 },
+        skinTonePercentage: 0,
+      };
+    }
+
     let minR = 255, maxR = 0, sumR = 0;
     let minG = 255, maxG = 0, sumG = 0;
     let minB = 255, maxB = 0, sumB = 0;

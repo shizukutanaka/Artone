@@ -125,6 +125,19 @@ describe('HistogramScope.getStats()', () => {
     expect(stats.skinTonePercentage).toBeLessThanOrEqual(100);
   });
 
+  it('returns finite neutral stats for an empty frame (no NaN from 0/0)', () => {
+    // A zero-dimension/decode-glitch frame would make every "/ pixelCount"
+    // a 0/0 = NaN, poisoning the realtime scope and any auto-grade.
+    const empty = { data: new Uint8ClampedArray(0), width: 0, height: 0 } as unknown as ImageData;
+    const stats = scope.getStats(empty);
+    for (const v of [stats.average.r, stats.average.g, stats.average.b, stats.average.y,
+      stats.clipping.shadows, stats.clipping.highlights, stats.skinTonePercentage]) {
+      expect(Number.isNaN(v)).toBe(false);
+    }
+    expect(stats.average.y).toBe(0);
+    expect(stats.skinTonePercentage).toBe(0);
+  });
+
   it('ScopeAnalysis has all required fields', () => {
     const img = solidImageData(2, 2, 100, 120, 140);
     const stats: ScopeAnalysis = scope.getStats(img);

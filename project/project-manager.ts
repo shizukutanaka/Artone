@@ -233,6 +233,14 @@ const DB_VERSION = 1;
 
 class ProjectDB {
   private db: IDBDatabase | null = null;
+  /**
+   * In-flight open() promise. Methods open lazily via `if (!this.db) await
+   * this.open()`, so concurrent first calls would otherwise each fire a
+   * separate indexedDB.open() — opening multiple connections, running
+   * onupgradeneeded more than once, and leaking all but the last IDBDatabase.
+   * Memoising the promise makes open() idempotent under concurrency.
+   */
+  private opening: Promise<void> | null = null;
 
   /** this.db が null なら例外。open() 前のDB操作を防ぐ。 */
   private requireDB(): IDBDatabase {
@@ -241,11 +249,17 @@ class ProjectDB {
   }
 
   async open(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    if (this.db) return;
+    if (this.opening) return this.opening; // a concurrent open is already running
+
+    this.opening = new Promise<void>((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-      request.onerror = () => reject(request.error);
-      
+      request.onerror = () => {
+        this.opening = null; // allow a later retry after a failed open
+        reject(request.error);
+      };
+
       request.onsuccess = () => {
         this.db = request.result;
         resolve();
@@ -253,7 +267,7 @@ class ProjectDB {
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
-        
+
         // Projects store
         if (!db.objectStoreNames.contains('projects')) {
           const projectStore = db.createObjectStore('projects', { keyPath: 'id' });
@@ -275,6 +289,8 @@ class ProjectDB {
         }
       };
     });
+
+    return this.opening;
   }
 
   async saveProject(project: Project): Promise<void> {

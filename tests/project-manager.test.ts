@@ -66,6 +66,36 @@ async function patchDB(manager: ProjectManager): Promise<void> {
 }
 
 // ============================================================
+// ProjectDB.open — concurrency / re-entrancy
+// ============================================================
+
+describe('ProjectDB.open() — concurrent first calls', () => {
+  it('opens the database only once when methods race before init', async () => {
+    // Use the REAL ProjectDB (no patchDB) against the fake-indexeddb global.
+    // Several methods lazily open via "if (!this.db) await this.open()"; firing
+    // them concurrently must not open multiple connections / leak IDBDatabases.
+    const pm = new ProjectManager();
+    const db = (pm as unknown as { db: { open(): Promise<void> } }).db;
+    const openSpy = vi.spyOn(indexedDB, 'open');
+
+    await Promise.all([db.open(), db.open(), db.open()]);
+
+    expect(openSpy).toHaveBeenCalledTimes(1); // memoised in-flight open
+    openSpy.mockRestore();
+  });
+
+  it('open() is a no-op once the database is already open', async () => {
+    const pm = new ProjectManager();
+    const db = (pm as unknown as { db: { open(): Promise<void> } }).db;
+    await db.open();
+    const openSpy = vi.spyOn(indexedDB, 'open');
+    await db.open(); // already open → must not reopen
+    expect(openSpy).not.toHaveBeenCalled();
+    openSpy.mockRestore();
+  });
+});
+
+// ============================================================
 // createProject
 // ============================================================
 

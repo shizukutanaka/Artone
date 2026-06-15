@@ -509,3 +509,76 @@ describe('subscribe()', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+// ============================================================
+// Offline operation queue (observability / no silent edit loss)
+// ============================================================
+
+/** Minimal fake RTCDataChannel capturing sent payloads. */
+class FakeChannel {
+  readyState: 'connecting' | 'open' | 'closing' | 'closed';
+  sent: string[] = [];
+  constructor(state: FakeChannel['readyState'] = 'open') { this.readyState = state; }
+  send(data: string): void { this.sent.push(data); }
+}
+
+/** Inject a fake channel into the engine's private channels map. */
+function addChannel(engine: CollaborationEngine, id: string, ch: FakeChannel): void {
+  (engine as unknown as { channels: Map<string, FakeChannel> }).channels.set(id, ch);
+}
+
+describe('CollaborationEngine — offline operation queue', () => {
+  it('buffers operations made while no channel is open (no silent loss)', async () => {
+    const engine = await connected();
+    expect(engine.getPendingOperationCount()).toBe(0);
+    engine.applyOperation(['title'], 'set', 'Offline edit');
+    engine.addComment('also offline');
+    // Both edits produced broadcasts that had nowhere to go → queued, not lost.
+    expect(engine.getPendingOperationCount()).toBe(2);
+  });
+
+  it('sends directly (and does not queue) when a channel is open', async () => {
+    const engine = await connected();
+    const ch = new FakeChannel('open');
+    addChannel(engine, 'peer', ch);
+    engine.applyOperation(['title'], 'set', 'Online edit');
+    expect(ch.sent).toHaveLength(1);
+    expect(engine.getPendingOperationCount()).toBe(0);
+  });
+
+  it('does not deliver to a non-open channel and queues instead', async () => {
+    const engine = await connected();
+    const ch = new FakeChannel('connecting');
+    addChannel(engine, 'peer', ch);
+    engine.applyOperation(['title'], 'set', 'x');
+    expect(ch.sent).toHaveLength(0);
+    expect(engine.getPendingOperationCount()).toBe(1);
+  });
+
+  it('flushPendingOperations replays buffered ops once a peer connects', async () => {
+    const engine = await connected();
+    engine.applyOperation(['a'], 'set', 1);
+    engine.applyOperation(['b'], 'set', 2);
+    expect(engine.getPendingOperationCount()).toBe(2);
+
+    const ch = new FakeChannel('open');
+    addChannel(engine, 'peer', ch);
+    const flushed = engine.flushPendingOperations();
+    expect(flushed).toBe(2);
+    expect(ch.sent).toHaveLength(2);
+    expect(engine.getPendingOperationCount()).toBe(0);
+  });
+
+  it('flushPendingOperations is a no-op while still offline (queue preserved)', async () => {
+    const engine = await connected();
+    engine.applyOperation(['a'], 'set', 1);
+    expect(engine.flushPendingOperations()).toBe(0);
+    expect(engine.getPendingOperationCount()).toBe(1); // kept until a peer is open
+  });
+
+  it('caps the offline queue so it cannot grow without bound', async () => {
+    const engine = await connected();
+    for (let i = 0; i < 1100; i++) engine.applyOperation(['k'], 'set', i);
+    expect(engine.getPendingOperationCount()).toBeLessThanOrEqual(1000);
+  });
+});

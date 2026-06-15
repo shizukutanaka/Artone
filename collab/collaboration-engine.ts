@@ -89,6 +89,15 @@ export class CollaborationEngine {
   private docState: Map<string, unknown> = new Map();
   private listeners: Set<() => void> = new Set();
   private connected = false;
+  /**
+   * Operations produced while no peer channel is open. CLAUDE.md requires
+   * "オフライン時はローカル操作を蓄積": without this, an edit made offline is
+   * applied locally but silently never propagated, so collaborators diverge
+   * permanently. Flushed by {@link flushPendingOperations} on reconnect.
+   */
+  private outgoing: SyncMessage[] = [];
+  /** Cap so a long offline session cannot grow the queue without bound. */
+  private readonly maxQueue = 1000;
 
   // ============================================================
   // Connection
@@ -363,11 +372,48 @@ export class CollaborationEngine {
   // ============================================================
 
   private broadcast(message: SyncMessage): void {
+    let delivered = false;
     for (const dc of this.channels.values()) {
       if (dc.readyState === 'open') {
         dc.send(JSON.stringify(message));
+        delivered = true;
       }
     }
+    // No open peer (offline / transient drop): buffer instead of silently
+    // dropping the edit, so it can be replayed on reconnect.
+    if (!delivered) {
+      this.outgoing.push(message);
+      if (this.outgoing.length > this.maxQueue) {
+        this.outgoing.splice(0, this.outgoing.length - this.maxQueue);
+      }
+    }
+  }
+
+  /**
+   * Re-send operations buffered while offline to all currently-open channels.
+   * Call after a peer (re)connects. No-op when nothing is queued or no channel
+   * is open (so the queue is preserved until a peer is actually available).
+   *
+   * @returns number of buffered operations flushed.
+   */
+  flushPendingOperations(): number {
+    if (this.outgoing.length === 0) return 0;
+    const open = Array.from(this.channels.values()).filter((dc) => dc.readyState === 'open');
+    if (open.length === 0) return 0;
+
+    const pending = this.outgoing;
+    this.outgoing = [];
+    for (const message of pending) {
+      const json = JSON.stringify(message);
+      for (const dc of open) dc.send(json);
+    }
+    this.notify();
+    return pending.length;
+  }
+
+  /** Number of operations buffered while offline (observability / UI badge). */
+  getPendingOperationCount(): number {
+    return this.outgoing.length;
   }
 
   private broadcastUpdate(type: string, data: unknown): void {

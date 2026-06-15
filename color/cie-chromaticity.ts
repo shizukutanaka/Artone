@@ -263,13 +263,17 @@ export function planckianLocusPoints(
  *   `CCT = −449n³ + 3525n² − 6823.3n + 5520.33`
  *   where `n = (x − 0.3320) / (y − 0.1858)`
  *
- * Valid range: approximately 2500–7500 K. Returns NaN outside the valid range.
+ * Most accurate around 2500–7500 K. The formula has a singularity at its
+ * epicenter (≈0.3320, 0.1858): there `n` is undefined, so this returns `NaN`
+ * instead of the ±Infinity / garbage a raw divide would yield.
  *
  * @param xy  CIE xy chromaticity coordinate.
- * @returns   Estimated CCT in Kelvin.
+ * @returns   Estimated CCT in Kelvin, or `NaN` at the McCamy singularity.
  */
 export function estimateCCT(xy: Chromaticity): number {
-  const n = (xy.x - 0.3320) / (xy.y - 0.1858);
+  const denom = xy.y - 0.1858;
+  if (Math.abs(denom) < 1e-9) return NaN; // McCamy epicenter — CCT undefined
+  const n = (xy.x - 0.3320) / denom;
   return -449 * n * n * n + 3525 * n * n - 6823.3 * n + 5520.33;
 }
 

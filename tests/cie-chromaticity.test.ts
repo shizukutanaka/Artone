@@ -278,6 +278,13 @@ describe('estimateCCT', () => {
     const cct = estimateCCT(xy);
     expect(Math.abs(cct - T) / T).toBeLessThan(0.05);
   });
+
+  it('returns NaN at the McCamy singularity instead of ±Infinity', () => {
+    // y == 0.1858 makes the denominator zero; a raw divide would give Infinity.
+    const cct = estimateCCT({ x: 0.45, y: 0.1858 } as Chromaticity);
+    expect(Number.isNaN(cct)).toBe(true);
+    expect(Number.isFinite(cct)).toBe(false);
+  });
 });
 
 // ─── sampleBufferChromaticities ───────────────────────────────────────────────

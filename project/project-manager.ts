@@ -19,13 +19,21 @@ export interface Project {
   name: string;
   created: number;
   modified: number;
+  /** Monotonic save counter (incremented on every save). NOT the file format version. */
   version: number;
-  
+  /**
+   * On-disk schema/format version. Distinct from {@link version} (a save
+   * counter): this identifies the *shape* of the file so old projects can be
+   * migrated forward and files from a newer app can be refused rather than
+   * silently misread. Optional in memory; always set on load/save.
+   */
+  schemaVersion?: number;
+
   settings: ProjectSettings;
   timeline: TimelineData;
   media: MediaReference[];
   markers: Marker[];
-  
+
   metadata: {
     author: string;
     description: string;
@@ -130,6 +138,63 @@ const DEFAULT_SETTINGS: ProjectSettings = {
   bitDepth: 8
 };
 
+/** Current project file schema version. Bump when the on-disk shape changes. */
+export const PROJECT_SCHEMA_VERSION = 1;
+
+/**
+ * Normalise a loaded/imported project to the current schema.
+ *
+ * Serves the "10年読める / スキーマバージョニングで後方互換" requirement:
+ * - Files written by an OLDER app (missing fields) are backfilled with safe
+ *   defaults so they stay loadable.
+ * - Files written by a NEWER app (schemaVersion ahead of this build) are
+ *   refused with a clear error instead of being silently misread.
+ * - Forward-only migrations (v1→v2…) slot in as the schema evolves.
+ *
+ * @param raw  Parsed project data of unknown vintage/shape.
+ * @returns    A project conforming to the current schema.
+ */
+export function migrateProject(raw: unknown): Project {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('Invalid project file: expected an object');
+  }
+  const p = raw as Partial<Project> & { schemaVersion?: number };
+  const fileSchema = typeof p.schemaVersion === 'number' ? p.schemaVersion : 1;
+  if (fileSchema > PROJECT_SCHEMA_VERSION) {
+    throw new Error(
+      `Project schema v${fileSchema} is newer than supported v${PROJECT_SCHEMA_VERSION}; please update Artone to open it.`,
+    );
+  }
+
+  // Backfill structure so a project from an older build stays usable. As the
+  // schema grows, forward-only migration steps keyed on fileSchema go here.
+  const t = p.timeline ?? ({} as Partial<TimelineData>);
+  const m = p.metadata ?? ({} as Project['metadata']);
+  return {
+    id: typeof p.id === 'string' ? p.id : crypto.randomUUID(),
+    name: typeof p.name === 'string' ? p.name : 'Untitled',
+    created: typeof p.created === 'number' ? p.created : Date.now(),
+    modified: typeof p.modified === 'number' ? p.modified : Date.now(),
+    version: typeof p.version === 'number' ? p.version : 1,
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    settings: { ...DEFAULT_SETTINGS, ...(p.settings ?? {}) },
+    timeline: {
+      tracks: Array.isArray(t.tracks) ? t.tracks : [],
+      clips: Array.isArray(t.clips) ? t.clips : [],
+      duration: typeof t.duration === 'number' ? t.duration : 0,
+      playhead: typeof t.playhead === 'number' ? t.playhead : 0,
+    },
+    media: Array.isArray(p.media) ? p.media : [],
+    markers: Array.isArray(p.markers) ? p.markers : [],
+    metadata: {
+      author: typeof m.author === 'string' ? m.author : '',
+      description: typeof m.description === 'string' ? m.description : '',
+      tags: Array.isArray(m.tags) ? m.tags : [],
+      thumbnail: m.thumbnail,
+    },
+  };
+}
+
 function createDefaultProject(name: string): Project {
   return {
     id: crypto.randomUUID(),
@@ -137,6 +202,7 @@ function createDefaultProject(name: string): Project {
     created: Date.now(),
     modified: Date.now(),
     version: 1,
+    schemaVersion: PROJECT_SCHEMA_VERSION,
     settings: { ...DEFAULT_SETTINGS },
     timeline: {
       tracks: [
@@ -343,14 +409,15 @@ export class ProjectManager {
   }
 
   async openProject(id: string): Promise<Project | null> {
-    const project = await this.db.loadProject(id);
-    
-    if (project) {
-      this.currentProject = project;
-      this.isDirty = false;
-      this.startAutosave();
-      this.notify();
-    }
+    const loaded = await this.db.loadProject(id);
+    if (!loaded) return null;
+
+    // Migrate forward: a project stored by an older build must still open.
+    const project = migrateProject(loaded);
+    this.currentProject = project;
+    this.isDirty = false;
+    this.startAutosave();
+    this.notify();
 
     return project;
   }
@@ -440,14 +507,14 @@ export class ProjectManager {
     if (!version) return false;
 
     try {
-      const project = JSON.parse(version.data) as Project;
+      const project = migrateProject(JSON.parse(version.data));
       project.modified = Date.now();
       project.version++;
-      
+
       this.currentProject = project;
       await this.db.saveProject(project);
       this.notify();
-      
+
       return true;
     } catch {
       return false;
@@ -501,7 +568,9 @@ export class ProjectManager {
 
   async importProject(file: File): Promise<Project> {
     const text = await file.text();
-    const data = JSON.parse(text) as Project;
+    // Migrate/validate untrusted external project data; refuses newer-schema
+    // files and backfills older ones instead of casting blindly.
+    const data = migrateProject(JSON.parse(text));
 
     // Generate new ID to avoid conflicts
     data.id = crypto.randomUUID();

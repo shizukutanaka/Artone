@@ -9,7 +9,14 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ProjectManager, type Project, type ClipData, type MediaReference } from '../project/project-manager';
+import {
+  ProjectManager,
+  migrateProject,
+  PROJECT_SCHEMA_VERSION,
+  type Project,
+  type ClipData,
+  type MediaReference,
+} from '../project/project-manager';
 
 // ============================================================
 // Stub IndexedDB dependency
@@ -484,5 +491,77 @@ describe('subscribe()', () => {
     unsub();
     await pm.createProject('A');
     expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// Schema versioning / migration (10-year backward & forward compat)
+// ============================================================
+
+describe('migrateProject() — version evolution', () => {
+  it('stamps the current schema version on a normalised project', () => {
+    const p = migrateProject({ id: 'x', name: 'N', timeline: { tracks: [], clips: [] } });
+    expect(p.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+  });
+
+  it('backfills fields missing from an older-shaped project', () => {
+    // A project written before metadata/markers/settings existed must still load.
+    const old = { id: 'legacy', name: 'Legacy', timeline: { tracks: [{ id: 'v1' }] } };
+    const p = migrateProject(old);
+    expect(p.settings.width).toBe(1920);       // default settings filled in
+    expect(p.settings.fps).toBe(30);
+    expect(p.media).toEqual([]);               // missing arrays default to empty
+    expect(p.markers).toEqual([]);
+    expect(p.metadata.tags).toEqual([]);       // missing metadata filled in
+    expect(p.timeline.clips).toEqual([]);
+    expect(p.timeline.duration).toBe(0);
+    expect((p.timeline.tracks[0] as { id: string }).id).toBe('v1'); // real data preserved
+  });
+
+  it('preserves a partial settings object while filling the rest', () => {
+    const p = migrateProject({ id: 'x', name: 'N', settings: { fps: 60 } });
+    expect(p.settings.fps).toBe(60);           // provided value kept
+    expect(p.settings.height).toBe(1080);      // missing value defaulted
+  });
+
+  it('refuses a project written by a NEWER app instead of misreading it', () => {
+    expect(() =>
+      migrateProject({ id: 'x', name: 'Future', schemaVersion: PROJECT_SCHEMA_VERSION + 1 }),
+    ).toThrow(/newer than supported/i);
+  });
+
+  it('rejects non-object input with a clear error', () => {
+    expect(() => migrateProject(null)).toThrow(/expected an object/i);
+    expect(() => migrateProject('nope')).toThrow(/expected an object/i);
+  });
+
+  it('treats a missing schemaVersion as v1 (legacy files)', () => {
+    const p = migrateProject({ id: 'x', name: 'N' });
+    expect(p.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+  });
+});
+
+describe('importProject() — schema safety', () => {
+  function fakeFile(json: string): File {
+    return { text: async () => json } as unknown as File;
+  }
+
+  it('imports a legacy project missing fields without crashing', async () => {
+    const pm = new ProjectManager();
+    await patchDB(pm);
+    await pm.init();
+    const legacy = JSON.stringify({ id: 'old', name: 'Old', timeline: { tracks: [], clips: [] } });
+    const p = await pm.importProject(fakeFile(legacy));
+    expect(p.name).toBe('Old');
+    expect(p.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(p.metadata.tags).toEqual([]);
+  });
+
+  it('rejects importing a newer-schema project file', async () => {
+    const pm = new ProjectManager();
+    await patchDB(pm);
+    await pm.init();
+    const future = JSON.stringify({ id: 'f', name: 'F', schemaVersion: PROJECT_SCHEMA_VERSION + 99 });
+    await expect(pm.importProject(fakeFile(future))).rejects.toThrow(/newer than supported/i);
   });
 });

@@ -10,6 +10,7 @@ Artone v3 の全変更を記録。
 ### Added
 - **GIF89a エクスポーター実装** (`export/gif-encoder.ts`): 空 Blob を返すスタブを完全な自己完結型アニメーション GIF エンコーダで置き換え。メディアン・カット色量子化 (フレーム毎 256 色, 4× ピクセルサンプリング) + 32³ 最近傍 LUT (O(1) 色マッピング) + Floyd-Steinberg ディザリング + LZW 圧縮 (可変幅コード/LSB ファースト) + Netscape 2.0 アニメーションループ拡張を実装。25 テスト追加。
 - **GIF 書き出しパス** (`export/export-engine.ts`): `export()` が GIF フォーマット時に WebCodecs をバイパスし `exportGif()` → `videoFrameToImageData()` → `encodeGif()` を呼ぶ専用ルートを追加。
+- **`project/project-manager.ts` プロジェクトのスキーマバージョニング/マイグレーション層を追加** (10年読める設計、リスクゾーン project)。従来 `version` フィールドは保存ごとに `++` される**保存カウンタ**で、ファイル形式のスキーマ版を表しておらず、CLAUDE.md「スキーマバージョニングで後方互換」が未実装だった。さらに `loadProject`/`importProject`/`restoreVersion` は `JSON.parse(...) as Project` で**無検証キャスト**し、古い形のファイル(欠損フィールド)は現行形と誤認、新しいアプリが書いたファイルは黙って誤読していた。保存カウンタと独立した `schemaVersion` を導入し、`migrateProject()` を全ロード経路に配線: 旧形ファイルは安全なデフォルトで backfill して読めるようにし、`schemaVersion` が現行より新しいファイルは明確なエラーで拒否 (誤読防止)、forward-only migration の枠組みを用意。13 テスト追加。
 
 ### Security
 - **`plugins/plugin-manager.ts` サンドボックスの ambient capability を遮断** (セキュリティ境界ゾーン)。未信頼プラグインコードを `new Function` で Worker 内実行していたが、Worker は `fetch`/`XMLHttpRequest`/`WebSocket`/`importScripts`/`indexedDB` 等へ ambient アクセス可能で、CLAUDE.md の「ホスト API は明示的 import のみ (ambient access 禁止)」「ネットワークは manifest 宣言必須」「eval/Function 禁止」に反し、悪意あるプラグインがデータ送出やリモートコード読込を行えた。worker bootstrap に `lockdownSandboxGlobals(self)` を注入し、プラグイン関数のコンパイル後・実行前に network/remote-code/eval 系グローバルを deny-by-default で無効化 (defense-in-depth)。閉包フリー関数として export し直接単体テスト＋bootstrap への直列化順序を検証 (8 テスト)。

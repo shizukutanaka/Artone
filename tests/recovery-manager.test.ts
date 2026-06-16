@@ -305,6 +305,20 @@ describe('RecoveryManager — enforceLimit', () => {
     expect(snaps.some(s => s.id === first)).toBe(true);
   });
 
+  it('REGRESSION: maxSnapshots=0 does not delete all snapshots (data-loss bug)', async () => {
+    // Bug: enforceLimit checks `kept >= maxSnapshots`. With maxSnapshots=0 that is
+    // `kept >= 0` which is always true, so every snapshot (including the just-saved
+    // one) was added to toDelete. The constructor now clamps to min 1.
+    const mgr = makeManager({ maxSnapshots: 0 });
+    await mgr.init();
+    const id = await mgr.saveSnapshot('manual', 'p', 'P', makeData({ playhead: 42 }));
+    expect(id).toBeTruthy();
+    // At least the latest snapshot must survive after enforceLimit.
+    const snaps = await mgr.getSnapshots('p');
+    expect(snaps.length).toBeGreaterThanOrEqual(1);
+    expect(snaps.some(s => s.id === id)).toBe(true);
+  });
+
   it('deletes many excess snapshots in a single transaction (atomic prune)', async () => {
     // recovery/CLAUDE.md mandates transactional deletion. Build up 6 snapshots
     // under a high cap, then tighten the cap so the next save must prune 5 at
@@ -356,6 +370,22 @@ describe('RecoveryManager — getStats', () => {
     expect(stats.totalSnapshots).toBe(2);
     expect(stats.totalSize).toBeGreaterThan(0);
     expect(stats.newestSnapshot!).toBeGreaterThanOrEqual(stats.oldestSnapshot!);
+  });
+
+  it('REGRESSION: totalSize counts UTF-8 bytes (not UTF-16 code units) for unicode data', async () => {
+    // Bug: JSON.stringify(...).length returns UTF-16 code units — a 3-byte UTF-8
+    // character (e.g. Japanese) counts as 1, not 3. For ASCII data both are equal,
+    // but for multi-byte content the old code underreported size by up to 3×.
+    const unicodeData = makeData({ timeline: { name: '日本語プロジェクト' } });
+    await mgr.saveSnapshot('manual', 'p', 'P', unicodeData);
+    const stats = await mgr.getStats();
+    const jsonStr = JSON.stringify(unicodeData);
+    // UTF-8 byte count must be ≥ JS .length (equal for ASCII, > for multi-byte)
+    expect(stats.totalSize).toBeGreaterThanOrEqual(jsonStr.length);
+    // The specific string contains multi-byte chars so byte count > code-unit count
+    const enc = new TextEncoder();
+    expect(enc.encode(jsonStr).byteLength).toBeGreaterThan(jsonStr.length);
+    expect(stats.totalSize).toBe(enc.encode(jsonStr).byteLength);
   });
 });
 

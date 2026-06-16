@@ -98,7 +98,11 @@ export class RecoveryManager {
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       dbName: 'ArtoneRecovery',
       storeName: 'snapshots',
-      ...config
+      ...config,
+      // Guard against 0: enforceLimit checks `kept >= maxSnapshots`, so
+      // maxSnapshots=0 would delete every snapshot including the just-saved one
+      // (complete data loss). Minimum meaningful value is 1.
+      maxSnapshots: Math.max(1, config.maxSnapshots ?? 50),
     };
   }
 
@@ -444,9 +448,12 @@ export class RecoveryManager {
   }> {
     const snapshots = await this.getSnapshots();
     
+    const enc = new TextEncoder();
     let totalSize = 0;
     for (const snapshot of snapshots) {
-      totalSize += JSON.stringify(snapshot.data).length;
+      // Use TextEncoder to count UTF-8 bytes, not UTF-16 code units (.length),
+      // so projects with multi-byte content (Japanese text, emoji) report correctly.
+      totalSize += enc.encode(JSON.stringify(snapshot.data)).byteLength;
     }
 
     return {

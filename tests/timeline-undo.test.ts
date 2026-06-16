@@ -535,8 +535,11 @@ describe('CommandFactory.clipTrim', () => {
     cmd.execute();
     expect(clip.sourceIn).toBe(25); // 0 (default) + 25
     expect(Number.isNaN(clip.sourceIn as number)).toBe(false);
+    // Snapshot-based undo restores the exact pre-execute state: sourceIn was
+    // absent in the original clip, so it comes back as undefined (not 0 and
+    // not NaN — the old delta-based undo would have produced NaN here).
     cmd.undo();
-    expect(clip.sourceIn).toBe(0);
+    expect(clip.sourceIn).toBeUndefined();
     expect(Number.isNaN(clip.sourceIn as number)).toBe(false);
   });
 
@@ -630,6 +633,64 @@ describe('CommandFactory.audioVolume', () => {
     expect(clip.audioVolume).toBeCloseTo(0.5);
     cmd.undo();
     expect(clip.audioVolume).toBeCloseTo(1.0);
+  });
+
+  it('REGRESSION: canMergeWith+merge do not crash (missing merge caused TypeError)', () => {
+    const h = new HistoryManager({ autoPersist: false });
+    let clip = { audioVolume: 1.0 };
+    const get = () => clip;
+    const set = (c: unknown) => { clip = c as typeof clip; };
+    h.execute(CommandFactory.audioVolume('c1', 1.0, 0.8, get, set));
+    // Second volume change within the 200 ms window → triggers canMergeWith+merge path.
+    // Before the fix this threw "TypeError: lastCmd.merge is not a function".
+    expect(() => h.execute(CommandFactory.audioVolume('c1', 0.8, 0.5, get, set))).not.toThrow();
+    expect(clip.audioVolume).toBeCloseTo(0.5);
+    // Single undo should jump back to the original volume (1.0).
+    h.undo();
+    expect(clip.audioVolume).toBeCloseTo(1.0);
+    expect(h.getHistory().length).toBe(1); // two sub-changes collapsed to one
+  });
+});
+
+describe('CommandFactory.colorGrade', () => {
+  it('REGRESSION: canMergeWith+merge do not crash (missing merge caused TypeError)', () => {
+    const h = new HistoryManager({ autoPersist: false });
+    let clip: Record<string, unknown> = {};
+    const get = () => clip;
+    const set = (c: unknown) => { clip = c as typeof clip; };
+    const g1 = { contrast: 1.0 };
+    const g2 = { contrast: 1.2 };
+    const g3 = { contrast: 1.5 };
+    h.execute(CommandFactory.colorGrade('c1', 'exposure', g1, g2, get, set));
+    // Second grade change within 200 ms → triggers canMergeWith+merge path.
+    expect(() => h.execute(CommandFactory.colorGrade('c1', 'exposure', g2, g3, get, set))).not.toThrow();
+    // Single undo must revert to g1 (original before the whole drag).
+    h.undo();
+    expect((clip.colorGrade as Record<string, unknown>)['exposure']).toEqual(g1);
+  });
+});
+
+describe('CommandFactory.clipTrim — snapshot-based undo', () => {
+  it('REGRESSION: undo restores pre-execute state even if another command modified the clip', () => {
+    // Bug: undo used delta arithmetic on LIVE clip state; if an interleaved
+    // command changed sourceIn, undo would restore the wrong value.
+    let clip: Record<string, unknown> = { id: 'c1', startFrame: 0, sourceIn: 100 };
+    const get = () => clip;
+    const set = (c: unknown) => { clip = c as typeof clip; };
+
+    const trim = CommandFactory.clipTrim('c1', 'start', 0, 30, get, set);
+    trim.execute();
+    expect(clip.startFrame).toBe(30);
+    expect(clip.sourceIn).toBe(130);
+
+    // Interleaved change: something else modifies sourceIn externally.
+    clip = { ...clip, sourceIn: 999 };
+
+    // Undo must restore the snapshot (startFrame=0, sourceIn=100),
+    // not apply -30 to the current 999.
+    trim.undo();
+    expect(clip.startFrame).toBe(0);
+    expect(clip.sourceIn).toBe(100); // snapshot, not 999 - 30 = 969
   });
 });
 

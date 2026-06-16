@@ -177,36 +177,34 @@ export class CommandFactory {
     getClip: () => ClipLike,
     setClip: (clip: ClipLike) => void
   ): Command {
+    // Snapshot captured in execute() and used for undo — same pattern as
+    // clipMove. Delta-based undo on live state was wrong when another command
+    // modified the same clip between execute and undo.
+    let snapshot: ClipLike;
+
     return {
       id: `clip_trim_${Date.now()}`,
       type: 'clip.trim',
       timestamp: Date.now(),
       description: `Trim clip ${clipId} ${edge}`,
-      
+
       execute() {
-        const clip = getClip();
+        snapshot = { ...getClip() };
         // Default source offsets to 0: ClipLike marks them optional, and
         // `undefined + n` would silently corrupt the clip to NaN.
         if (edge === 'start') {
-          const sourceIn = ((clip.sourceIn as number | undefined) ?? 0) + (toFrame - fromFrame);
-          setClip({ ...clip, startFrame: toFrame, sourceIn });
+          const sourceIn = ((snapshot.sourceIn as number | undefined) ?? 0) + (toFrame - fromFrame);
+          setClip({ ...snapshot, startFrame: toFrame, sourceIn });
         } else {
-          const sourceOut = ((clip.sourceOut as number | undefined) ?? 0) + (toFrame - fromFrame);
-          setClip({ ...clip, endFrame: toFrame, sourceOut });
+          const sourceOut = ((snapshot.sourceOut as number | undefined) ?? 0) + (toFrame - fromFrame);
+          setClip({ ...snapshot, endFrame: toFrame, sourceOut });
         }
       },
 
       undo() {
-        const clip = getClip();
-        if (edge === 'start') {
-          const sourceIn = ((clip.sourceIn as number | undefined) ?? 0) - (toFrame - fromFrame);
-          setClip({ ...clip, startFrame: fromFrame, sourceIn });
-        } else {
-          const sourceOut = ((clip.sourceOut as number | undefined) ?? 0) - (toFrame - fromFrame);
-          setClip({ ...clip, endFrame: fromFrame, sourceOut });
-        }
+        setClip({ ...snapshot });
       },
-      
+
       redo() {
         this.execute();
       },
@@ -430,6 +428,14 @@ export class CommandFactory {
         return other.type === 'color.grade' &&
                other.getDelta().path.join('.') === this.getDelta().path.join('.') &&
                other.timestamp - this.timestamp < 200;
+      },
+
+      merge(other: Command): Command {
+        return CommandFactory.colorGrade(
+          clipId, gradeType,
+          fromGrade, other.getDelta().after as GradeLike,
+          getClip, setClip,
+        );
       }
     };
   }
@@ -518,6 +524,14 @@ export class CommandFactory {
         return other.type === 'audio.volume' &&
                other.getDelta().path[1] === clipId &&
                other.timestamp - this.timestamp < 200;
+      },
+
+      merge(other: Command): Command {
+        return CommandFactory.audioVolume(
+          clipId,
+          fromVolume, other.getDelta().after as number,
+          getClip, setClip,
+        );
       }
     };
   }

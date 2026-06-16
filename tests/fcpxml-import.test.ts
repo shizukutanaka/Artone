@@ -100,3 +100,32 @@ describe('FCPXML parsing', () => {
     expect(tl.videoTracks).toHaveLength(0);
   });
 });
+
+// ─── REGRESSION: degenerate frameDuration guard ───────────────────────────────
+
+describe('FCPXMLImporter — REGRESSION: degenerate frameDuration falls back to fps=30', () => {
+  it('frameDuration "1/0s" (division-by-zero fps) falls back to 30', () => {
+    const xml = [
+      '<fcpxml version="1.10">',
+      '  <resources>',
+      '    <format id="r1" frameDuration="1/0s" width="1920" height="1080"/>',
+      '    <asset id="r2" name="Clip" src="file://clip.mp4" hasVideo="1" hasAudio="1" format="r1"/>',
+      '  </resources>',
+      '  <library><event name="E"><project name="P">',
+      '    <sequence format="r1" duration="30/30s">',
+      '      <spine>',
+      '        <clip name="A" offset="0s" start="0s" duration="30s" ref="r2"/>',
+      '      </spine>',
+      '    </sequence>',
+      '  </project></event></library>',
+      '</fcpxml>',
+    ].join('\n');
+    const tl = interchange.fcpxmlImporter().import(xml);
+    // fps must fall back to 30, not 0 — which would silently zero all frame numbers.
+    expect(tl.fps).toBe(30);
+    // duration "30s" at fps=30 → 30*30=900 frames (not 0).
+    const clip = tl.videoTracks[0]?.clips[0];
+    expect(clip).toBeDefined();
+    expect(clip!.durationFrames).toBeGreaterThan(0);
+  });
+});

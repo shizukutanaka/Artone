@@ -79,3 +79,35 @@ describe('EDL parsing robustness', () => {
     expect(tl.audioTracks).toHaveLength(0);
   });
 });
+
+// ─── REGRESSION: fps=0 guard ──────────────────────────────────────────────────
+
+describe('TimecodeUtil — REGRESSION: fps=0 produces safe output', () => {
+  it('framesToTC with fps=0 returns 00:00:00:00 (not NaN/Infinity)', () => {
+    const { timecode } = interchange;
+    expect(timecode.framesToTC(0, 0)).toBe('00:00:00:00');
+    expect(timecode.framesToTC(100, 0)).toBe('00:00:00:00');
+  });
+
+  it('framesToTC with negative fps returns 00:00:00:00', () => {
+    expect(interchange.timecode.framesToTC(60, -30)).toBe('00:00:00:00');
+  });
+});
+
+describe('EDLImporter — REGRESSION: fps=0 falls back to default (not silent data loss)', () => {
+  it('fps=0 option falls back to 30 fps (non-drop)', () => {
+    const edl = [
+      'TITLE: T',
+      'FCM: NON-DROP FRAME',
+      '',
+      '001  A   V     C        00:00:01:00 00:00:02:00 00:00:01:00 00:00:02:00',
+    ].join('\n');
+    // With fps=0, the bug returned all timecodes as 0 (silent data loss).
+    // After the fix, it falls back to 30 fps and the clip lands at frame 30.
+    const tl = interchange.edlImporter().import(edl, { fps: 0 });
+    expect(tl.fps).toBe(30);
+    const clip = tl.videoTracks[0]?.clips[0];
+    expect(clip).toBeDefined();
+    expect(clip!.startFrame).toBe(30); // 00:00:01:00 at 30fps = frame 30
+  });
+});

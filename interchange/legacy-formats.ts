@@ -14,6 +14,8 @@ import { pad, escapeXML } from '../app/utils';
 
 export class TimecodeUtil {
   static framesToTC(frames: number, fps: number, dropFrame = false): string {
+    // fps=0 / NaN / negative → Math.round(fps)=0 → division produces NaN/Infinity.
+    if (!(fps > 0)) return '00:00:00:00';
     if (dropFrame && (fps === 29.97 || fps === 59.94)) {
       return this.framesToDropFrameTC(frames, fps);
     }
@@ -177,7 +179,10 @@ export class EDLImporter {
       else if (t.startsWith('FCM:')) dropFrame = /DROP/i.test(t) && !/NON-DROP/i.test(t);
     }
 
-    const fps = options.fps ?? (dropFrame ? 29.97 : 30);
+    const rawFps = options.fps ?? (dropFrame ? 29.97 : 30);
+    const fps = (typeof rawFps === 'number' && Number.isFinite(rawFps) && rawFps > 0)
+      ? rawFps
+      : (dropFrame ? 29.97 : 30);
     const events: EDLEvent[] = [];
 
     for (const raw of lines) {
@@ -341,7 +346,11 @@ export class FCPXMLImporter {
     const fdMatch = fd?.match(/^(\d+)\/(\d+)s$/);
     if (fdMatch) {
       const numer = Number(fdMatch[1]);
-      if (numer > 0) fps = Math.round(Number(fdMatch[2]) / numer);
+      if (numer > 0) {
+        const derived = Math.round(Number(fdMatch[2]) / numer);
+        // Guard against degenerate frameDuration (e.g. "1/0s") that yields fps=0.
+        if (derived > 0) fps = derived;
+      }
     }
 
     // asset id → src

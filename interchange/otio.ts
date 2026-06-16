@@ -429,7 +429,11 @@ export class OTIOImporter {
     }
     const stack = this.requireStack(parsed);
     const losses: OTIOImportLoss[] = [];
-    const fps = targetFps ?? parsed.global_start_time?.rate ?? 30;
+    // Guard against rate=0 or NaN in global_start_time: fromRationalTime would
+    // compute Math.round(value * 0 / rate) = 0 for every frame, silently
+    // zeroing all clip positions and durations.
+    const rawFps = targetFps ?? parsed.global_start_time?.rate;
+    const fps = (typeof rawFps === 'number' && Number.isFinite(rawFps) && rawFps > 0) ? rawFps : 30;
 
     const videoTracks: ArtoneTrack[] = [];
     const audioTracks: ArtoneTrack[] = [];
@@ -455,7 +459,8 @@ export class OTIOImporter {
 
   import(otio: OTIOTimeline, targetFps?: number): ArtoneTimeline {
     const stack = this.requireStack(otio);
-    const fps = targetFps ?? otio.global_start_time?.rate ?? 30;
+    const rawFps = targetFps ?? otio.global_start_time?.rate;
+    const fps = (typeof rawFps === 'number' && Number.isFinite(rawFps) && rawFps > 0) ? rawFps : 30;
 
     const videoTracks: ArtoneTrack[] = [];
     const audioTracks: ArtoneTrack[] = [];

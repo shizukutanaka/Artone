@@ -467,4 +467,76 @@ describe('OTIOImporter — malformed/partial input (trust boundary)', () => {
     expect(clip.sourceInFrame).toBe(0); // rate 0 → 0, not Infinity
     expect(clip.durationFrames).toBe(30);
   });
+
+  it('REGRESSION: global_start_time.rate=0 falls back to fps=30 (not silent data-loss to 0)', () => {
+    // Bug: `fps = targetFps ?? parsed.global_start_time?.rate ?? 30` uses `??`
+    // (nullish coalescing) so `rate=0` is NOT replaced by 30 (0 is not null/undefined).
+    // fromRationalTime(rt, 0) then computes Math.round(value * 0 / rate) = 0 for
+    // every frame, silently zeroing all clip positions and durations.
+    const json = JSON.stringify({
+      OTIO_SCHEMA: 'Timeline.1',
+      name: 'Zero-Rate Test',
+      global_start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 0, value: 0 },
+      tracks: {
+        OTIO_SCHEMA: 'Stack.1',
+        children: [
+          {
+            OTIO_SCHEMA: 'Track.1', kind: 'Video', children: [
+              {
+                OTIO_SCHEMA: 'Clip.2', name: 'c', enabled: true,
+                effects: [], markers: [],
+                media_reference: { OTIO_SCHEMA: 'ExternalReference.1', target_url: 'file:///a.mp4' },
+                source_range: {
+                  OTIO_SCHEMA: 'TimeRange.1',
+                  start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 15 },
+                  duration:   { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 60 },
+                },
+              },
+            ],
+            effects: [], markers: [],
+          },
+        ],
+        effects: [], markers: [],
+      },
+    });
+
+    const result = imp().importWithReport(json);
+    // fps must default to 30 (not 0) when global_start_time.rate is invalid
+    expect(result.timeline.fps).toBe(30);
+    const clip = result.timeline.videoTracks[0].clips[0];
+    // With fps=30, fromRationalTime(start_time{rate:30, value:15}, 30) = 15
+    expect(clip.sourceInFrame).toBe(15);
+    // fromRationalTime(duration{rate:30, value:60}, 30) = 60
+    expect(clip.durationFrames).toBe(60);
+  });
+
+  it('REGRESSION: importFromString with global_start_time.rate=0 also falls back to fps=30', () => {
+    // Same bug in import() / importFromString() path (not just importWithReport).
+    const json = JSON.stringify({
+      OTIO_SCHEMA: 'Timeline.1', name: 'T',
+      global_start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 0, value: 0 },
+      tracks: {
+        OTIO_SCHEMA: 'Stack.1', children: [
+          {
+            OTIO_SCHEMA: 'Track.1', kind: 'Video', children: [
+              {
+                OTIO_SCHEMA: 'Clip.2', name: 'c', enabled: true,
+                effects: [], markers: [],
+                media_reference: { OTIO_SCHEMA: 'ExternalReference.1', target_url: '' },
+                source_range: {
+                  OTIO_SCHEMA: 'TimeRange.1',
+                  start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 0 },
+                  duration:   { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 90 },
+                },
+              },
+            ],
+            effects: [], markers: [],
+          },
+        ], effects: [], markers: [],
+      },
+    });
+    const tl = imp().importFromString(json);
+    expect(tl.fps).toBe(30);
+    expect(tl.videoTracks[0].clips[0].durationFrames).toBe(90);
+  });
 });

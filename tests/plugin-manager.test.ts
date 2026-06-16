@@ -264,7 +264,7 @@ describe('subscribe()', () => {
 
 type SandboxPrivate = {
   executeSandboxed<T>(code: string, context: Record<string, unknown>): Promise<T>;
-  sandbox: unknown;
+  sandboxes: Set<unknown>;
 };
 
 class FakeWorker {
@@ -295,7 +295,7 @@ describe('PluginManager — executeSandboxed', () => {
     workers[0].onmessage!({ data: { success: true, result: 42 } });
     await expect(p).resolves.toBe(42);
     expect(workers[0].terminated).toBe(true);
-    expect(pm.sandbox).toBeNull();
+    expect(pm.sandboxes.size).toBe(0);
   });
 
   it('rejects with the plugin error message on { success: false }', async () => {
@@ -304,7 +304,7 @@ describe('PluginManager — executeSandboxed', () => {
     workers[0].onmessage!({ data: { success: false, error: 'plugin blew up' } });
     await expect(p).rejects.toThrow('plugin blew up');
     expect(workers[0].terminated).toBe(true);
-    expect(pm.sandbox).toBeNull();
+    expect(pm.sandboxes.size).toBe(0);
   });
 
   it('rejects and clears the sandbox on worker onerror', async () => {
@@ -313,7 +313,7 @@ describe('PluginManager — executeSandboxed', () => {
     workers[0].onerror!({ message: 'worker crashed' });
     await expect(p).rejects.toThrow('worker crashed');
     expect(workers[0].terminated).toBe(true);
-    expect(pm.sandbox).toBeNull();
+    expect(pm.sandboxes.size).toBe(0);
   });
 
   it('terminates the worker and rejects after the 5s timeout', async () => {
@@ -324,7 +324,26 @@ describe('PluginManager — executeSandboxed', () => {
     vi.advanceTimersByTime(5000);
     await assertion;
     expect(workers[0].terminated).toBe(true);
-    expect(pm.sandbox).toBeNull();
+    expect(pm.sandboxes.size).toBe(0);
+  });
+
+  it('REGRESSION: dispose() terminates ALL concurrent sandbox workers (not just the last)', () => {
+    // Bug: the old code stored a single `sandbox: Worker|null`. When two plugins
+    // ran concurrently, the second `this.sandbox = worker` overwrote the first.
+    // dispose() then only terminated the second worker — the first kept running,
+    // leaking resources and leaving a potential security hole.
+    const pm = makeManager() as unknown as PluginManager & SandboxPrivate;
+    // Start two concurrent executions — both workers land in sandboxes Set.
+    pm.executeSandboxed('a', {}).catch(() => {});
+    pm.executeSandboxed('b', {}).catch(() => {});
+    expect(workers).toHaveLength(2);
+    expect(pm.sandboxes.size).toBe(2);
+
+    // dispose() must terminate both.
+    (pm as unknown as PluginManager).dispose();
+    expect(workers[0].terminated).toBe(true);
+    expect(workers[1].terminated).toBe(true);
+    expect(pm.sandboxes.size).toBe(0);
   });
 
   it('serialises the global lockdown into the worker bootstrap', () => {

@@ -311,7 +311,10 @@ export function lockdownSandboxGlobals(scope: Record<string, unknown>): void {
 export class PluginManager {
   private plugins: Map<string, Plugin> = new Map();
   private pluginCode: Map<string, string> = new Map();
-  private sandbox: Worker | null = null;
+  // Track ALL active sandbox workers. The previous single `sandbox: Worker|null`
+  // reference was overwritten on each runPlugin call, so concurrent invocations
+  // caused dispose() to miss all but the last worker (security/resource leak).
+  private sandboxes: Set<Worker> = new Set();
   private listeners: Set<() => void> = new Set();
 
   constructor() {
@@ -397,10 +400,10 @@ export class PluginManager {
 
   /** 実行中の sandbox Worker を強制終了しリソースを解放 */
   dispose(): void {
-    if (this.sandbox) {
-      this.sandbox.terminate();
-      this.sandbox = null;
+    for (const w of this.sandboxes) {
+      w.terminate();
     }
+    this.sandboxes.clear();
     this.plugins.clear();
     this.pluginCode.clear();
     this.listeners.clear();
@@ -522,19 +525,22 @@ export class PluginManager {
       // The worker has begun fetching its script synchronously, so the object
       // URL can be revoked immediately to avoid leaking it for the process life.
       URL.revokeObjectURL(blobUrl);
-      this.sandbox = worker; // 実行中の Worker を保持 (terminate/cleanup 用)
-      
-      const timeout = setTimeout(() => {
+      this.sandboxes.add(worker); // track in the Set so dispose() covers all active workers
+
+      const cleanup = (): void => {
         worker.terminate();
-        this.sandbox = null;
+        this.sandboxes.delete(worker);
+      };
+
+      const timeout = setTimeout(() => {
+        cleanup();
         reject(new Error('Plugin execution timeout'));
       }, 5000);
 
       worker.onmessage = (e) => {
         clearTimeout(timeout);
-        worker.terminate();
-        this.sandbox = null;
-        
+        cleanup();
+
         if (e.data.success) {
           resolve(e.data.result);
         } else {
@@ -544,10 +550,7 @@ export class PluginManager {
 
       worker.onerror = (e) => {
         clearTimeout(timeout);
-        worker.terminate();
-        // Clear the reference like the message/timeout paths do; otherwise a
-        // terminated worker stays referenced in this security-boundary field.
-        this.sandbox = null;
+        cleanup();
         reject(new Error(e.message));
       };
 

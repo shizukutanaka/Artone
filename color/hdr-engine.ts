@@ -261,12 +261,18 @@ export class HDREngine {
 
   private reinhardToneMap(r: number, g: number, b: number): { r: number; g: number; b: number } {
     const wp = this.toneMappingConfig.whitePoint;
-    const wp2 = wp * wp;
-    
+    // wp=0 makes wp2=0 → r/wp2 = Infinity; wp<0 is physically undefined → clamp.
+    const wp2 = Math.max(1e-6, wp * wp);
+    // Reinhard is defined for non-negative scene luminances.
+    // Color-space conversion can produce negative out-of-gamut values; clamping
+    // prevents (1 + r) = 0 at r = -1 (divide-by-zero → ±Infinity).
+    const rn = Math.max(0, r);
+    const gn = Math.max(0, g);
+    const bn = Math.max(0, b);
     return {
-      r: (r * (1 + r / wp2)) / (1 + r),
-      g: (g * (1 + g / wp2)) / (1 + g),
-      b: (b * (1 + b / wp2)) / (1 + b)
+      r: (rn * (1 + rn / wp2)) / (1 + rn),
+      g: (gn * (1 + gn / wp2)) / (1 + gn),
+      b: (bn * (1 + bn / wp2)) / (1 + bn),
     };
   }
 
@@ -313,7 +319,9 @@ export class HDREngine {
     };
 
     const wp = this.toneMappingConfig.whitePoint;
-    const whiteScale = 1 / hable(wp);
+    const hableWp = hable(wp);
+    // hable(0) = 0 (the formula evaluates to zero at x=0) → 1/0 = Infinity.
+    const whiteScale = Math.abs(hableWp) < 1e-9 ? 1 : 1 / hableWp;
     
     return {
       r: hable(r) * whiteScale,
@@ -325,27 +333,29 @@ export class HDREngine {
   private uchimuraToneMap(r: number, g: number, b: number): { r: number; g: number; b: number } {
     // Hajime Uchimura's GT Tone Mapping
     const uchimura = (x: number) => {
+      // Uchimura is defined for x ≥ 0; Math.pow(negative, 1.33) = NaN in JS.
+      if (x <= 0) return 0;
       const P = 1.0;  // max brightness
       const a = 1.0;  // contrast
       const m = 0.22; // linear section start
       const l = 0.4;  // linear section length
       const c = 1.33; // black tightness
       const b = 0.0;  // pedestal
-      
+
       const l0 = ((P - m) * l) / a;
       const S0 = m + l0;
       const S1 = m + a * l0;
       const C2 = (a * P) / (P - S1);
       const CP = -C2 / P;
-      
+
       const w0 = 1.0 - Math.smoothstep(0.0, m, x);
       const w2 = Math.smoothstep(m + l0, m + l0, x);
       const w1 = 1.0 - w0 - w2;
-      
+
       const T = m * Math.pow(x / m, c) + b;
       const S = P - (P - S1) * Math.exp(CP * (x - S0));
       const L = m + a * (x - m);
-      
+
       return T * w0 + L * w1 + S * w2;
     };
     
@@ -359,17 +369,19 @@ export class HDREngine {
   private lottesToneMap(r: number, g: number, b: number): { r: number; g: number; b: number } {
     // Timothy Lottes tone mapping
     const lottes = (x: number) => {
+      // Lottes uses Math.pow(x, fractional); negative base yields NaN in JS.
+      if (x <= 0) return 0;
       const a = 1.6;
       const d = 0.977;
       const hdrMax = 8.0;
       const midIn = 0.18;
       const midOut = 0.267;
-      
-      const bb = (-Math.pow(midIn, a) + Math.pow(hdrMax, a) * midOut) / 
+
+      const bb = (-Math.pow(midIn, a) + Math.pow(hdrMax, a) * midOut) /
                 ((Math.pow(hdrMax, a * d) - Math.pow(midIn, a * d)) * midOut);
       const c = (Math.pow(hdrMax, a * d) * Math.pow(midIn, a) - Math.pow(hdrMax, a) * Math.pow(midIn, a * d) * midOut) /
                 ((Math.pow(hdrMax, a * d) - Math.pow(midIn, a * d)) * midOut);
-      
+
       return Math.pow(x, a) / (Math.pow(x, a * d) * bb + c);
     };
     

@@ -107,6 +107,39 @@ describe('HDREngine — Tone Mapping', () => {
     const high = hdr.toneMap(0.8, 0.8, 0.8);
     expect(high.r).toBeGreaterThanOrEqual(low.r);
   });
+
+  it('reinhard: out-of-gamut negative input (r=-1) does not produce NaN/Infinity', () => {
+    // Color-space conversion can yield r=-1; (1+r)=0 was a divide-by-zero.
+    hdr.setToneMappingConfig({ method: 'reinhard', whitePoint: 1 });
+    const out = hdr.toneMap(-1, -0.5, -1);
+    expect(Number.isFinite(out.r)).toBe(true);
+    expect(Number.isFinite(out.g)).toBe(true);
+    expect(Number.isFinite(out.b)).toBe(true);
+  });
+
+  it('reinhard: whitePoint=0 does not produce NaN/Infinity', () => {
+    hdr.setToneMappingConfig({ method: 'reinhard', whitePoint: 0 });
+    const out = hdr.toneMap(0.5, 0.5, 0.5);
+    expect(Number.isFinite(out.r)).toBe(true);
+  });
+
+  it('hable: whitePoint=0 does not produce NaN/Infinity (hable(0)=0 → 1/0)', () => {
+    hdr.setToneMappingConfig({ method: 'hable', whitePoint: 0 });
+    const out = hdr.toneMap(0.5, 0.4, 0.3);
+    expect(Number.isFinite(out.r)).toBe(true);
+    expect(Number.isFinite(out.g)).toBe(true);
+    expect(Number.isFinite(out.b)).toBe(true);
+  });
+
+  it('all tone-mapping methods return finite values for negative out-of-gamut input', () => {
+    for (const method of ['reinhard', 'aces', 'filmic', 'hable', 'uchimura', 'lottes'] as const) {
+      hdr.setToneMappingConfig({ method });
+      const out = hdr.toneMap(-0.8, -1, 0.2);
+      expect(Number.isFinite(out.r)).toBe(true);
+      expect(Number.isFinite(out.g)).toBe(true);
+      expect(Number.isFinite(out.b)).toBe(true);
+    }
+  });
 });
 
 describe('HDREngine — Metadata', () => {

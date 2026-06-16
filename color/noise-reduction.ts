@@ -118,8 +118,9 @@ export function bilateralFilter(
   height: number,
   opts:   BilateralOptions = {},
 ): Uint8ClampedArray {
-  const sigmaS = opts.sigmaS ?? 2.0;
-  const sigmaR = opts.sigmaR ?? 25;
+  // sigma=0 → inv2sig2=Infinity → 0*Infinity=NaN in the LUT; clamp to a tiny positive value.
+  const sigmaS = Math.max(1e-6, opts.sigmaS ?? 2.0);
+  const sigmaR = Math.max(1e-6, opts.sigmaR ?? 25);
   const radius = opts.radius ?? Math.ceil(2 * sigmaS);
 
   const dst = new Uint8ClampedArray(src.length);
@@ -294,7 +295,8 @@ export function nonLocalMeans(
   height: number,
   opts:   NLMOptions = {},
 ): Uint8ClampedArray {
-  const h            = opts.h            ?? 10;
+  // h=0 → patchArea*h²=0 → patchDist/0=NaN for the center pixel (0/0).
+  const h            = Math.max(1e-6, opts.h ?? 10);
   const patchRadius  = opts.patchRadius  ?? 3;
   const searchRadius = opts.searchRadius ?? 7;
 
@@ -376,10 +378,13 @@ export function estimateNoise(
   // Laplacian kernel (normalized): center=4, neighbours=-1
   // ∇²I = 4*I(x,y) - I(x-1,y) - I(x+1,y) - I(x,y-1) - I(x,y+1)
   // Scale factor from Immerkaer 1996 formula
-  const scaleFactor = Math.sqrt(Math.PI / 2) / (6 * (width - 2) * (height - 2));
+  const N = (width - 2) * (height - 2);
+  // Images smaller than 3×3 have no interior pixels; N≤0 makes scaleFactor=Infinity
+  // and channelSums stays 0, producing 0*Infinity=NaN.
+  if (N < 1) return { sigma: 0, channelSigma: [0, 0, 0] };
+  const scaleFactor = Math.sqrt(Math.PI / 2) / (6 * N);
 
   const channelSums: [number, number, number] = [0, 0, 0];
-  const N = (width - 2) * (height - 2);
 
   for (let y = 1; y < height - 1; y++) {
     for (let x = 1; x < width - 1; x++) {

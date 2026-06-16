@@ -114,6 +114,19 @@ describe('bilateralFilter', () => {
     expect(() => bilateralFilter(src, 8, 8, { radius: 1 })).not.toThrow();
     expect(() => bilateralFilter(src, 8, 8, { radius: 5 })).not.toThrow();
   });
+
+  it('sigmaS=0 does not produce NaN output (0*Infinity guard in Gaussian LUT)', () => {
+    // sigma=0 → inv2sig2=Infinity → Math.exp(-0*Infinity)=NaN in the LUT.
+    const src = solidImage(6, 6, [100, 150, 200, 255]);
+    const out = bilateralFilter(src, 6, 6, { sigmaS: 0 });
+    for (const v of out) expect(Number.isNaN(v)).toBe(false);
+  });
+
+  it('sigmaR=0 does not produce NaN output', () => {
+    const src = solidImage(6, 6, [100, 150, 200, 255]);
+    const out = bilateralFilter(src, 6, 6, { sigmaR: 0 });
+    for (const v of out) expect(Number.isNaN(v)).toBe(false);
+  });
 });
 
 // ─── gaussianBlur ─────────────────────────────────────────────────────────────
@@ -196,6 +209,13 @@ describe('nonLocalMeans', () => {
     expect(imagePsnr(clean, denoised)).toBeGreaterThan(imagePsnr(clean, noisy));
   });
 
+  it('h=0 does not produce NaN output (patchArea*h²=0 → 0/0 guard)', () => {
+    // h=0 makes patchDist/0=NaN for the self-patch (0/0).
+    const src = solidImage(6, 6, [100, 150, 200, 255]);
+    const out = nonLocalMeans(src, 6, 6, { h: 0, patchRadius: 1, searchRadius: 2 });
+    for (const v of out) expect(Number.isNaN(v)).toBe(false);
+  });
+
   it('all output values within [0, 255]', () => {
     const noisy = makeSyntheticNoisyImage(8, 8, [128, 128, 128, 255], 30, 9);
     const out = nonLocalMeans(noisy, 8, 8, { patchRadius: 1, searchRadius: 2 });
@@ -242,6 +262,15 @@ describe('estimateNoise', () => {
     const result = estimateNoise(src, 16, 16);
     const mean = (result.channelSigma[0] + result.channelSigma[1] + result.channelSigma[2]) / 3;
     expect(result.sigma).toBeCloseTo(mean, 8);
+  });
+
+  it('2×2 image (N=0 interior pixels) returns sigma=0 not NaN (0*Infinity guard)', () => {
+    // A 2×2 image has no interior pixels; scaleFactor was Infinity, channelSums=0 → NaN.
+    const src = solidImage(2, 2, [128, 128, 128, 255]);
+    const result = estimateNoise(src, 2, 2);
+    expect(Number.isNaN(result.sigma)).toBe(false);
+    expect(result.sigma).toBe(0);
+    for (const s of result.channelSigma) expect(Number.isNaN(s)).toBe(false);
   });
 });
 

@@ -72,10 +72,14 @@ const PROFILES: Record<BroadcastProfile, Required<Omit<ReadabilityOptions, 'prof
 
 function resolveOptions(opts: ReadabilityOptions): Required<Omit<ReadabilityOptions, 'profile'>> {
   const base = PROFILES[opts.profile ?? 'netflix'];
+  // Clamp the divisor/step-controlling fields to safe minimums:
+  //  - maxCharsPerLine ≤ 0 → wrapWords hard-break infinite loop.
+  //  - maxLines ≤ 0 → wrapCue's `i += maxLines` infinite loop.
+  //  - maxCps ≤ 0 → `chars / maxCps` = Infinity → Infinity cue timecodes.
   return {
-    maxCharsPerLine: opts.maxCharsPerLine ?? base.maxCharsPerLine,
-    maxLines:        opts.maxLines        ?? base.maxLines,
-    maxCps:          opts.maxCps          ?? base.maxCps,
+    maxCharsPerLine: Math.max(1, opts.maxCharsPerLine ?? base.maxCharsPerLine),
+    maxLines:        Math.max(1, opts.maxLines        ?? base.maxLines),
+    maxCps:          Math.max(1e-6, opts.maxCps        ?? base.maxCps),
     minDurationSec:  opts.minDurationSec  ?? base.minDurationSec,
     minGapSec:       opts.minGapSec       ?? base.minGapSec,
   };
@@ -91,22 +95,25 @@ function resolveOptions(opts: ReadabilityOptions): Required<Omit<ReadabilityOpti
  * Returns array of line strings.
  */
 export function wrapWords(text: string, maxChars: number): string[] {
+  // maxChars ≤ 0 would make the hard-break loop below never shrink `remaining`
+  // (slice(0,0)='' and slice(0)=whole string) → infinite loop. Clamp to ≥ 1.
+  const maxC = Math.max(1, Math.floor(maxChars));
   const words = text.split(/\s+/).filter((w) => w.length > 0);
   const lines: string[] = [];
   let current = '';
 
   for (const word of words) {
     const candidate = current.length === 0 ? word : `${current} ${word}`;
-    if (candidate.length <= maxChars) {
+    if (candidate.length <= maxC) {
       current = candidate;
     } else {
       if (current.length > 0) lines.push(current);
-      // Long word wider than maxChars: hard-break at maxChars boundary
-      if (word.length > maxChars) {
+      // Long word wider than maxC: hard-break at maxC boundary
+      if (word.length > maxC) {
         let remaining = word;
-        while (remaining.length > maxChars) {
-          lines.push(remaining.slice(0, maxChars));
-          remaining = remaining.slice(maxChars);
+        while (remaining.length > maxC) {
+          lines.push(remaining.slice(0, maxC));
+          remaining = remaining.slice(maxC);
         }
         current = remaining;
       } else {

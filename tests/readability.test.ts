@@ -70,6 +70,18 @@ describe('wrapWords()', () => {
   it('single word exactly at limit stays on its own line', () => {
     expect(wrapWords('hello', 5)).toEqual(['hello']);
   });
+
+  it('maxChars=0 does not hang (clamped to ≥1)', () => {
+    // maxChars=0 made the hard-break loop never shrink `remaining` → infinite loop.
+    let result: string[] = [];
+    expect(() => { result = wrapWords('hello world', 0); }).not.toThrow();
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.join('')).toContain('h');
+  });
+
+  it('negative maxChars does not hang', () => {
+    expect(() => wrapWords('abcdef', -5)).not.toThrow();
+  });
 });
 
 // ============================================================
@@ -352,5 +364,32 @@ describe('normalizeCues → auditCues round-trip', () => {
     const normalized = normalizeCues(raw, { profile: 'ebu' });
     const violations = auditCues(normalized, { profile: 'ebu' });
     expect(violations).toHaveLength(0);
+  });
+});
+
+// ============================================================
+// Degenerate-config guards
+// ============================================================
+
+describe('normalizeCues() — degenerate-config guards', () => {
+  const raw: RawCue[] = [{ start: 0, end: 2, text: 'Hello world this is a test caption.' }];
+
+  it('maxLines=0 does not hang (wrapCue `i += maxLines` infinite loop)', () => {
+    let out: NormalizedCue[] = [];
+    expect(() => { out = normalizeCues(raw, { maxLines: 0 }); }).not.toThrow();
+    expect(out.length).toBeGreaterThan(0);
+  });
+
+  it('maxCharsPerLine=0 does not hang', () => {
+    expect(() => normalizeCues(raw, { maxCharsPerLine: 0 })).not.toThrow();
+  });
+
+  it('maxCps=0 does not produce Infinity timecodes', () => {
+    const out = normalizeCues(raw, { maxCps: 0 });
+    for (const c of out) {
+      expect(Number.isFinite(c.start)).toBe(true);
+      expect(Number.isFinite(c.end)).toBe(true);
+      expect(Number.isFinite(c.cps)).toBe(true);
+    }
   });
 });

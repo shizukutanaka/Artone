@@ -757,6 +757,15 @@ export class HistoryManager {
       (composite as Command & { description: string }).description = description;
     }
 
+    // Nested group: push the composite into the parent group rather than
+    // directly into the history stack.  Without this check, the inner
+    // composite escaped its parent group and became an independent history
+    // entry, making nested beginGroup/endGroup pairs behave incorrectly.
+    if (this.groupStack.length > 0) {
+      this.groupStack[this.groupStack.length - 1].push(composite);
+      return;
+    }
+
     // グループをスタックの上に置く
     this.commands = this.commands.slice(0, this.position + 1);
     this.commands.push(composite);

@@ -264,6 +264,24 @@ describe('cancelJob', () => {
   it('ignores cancelJob for unknown jobId', () => {
     expect(() => mgr.cancelJob('no-such-job')).not.toThrow();
   });
+
+  it('REGRESSION: cancelling a processing job keeps status cancelled (not overwritten to complete)', async () => {
+    // Start one job — it becomes 'processing' immediately.
+    const p1 = mgr.generateProxy('media-1', undefined!);
+
+    const job1 = mgr.getAllJobs().find(j => j.mediaId === 'media-1');
+    expect(job1).toBeDefined();
+
+    // Cancel while processJob is in-flight (before timers advance).
+    mgr.cancelJob(job1!.id);
+    expect(mgr.getJob(job1!.id)?.status).toBe('cancelled');
+
+    // Let the fake async job finish — processQueue must not overwrite 'cancelled'.
+    await vi.runAllTimersAsync();
+    await p1;
+
+    expect(mgr.getJob(job1!.id)?.status).toBe('cancelled');
+  });
 });
 
 // ─── proxy lifecycle ──────────────────────────────────────────────────────────

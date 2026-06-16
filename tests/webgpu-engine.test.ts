@@ -290,12 +290,26 @@ describe('WebGPURenderEngine — REGRESSION: frame-local GPU resources are destr
 
   it('unknown effect type leaves input texture unchanged (no output texture)', async () => {
     const { engine, mock } = primedEngine();
-    // 'sharpen' is not in the pipelines map → applyEffect returns input
+    // 'sharpen' has no pipeline → applyEffect returns null, caller keeps current tex
     await engine.renderFrame([makeLayer({ effects: [makeEffect('sharpen')] })]);
     // No intermediate texture created for the missing pipeline
     expect(mock.createdTextures).toHaveLength(0);
     // Only composite paramBuffer
     expect(mock.createdBuffers).toHaveLength(1);
+  });
+
+  it('REGRESSION: unknown effect type does not destroy the original layer texture', async () => {
+    // Bug: applyEffect returned `input` (not null) when no pipeline was registered.
+    // The caller pushed `input` into transientTextures and destroyed it after submit,
+    // wiping the layer's own GPU texture and corrupting subsequent frames that
+    // reference the same layer (e.g. cached textures from importTexture).
+    const { engine } = primedEngine();
+    const layerTex = makeLayerTexture();
+    await engine.renderFrame([
+      makeLayer({ texture: layerTex, effects: [makeEffect('sharpen')] }),
+    ]);
+    const destroyFn = (layerTex as unknown as { destroy: ReturnType<typeof vi.fn> }).destroy;
+    expect(destroyFn).not.toHaveBeenCalled();
   });
 });
 

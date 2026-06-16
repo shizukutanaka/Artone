@@ -515,7 +515,10 @@ export class WebGPURenderEngine {
     if (!this.device) return null;
 
     const pipeline = this.pipelines.get(effect.type) as GPUComputePipeline;
-    if (!pipeline) return input;
+    // Return null (not input) so the caller's transientTextures array does not
+    // capture and later destroy the original layer texture. The caller skips
+    // assignment when null, preserving the current tex reference unchanged.
+    if (!pipeline) return null;
 
     const output = this.device.createTexture({
       size: [input.width, input.height],

@@ -312,8 +312,12 @@ export class ExportEngine {
 
       return blob;
     } catch (error) {
-      job.status = 'error';
-      job.error = error instanceof Error ? error.message : String(error);
+      // cancelJob() may have set status='cancelled' before the abort propagated;
+      // do not overwrite it with 'error'.
+      if (job.status !== 'cancelled') {
+        job.status = 'error';
+        job.error = error instanceof Error ? error.message : String(error);
+      }
       this.notifyListeners(job);
       throw error;
     } finally {

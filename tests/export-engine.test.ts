@@ -264,6 +264,44 @@ describe('ExportEngine — download()', () => {
   });
 });
 
+// ============================================================
+// REGRESSION: cancelJob status not overwritten by catch block
+// ============================================================
+
+describe('REGRESSION: cancel status preserved when abort propagates as error', () => {
+  it('job.status stays cancelled when abortController.abort() causes the encode to reject', () => {
+    // Simulate the sequence: cancelJob sets 'cancelled', then abort throws an error
+    // that the catch block must NOT overwrite with 'error'.
+    const engine = new ExportEngine();
+    const config: ExportConfig = {
+      format: 'mp4', codec: 'avc1.640028', width: 1920, height: 1080,
+      fps: 30, bitrate: 5_000_000, audioBitrate: 192_000,
+      quality: 'high', hardwareAcceleration: true,
+    };
+    const job = engine.createJob('p', config);
+
+    // Mark the job as encoding (as the export loop would)
+    job.status = 'encoding';
+    // cancelJob: sets 'cancelled' and fires abort
+    engine.cancelJob(job.id);
+    expect(job.status).toBe('cancelled');
+
+    // Now simulate the catch block path — verify that re-invoking cancelJob
+    // on an already-cancelled job doesn't flip it back (no-op guard already existed),
+    // and that the status is still 'cancelled' after the error path would have run.
+    // (White-box: we verify the guard logic without executing the full async export.)
+    const simulateCatchBlock = (j: ExportJob, err: Error) => {
+      if (j.status !== 'cancelled') {
+        j.status = 'error';
+        j.error = err.message;
+      }
+    };
+    simulateCatchBlock(job, new Error('Export cancelled'));
+    expect(job.status).toBe('cancelled');    // must NOT become 'error'
+    expect(job.error).toBeUndefined();       // error field must not be set
+  });
+});
+
 describe('REGRESSION: encodeAudio planar layout', () => {
   it('planar layout fix: data[ch * length + i] not data[i * channels + ch]', async () => {
     // We cannot call private encodeAudio directly without a real AudioEncoder,

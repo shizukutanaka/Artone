@@ -360,10 +360,16 @@ export class CollaborationEngine {
   /**
    * リモートの Vector Clock をローカルにマージ (各要素の最大値)。
    * 受信操作の適用時に呼ぶ。
+   *
+   * 入力値をバリデーションする: NaN / Infinity / 負値 を持つエントリは
+   * 無視する。これらが混入すると Math.max(..., NaN) = NaN となり、
+   * compareClocks の全比較が false → 'equal' を誤返却してしまう。
+   * (攻撃者が改ざんした SyncMessage で conflict resolution が崩壊するのを防ぐ)
    */
   mergeRemoteClock(remote: Record<string, number>): void {
     for (const [k, v] of Object.entries(remote)) {
-      this.vectorClock.set(k, Math.max(this.vectorClock.get(k) ?? 0, v));
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) continue;
+      this.vectorClock.set(k, Math.max(this.vectorClock.get(k) ?? 0, Math.floor(v)));
     }
   }
 

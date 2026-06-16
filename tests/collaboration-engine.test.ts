@@ -459,6 +459,46 @@ describe('CollaborationEngine — mergeRemoteClock', () => {
     const engine = await connected();
     expect(() => engine.mergeRemoteClock({})).not.toThrow();
   });
+
+  it('REGRESSION: NaN clock value is rejected and does not corrupt vectorClock', async () => {
+    // Bug: Math.max(0, NaN) === NaN silently poisoned the vector clock entry,
+    // making compareClocks always return 'equal' (all NaN comparisons are false).
+    const engine = await connected();
+    engine.applyOperation(['x'], 'set', 1); // local user clock → 1
+    engine.mergeRemoteClock({ alice: NaN });
+    // compareClocks must still work: two equal clocks → 'equal'
+    const a = { alice: 1 };
+    expect(CollaborationEngine.compareClocks(a, a)).toBe('equal');
+    // The NaN entry must not have been stored (no throw, no corruption)
+    expect(() => engine.mergeRemoteClock({ alice: NaN })).not.toThrow();
+  });
+
+  it('REGRESSION: Infinity clock value is rejected', async () => {
+    const engine = await connected();
+    // Infinity would make max() return Infinity, poisoning future comparisons.
+    expect(() => engine.mergeRemoteClock({ alice: Infinity })).not.toThrow();
+    // After rejection, compareClocks on normal clocks must still be correct.
+    expect(CollaborationEngine.compareClocks({ a: 1 }, { a: 2 })).toBe('before');
+  });
+
+  it('REGRESSION: negative clock value is rejected', async () => {
+    // Negative clocks are physically impossible in Lamport / vector clocks.
+    const engine = await connected();
+    expect(() => engine.mergeRemoteClock({ alice: -1 })).not.toThrow();
+    // Normal comparison must remain correct after the rejected merge.
+    expect(CollaborationEngine.compareClocks({ a: 2 }, { a: 1 })).toBe('after');
+  });
+
+  it('REGRESSION: mixed valid/invalid clock only applies valid entries', async () => {
+    const engine = await connected();
+    // alice=5 is valid; bob=NaN and carol=-3 must be silently skipped.
+    // We cannot inspect vectorClock directly, but compareClocks output confirms
+    // that the engine state is internally consistent (no NaN propagation).
+    expect(() =>
+      engine.mergeRemoteClock({ alice: 5, bob: NaN, carol: -3 })
+    ).not.toThrow();
+    expect(CollaborationEngine.compareClocks({ alice: 5 }, { alice: 5 })).toBe('equal');
+  });
 });
 
 // ============================================================

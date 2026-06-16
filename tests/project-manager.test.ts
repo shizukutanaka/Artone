@@ -594,4 +594,14 @@ describe('importProject() — schema safety', () => {
     const future = JSON.stringify({ id: 'f', name: 'F', schemaVersion: PROJECT_SCHEMA_VERSION + 99 });
     await expect(pm.importProject(fakeFile(future))).rejects.toThrow(/newer than supported/i);
   });
+
+  it('REGRESSION: importProject rejects malformed JSON with a clear error (not raw SyntaxError)', async () => {
+    // Bug: importProject called JSON.parse(text) without try/catch. A file with
+    // truncated/invalid JSON threw a raw SyntaxError with no "Invalid project
+    // file:" prefix, and the error propagated unhandled past the public API.
+    const pm = new ProjectManager();
+    await patchDB(pm);
+    await pm.init();
+    await expect(pm.importProject(fakeFile('{broken json::'))).rejects.toThrow(/Invalid project file/i);
+  });
 });

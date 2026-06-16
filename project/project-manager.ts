@@ -584,9 +584,15 @@ export class ProjectManager {
 
   async importProject(file: File): Promise<Project> {
     const text = await file.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      throw new Error(`Invalid project file: ${(err as Error).message}`);
+    }
     // Migrate/validate untrusted external project data; refuses newer-schema
     // files and backfills older ones instead of casting blindly.
-    const data = migrateProject(JSON.parse(text));
+    const data = migrateProject(parsed);
 
     // Generate new ID to avoid conflicts
     data.id = crypto.randomUUID();

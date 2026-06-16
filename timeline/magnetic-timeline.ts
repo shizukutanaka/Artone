@@ -217,8 +217,11 @@ export class MagneticTimeline {
     clip.duration = newDuration;
     clip.mediaIn += delta;
 
-    // Ripple subsequent clips
-    this.shiftClipsAfter(clip.trackId, clip.startTime + clip.duration, -delta);
+    // No ripple: trimming the start moves only the clip's head — its END
+    // position (startTime + duration) is unchanged — so subsequent clips must
+    // not move. The previous shiftClipsAfter rippled them left by delta, which
+    // overlapped this clip's tail (e.g. trimming A[0,10]→[3,10] pulled the
+    // following B[10,20] to [7,17], overlapping [7,10]).
 
     this.notify();
   }
@@ -230,12 +233,17 @@ export class MagneticTimeline {
     const newDuration = newEnd - clip.startTime;
     if (newDuration <= 0) return;
 
+    // Capture the OLD end before mutating duration — the ripple boundary is the
+    // position subsequent clips currently sit after, not the new end.
+    const oldEnd = clip.startTime + clip.duration;
     const delta = newDuration - clip.duration;
     clip.duration = newDuration;
     clip.mediaOut = clip.mediaIn + newDuration;
 
-    // Ripple subsequent clips
-    this.shiftClipsAfter(clip.trackId, newEnd, delta);
+    // Ripple subsequent clips from the OLD end. Using newEnd skipped clips in
+    // [oldEnd, newEnd) when extending → overlap (e.g. extending A[0,10]→[0,15]
+    // left the following B[10,20] untouched, overlapping [10,15]).
+    this.shiftClipsAfter(clip.trackId, oldEnd, delta);
 
     this.notify();
   }

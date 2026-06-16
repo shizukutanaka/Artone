@@ -224,6 +224,41 @@ describe('MagneticTimeline — trim', () => {
     tl.trimClipEnd(clip.id, 5); // newDuration = 0, ignored
     expect(tl.getState().clips.get(clip.id)!.duration).toBeCloseTo(5);
   });
+
+  it('REGRESSION: extending trimClipEnd ripples following clip (no overlap)', () => {
+    // Before fix: ripple used newEnd, skipping clips in [oldEnd, newEnd) →
+    // the extended clip overlapped the next clip.
+    const a = tl.addClip(clipSpec({ trackId: vid, startTime: 0, duration: 10 }));
+    const b = tl.addClip(clipSpec({ trackId: vid, startTime: 10, duration: 10 }));
+    tl.trimClipEnd(a.id, 15); // extend end 10 → 15 (delta +5)
+    const ca = tl.getState().clips.get(a.id)!;
+    const cb = tl.getState().clips.get(b.id)!;
+    expect(ca.startTime + ca.duration).toBeCloseTo(15);
+    expect(cb.startTime).toBeCloseTo(15); // rippled by +5
+    // No overlap
+    expect(ca.startTime + ca.duration).toBeLessThanOrEqual(cb.startTime + 1e-9);
+  });
+
+  it('shrinking trimClipEnd closes the gap to the following clip', () => {
+    const a = tl.addClip(clipSpec({ trackId: vid, startTime: 0, duration: 10 }));
+    const b = tl.addClip(clipSpec({ trackId: vid, startTime: 10, duration: 10 }));
+    tl.trimClipEnd(a.id, 7); // shrink end 10 → 7 (delta −3)
+    const cb = tl.getState().clips.get(b.id)!;
+    expect(cb.startTime).toBeCloseTo(7); // rippled left to close gap
+  });
+
+  it('REGRESSION: trimClipStart does not move the following clip (no overlap)', () => {
+    // Before fix: shiftClipsAfter rippled subsequent clips left by delta even
+    // though the trimmed clip's END position was unchanged → overlap.
+    const a = tl.addClip(clipSpec({ trackId: vid, startTime: 0, duration: 10 }));
+    const b = tl.addClip(clipSpec({ trackId: vid, startTime: 10, duration: 10 }));
+    tl.trimClipStart(a.id, 3); // head trim; end stays at 10
+    const ca = tl.getState().clips.get(a.id)!;
+    const cb = tl.getState().clips.get(b.id)!;
+    expect(ca.startTime + ca.duration).toBeCloseTo(10); // end unchanged
+    expect(cb.startTime).toBeCloseTo(10); // following clip stays put
+    expect(ca.startTime + ca.duration).toBeLessThanOrEqual(cb.startTime + 1e-9);
+  });
 });
 
 // ─── splitClip ───────────────────────────────────────────────

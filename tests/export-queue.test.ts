@@ -386,3 +386,37 @@ describe('meta and options', () => {
     expect(job.startedAt).toBeDefined();
   });
 });
+
+// ─── retry + cancel interaction ──────────────────────────────────────────────
+
+describe('REGRESSION: cancel during retry delay does not resurrect the job', () => {
+  it('job cancelled while waiting for retry delay stays cancelled', async () => {
+    // Bug: scheduleRetry's setTimeout callback called pending.push(job) even if
+    // cancel() had set job.status='cancelled' during the delay.  The job was
+    // then re-started ("resurrected") by tick(), making cancel() useless for
+    // retrying jobs.
+    const q = createExportQueue({ retryDelay: 50 });
+    let attempts = 0;
+    const job = q.enqueue(async () => {
+      attempts++;
+      throw new Error('always fail');
+    }, { maxRetries: 3 });
+
+    // Wait for the first failure and the status to flip to 'pending' (retry limbo).
+    await new Promise((r) => setTimeout(r, 10));
+    expect(attempts).toBe(1);
+    expect(job.status).toBe('pending'); // pending while awaiting retry delay
+
+    // Cancel during the retry delay — this must stick.
+    const cancelled = q.cancel(job.id);
+    expect(cancelled).toBe(true);
+    expect(job.status).toBe('cancelled');
+
+    // Wait well past the retry delay to ensure the setTimeout fires.
+    await new Promise((r) => setTimeout(r, 200));
+
+    // After the fix: status stays cancelled and no further attempts run.
+    expect(job.status).toBe('cancelled');
+    expect(attempts).toBe(1); // no resurrection
+  });
+});

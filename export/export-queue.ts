@@ -180,8 +180,11 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
   function scheduleRetry(job: QueueJob<T>, attemptNumber: number): void {
     const delay = retryDelay * Math.pow(2, attemptNumber - 1);
     setTimeout(() => {
-      job.status = 'pending';
-      job.progress = 0;
+      // Guard: cancel() may have been called during the retry delay. Without
+      // this check the job would be resurrected in the pending queue even though
+      // the caller already received cancel()→true.
+      if (job.status === 'cancelled') return;
+      // status is already 'pending' (set in runJob finally before notify)
       pending.push(job);
       sortPending();
       tick();
@@ -244,9 +247,17 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
         job.completedAt = Date.now();
       }
     } finally {
-      // active.delete MUST precede notify so drain() can observe an empty active set
       active.delete(job.id);
       controllers.delete(job.id);
+      // Set status to 'pending' before notifying so the UI sees an accurate
+      // state during the retry delay (not a stale 'active'). scheduleRetry
+      // checks for 'cancelled' before re-queuing, so setting 'pending' here
+      // does not prevent cancel() from working.
+      if (needsRetry) {
+        job.status = 'pending';
+        job.progress = 0;
+      }
+      // active.delete MUST precede notify so drain() can observe an empty active set
       notify(job);
       tick(); // open slot for next pending job (also fires before retry delay)
       if (needsRetry) {

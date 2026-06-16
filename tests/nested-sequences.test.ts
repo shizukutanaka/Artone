@@ -315,6 +315,51 @@ describe('navigation', () => {
   });
 });
 
+// ─── Cycle safety (corrupted / imported project data) ─────────────────────────
+
+describe('cycle safety', () => {
+  it('getParentChain does not hang on a parentId cycle', () => {
+    const a = mgr.createSequence('A');
+    const b = mgr.createSequence('B');
+    // Simulate a corrupted/imported project where parentId links form a cycle.
+    mgr.getSequence(a.id)!.parentId = b.id;
+    mgr.getSequence(b.id)!.parentId = a.id;
+    const chain = mgr.getParentChain(a.id);
+    // Terminates (no infinite loop) and visits each sequence at most once.
+    expect(chain.length).toBe(2);
+    expect(new Set(chain.map(s => s.id)).size).toBe(chain.length);
+  });
+
+  it('renderNestedFrame does not stack-overflow on a self-referential nested clip', async () => {
+    // OffscreenCanvas is unavailable in jsdom; install a minimal stub so the
+    // recursion path runs and the cycle guard (not a crash) is what stops it.
+    interface CanvasGlobal { OffscreenCanvas?: unknown }
+    const g = globalThis as unknown as CanvasGlobal;
+    const had = 'OffscreenCanvas' in g;
+    const prev = g.OffscreenCanvas;
+    const ctxStub = {
+      fillStyle: '', fillRect: () => {}, putImageData: () => {},
+      getImageData: () => ({ data: new Uint8ClampedArray(4), width: 1, height: 1 }),
+    };
+    g.OffscreenCanvas = class { getContext() { return ctxStub; } };
+    try {
+      const a = mgr.createSequence('A');
+      const trackId = mgr.getSequence(a.id)!.tracks[0].id;
+      // Nested clip pointing back at its own sequence → infinite recursion
+      // without the guard.
+      mgr.addClip(a.id, {
+        trackId, type: 'nested', startTime: 0, duration: 5, mediaIn: 0, mediaOut: 5,
+        speed: 1, reversed: false, sequenceId: a.id, label: 'self', color: '#fff',
+        locked: false, disabled: false,
+      });
+      // Should resolve (not throw RangeError: Maximum call stack size exceeded).
+      await expect(mgr.renderNestedFrame(a.id, 1)).resolves.toBeDefined();
+    } finally {
+      if (had) g.OffscreenCanvas = prev; else delete g.OffscreenCanvas;
+    }
+  });
+});
+
 // ─── Subscriptions ────────────────────────────────────────────────────────────
 
 describe('subscribe', () => {

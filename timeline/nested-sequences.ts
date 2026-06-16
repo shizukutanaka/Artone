@@ -401,12 +401,16 @@ export class NestedSequenceManager {
 
   getParentChain(sequenceId: string): Sequence[] {
     const chain: Sequence[] = [];
+    const visited = new Set<string>();
     let current = this.sequences.get(sequenceId);
 
-    while (current) {
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id);
       chain.unshift(current);
       current = current.parentId ? this.sequences.get(current.parentId) : undefined;
     }
+    // A parentId cycle (e.g. from a corrupted/imported project) would otherwise
+    // loop forever; the visited set stops at the first repeated sequence.
 
     return chain;
   }
@@ -527,9 +531,20 @@ export class NestedSequenceManager {
   // Render Frame from Nested
   // ============================================================
 
-  async renderNestedFrame(sequenceId: string, time: number): Promise<ImageData | null> {
+  async renderNestedFrame(
+    sequenceId: string,
+    time: number,
+    _ancestors: ReadonlySet<string> = new Set(),
+  ): Promise<ImageData | null> {
     const sequence = this.sequences.get(sequenceId);
     if (!sequence) return null;
+
+    // Cycle guard: a nested clip whose sequenceId points back to an ancestor
+    // (reachable via corrupted/imported project data) would recurse until the
+    // call stack overflows. Track the active render path and bail on revisit.
+    if (_ancestors.has(sequenceId)) return null;
+    const path = new Set(_ancestors);
+    path.add(sequenceId);
 
     // Create canvas for compositing
     const canvas = new OffscreenCanvas(sequence.settings.width, sequence.settings.height);
@@ -549,7 +564,7 @@ export class NestedSequenceManager {
       if (clip.type === 'nested' || clip.type === 'compound') {
         // Recursively render nested sequence
         const nestedTime = (time - clip.startTime) * clip.speed + clip.mediaIn;
-        const nestedFrame = await this.renderNestedFrame(clip.sequenceId!, nestedTime);
+        const nestedFrame = await this.renderNestedFrame(clip.sequenceId!, nestedTime, path);
         if (nestedFrame) {
           ctx.putImageData(nestedFrame, 0, 0);
         }

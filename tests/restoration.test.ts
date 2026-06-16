@@ -112,6 +112,13 @@ describe('highPassDcBlock', () => {
     const s = sine(440, 48000, 0.05);
     expect(highPassDcBlock(s, 48000).length).toBe(s.length);
   });
+
+  it('sampleRate=0 does not produce NaN (-Infinity*0=NaN guard)', () => {
+    // r = 1 - 2π·20/0 = 1 - Infinity = -Infinity; then -Infinity*0 = NaN.
+    const s = sine(440, 48000, 0.02, 0.5);
+    const out = highPassDcBlock(s, 0);
+    for (const v of out) expect(Number.isNaN(v)).toBe(false);
+  });
 });
 
 // ─── declick ──────────────────────────────────────────────────────────────────

@@ -302,3 +302,27 @@ describe('BPM estimation edge cases', () => {
     }
   });
 });
+
+// ─── Degenerate input guards ──────────────────────────────────────────────────
+
+describe('detectBeats — degenerate input guards', () => {
+  it('hopSize=0 does not infinite-loop (returns empty result)', () => {
+    // hopSize=0 → off+=0 → infinite loop; guard clamps to max(1, hopSize).
+    const audio = beatsSignal(120, 5);
+    const r = detectBeats(audio, { hopSize: 0 });
+    expect(Array.isArray(r.beats)).toBe(true);
+  });
+
+  it('sampleRate=0 returns empty beats (timeSec=Infinity guard)', () => {
+    const audio = beatsSignal(120, 3);
+    const r = detectBeats(audio, { sampleRate: 0 });
+    expect(r.beats.length).toBe(0);
+    expect(r.bpm).toBe(0);
+  });
+
+  it('all beat timestamps are finite numbers', () => {
+    const audio = beatsSignal(120, 5);
+    const r = detectBeats(audio, { sampleRate: 48000, hopSize: 512 });
+    for (const t of r.beats) expect(Number.isFinite(t)).toBe(true);
+  });
+});

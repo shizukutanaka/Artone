@@ -273,7 +273,8 @@ function resolveOptions(opts: VADOptions = {}): Required<VADOptions> {
   return {
     sampleRate:          opts.sampleRate          ?? 48000,
     windowSize,
-    hopSize:             opts.hopSize             ?? windowSize >> 1,
+    // hopSize=0 → numFrames=Infinity → new Float32Array(Infinity) throws RangeError.
+    hopSize:             Math.max(1, opts.hopSize ?? windowSize >> 1),
     thresholdDb:         opts.thresholdDb         ?? 10,
     noiseAlpha:          opts.noiseAlpha          ?? 0.02,
     hangoverFrames:      opts.hangoverFrames      ?? 8,

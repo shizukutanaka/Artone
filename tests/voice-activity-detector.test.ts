@@ -348,4 +348,11 @@ describe('detectVoiceActivity — edge cases', () => {
     const r = detectVoiceActivity(sine(44100, 440, 0.5), { sampleRate: 44100 });
     expect(r.energy.every(isFinite)).toBe(true);
   });
+
+  it('hopSize=0 does not throw (numFrames=Infinity → Float32Array(∞) guard)', () => {
+    // hopSize=0 → numFrames = Infinity → new Float32Array(Infinity) throws RangeError.
+    expect(() => detectVoiceActivity(sine(SR), { hopSize: 0 })).not.toThrow();
+    const r = detectVoiceActivity(sine(SR), { hopSize: 0 });
+    expect(r.energy.every(isFinite)).toBe(true);
+  });
 });

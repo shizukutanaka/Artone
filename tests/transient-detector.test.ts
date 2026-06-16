@@ -437,4 +437,19 @@ describe('detectTransients — integration', () => {
     const audio = impulseTrain(SR, 4800, 3, 1.0);
     expect(() => detectTransients(audio, { medianHalf: 100 })).not.toThrow();
   });
+
+  it('hopSize=0 does not throw (numFrames=Infinity → Float32Array(∞) guard)', () => {
+    // hopSize=0 → numFrames = floor((N-windowSize)/0)+1 = Infinity; throws RangeError.
+    const audio = impulseTrain(SR, 4800, 3, 1.0);
+    expect(() => detectTransients(audio, { hopSize: 0 })).not.toThrow();
+    const r = detectTransients(audio, { hopSize: 0 });
+    expect(Array.isArray(r.onsets)).toBe(true);
+  });
+
+  it('sampleRate=0 returns empty result (frameTimes=Infinity guard)', () => {
+    const audio = impulseTrain(SR, 4800, 3, 1.0);
+    const r = detectTransients(audio, { sampleRate: 0 });
+    expect(r.onsets.length).toBe(0);
+    expect(r.frameTimes.length).toBe(0);
+  });
 });

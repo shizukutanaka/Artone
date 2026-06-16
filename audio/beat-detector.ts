@@ -135,13 +135,16 @@ export function detectBeats(
 ): BeatDetectionResult {
   const sampleRate  = options.sampleRate   ?? 48000;
   const windowSize  = options.windowSize   ?? 1024;
-  const hopSize     = Math.min(options.hopSize ?? 512, windowSize);
+  // hopSize=0 causes `off += 0` → infinite loop; clamp to [1, windowSize].
+  const hopSize     = Math.max(1, Math.min(options.hopSize ?? 512, windowSize));
   const threshold   = options.threshold    ?? 1.5;
   const historySize = options.historySize  ?? Math.max(4, Math.ceil(sampleRate / hopSize));
   const minIntervalSec = options.minIntervalSec ?? 0.25;
   const minWinGap   = Math.ceil(minIntervalSec * sampleRate / hopSize);
 
   if (audio.length < windowSize) return { beats: [], bpm: 0, confidence: 0 };
+  // sampleRate=0 would make timeSec=Infinity for every beat; no valid output possible.
+  if (sampleRate <= 0) return { beats: [], bpm: 0, confidence: 0 };
 
   // ── Step 1: per-window energy ──
   const energies: number[] = [];

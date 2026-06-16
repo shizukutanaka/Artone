@@ -111,6 +111,8 @@ export function highPassDcBlock(
 ): Float32Array {
   const out = new Float32Array(input.length);
   if (input.length === 0) return out;
+  // sampleRate=0 → r=1-Infinity=-Infinity → (-Infinity)*0=NaN on first sample.
+  if (sampleRate <= 0) return Float32Array.from(input);
   const r = 1 - (2 * Math.PI * cutoffHz) / sampleRate;
   let prevIn = 0;
   let prevOut = 0;

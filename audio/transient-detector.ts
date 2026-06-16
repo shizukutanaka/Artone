@@ -216,12 +216,15 @@ export function detectTransients(
 ): TransientDetectionResult {
   const sampleRate     = options.sampleRate     ?? 48000;
   const windowSize     = options.windowSize     ?? 512;
-  const hopSize        = options.hopSize        ?? windowSize >> 1;
+  // hopSize=0 → numFrames=Infinity → new Float32Array(Infinity) throws RangeError.
+  const hopSize        = Math.max(1, options.hopSize ?? windowSize >> 1);
   const threshold      = options.threshold      ?? 1.5;
   const medianHalf     = options.medianHalf     ?? 8;
   const minIntervalSec = options.minIntervalSec ?? 0.05;
   const numBands       = options.numBands       ?? 4;
 
+  // sampleRate=0 → frameTimes=Infinity; guard before any frame-time arithmetic.
+  if (sampleRate <= 0) return { onsets: [], confidence: [], onsetStrength: new Float32Array(0), frameTimes: new Float32Array(0) };
   const minFrameGap = Math.max(1, Math.ceil(minIntervalSec * sampleRate / hopSize));
 
   const flux       = computeOnsetStrength(audio, windowSize, hopSize, numBands);

@@ -103,6 +103,13 @@ export function makeLogFrequencies(n = EQ_DISPLAY_POINTS, sampleRate = 48000): F
   const freqs = new Float32Array(n);
   const fMin     = 20;
   const fMax     = sampleRate / 2;
+  // When Nyquist ≤ fMin (sampleRate ≤ 40 Hz, incl. 0), log10(fMax/fMin) is
+  // ≤ 0 or −Infinity; the i=0 term becomes 0·−Infinity = NaN. Degenerate but
+  // guard so the array stays finite (flat at fMin).
+  if (!(fMax > fMin)) {
+    freqs.fill(fMin);
+    return freqs;
+  }
   const logRange = Math.log10(fMax / fMin);
   for (let i = 0; i < n; i++) {
     freqs[i] = fMin * Math.pow(10, (i / Math.max(1, n - 1)) * logRange);

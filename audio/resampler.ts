@@ -117,6 +117,9 @@ export function resample(input: Float32Array, options: ResampleOptions): Float32
 
   if (srcSR === dstSR) return input.slice();
   if (input.length === 0) return new Float32Array(0);
+  // Non-positive / non-finite rates make outputSampleCount divide by zero
+  // → Infinity → `new Float32Array(Infinity)` throws RangeError. Pass through.
+  if (!(srcSR > 0) || !(dstSR > 0)) return input.slice();
 
   const outLen = outputSampleCount(input.length, srcSR, dstSR);
   if (outLen === 0) return new Float32Array(0);
@@ -188,6 +191,12 @@ export function createResampler(options: ResampleOptions): Resampler {
       return input.slice();
     }
     if (input.length === 0) return new Float32Array(0);
+    // Invalid rates → outputSampleCount Infinity → Float32Array(Infinity) throws.
+    if (!(srcSR > 0) || !(dstSR > 0)) {
+      totalIn  += input.length;
+      totalOut += input.length;
+      return input.slice();
+    }
 
     // How many output samples should we have emitted after consuming all new input?
     const newTotalOut = outputSampleCount(totalIn + input.length, srcSR, dstSR);

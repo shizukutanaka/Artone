@@ -396,3 +396,28 @@ describe('Quality comparison', () => {
     expect(Math.abs(20 * Math.log10(r16 / r4))).toBeLessThan(1);
   });
 });
+
+// ─── Invalid sample-rate guards ───────────────────────────────────────────────
+
+describe('resample — invalid sample-rate guards', () => {
+  it('sourceSampleRate=0 does not throw RangeError (Float32Array(Infinity))', () => {
+    // outputSampleCount = ⌊len·dst/0⌋ = Infinity → new Float32Array(Infinity) throws.
+    const input = sine(440, 1000, 48000);
+    expect(() => resample(input, { sourceSampleRate: 0, targetSampleRate: 48000 })).not.toThrow();
+    const out = resample(input, { sourceSampleRate: 0, targetSampleRate: 48000 });
+    expect(out.every(isFinite)).toBe(true);
+  });
+
+  it('negative sample rates pass through without crashing', () => {
+    const input = sine(440, 1000, 48000);
+    expect(() => resample(input, { sourceSampleRate: -44100, targetSampleRate: 48000 })).not.toThrow();
+    expect(() => resample(input, { sourceSampleRate: 44100, targetSampleRate: -1 })).not.toThrow();
+  });
+
+  it('streaming resampler with sourceSampleRate=0 does not throw', () => {
+    const r = createResampler({ sourceSampleRate: 0, targetSampleRate: 48000 });
+    const input = sine(440, 512, 48000);
+    expect(() => r.process(input)).not.toThrow();
+    expect(r.process(input).every(isFinite)).toBe(true);
+  });
+});

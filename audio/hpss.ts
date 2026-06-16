@@ -346,7 +346,9 @@ function wienerMasks(
  */
 export function separateHPSS(signal: Float32Array, opts: HPSSOptions = {}): HPSSResult {
   const winSize       = opts.windowSize        ?? 2048;
-  const hopSize       = opts.hopSize           ?? winSize >> 2;
+  // hopSize ≤ 0 makes stft's nFrames = ⌊…/0⌋ + 1 = Infinity → the frame loop
+  // never terminates (hang). Clamp to [1, winSize].
+  const hopSize       = Math.max(1, Math.min(opts.hopSize ?? winSize >> 2, winSize));
   const harmFilterLen = opts.harmonicFilterLen  ?? 17;
   const percFilterLen = opts.percussiveFilterLen ?? 17;
   const maskPower     = opts.maskPower          ?? 2;
@@ -398,7 +400,8 @@ export function createHPSSProcessor(opts: HPSSOptions = {}): {
   reset(): void;
 } {
   const winSize       = opts.windowSize        ?? 2048;
-  const hopSize       = opts.hopSize           ?? winSize >> 2;
+  // hopSize ≤ 0 → Infinity frames in processBuffer/stft (hang). Clamp.
+  const hopSize       = Math.max(1, Math.min(opts.hopSize ?? winSize >> 2, winSize));
   const harmFilterLen = opts.harmonicFilterLen  ?? 17;
   const percFilterLen = opts.percussiveFilterLen ?? 17;
   const maskPower     = opts.maskPower          ?? 2;

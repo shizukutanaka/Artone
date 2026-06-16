@@ -73,6 +73,18 @@ describe('makeLogFrequencies', () => {
     const f = makeLogFrequencies(EQ_DISPLAY_POINTS, 44100);
     expect(f[f.length - 1]).toBeCloseTo(22050, -1);
   });
+
+  it('sampleRate=0 produces finite frequencies (0·−Infinity=NaN guard)', () => {
+    // Nyquist=0 → log10(0/20)=−Infinity → freqs[0]=20·pow(10, 0·−∞)=NaN.
+    const f = makeLogFrequencies(64, 0);
+    expect(f.length).toBe(64);
+    for (const v of f) expect(Number.isNaN(v)).toBe(false);
+  });
+
+  it('sampleRate below 2·fMin (Nyquist ≤ 20 Hz) stays finite', () => {
+    const f = makeLogFrequencies(32, 30); // Nyquist 15 Hz < fMin 20 Hz
+    for (const v of f) expect(Number.isFinite(v)).toBe(true);
+  });
 });
 
 // ─── nearestFrequencyIndex ────────────────────────────────────────────────────

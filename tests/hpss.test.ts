@@ -359,6 +359,22 @@ describe('separateHPSS — edge cases', () => {
     expect(hE / (pE + 1e-10)).toBeGreaterThan(0.3);
     expect(pE / (hE + 1e-10)).toBeGreaterThan(0.3);
   });
+
+  it('hopSize=0 does not hang (Infinity-frames guard)', () => {
+    // hopSize=0 → stft nFrames = ⌊(N-win)/0⌋ + 1 = Infinity → frame loop hangs.
+    const input = sine(440, 16000, 0.05);
+    expect(() => separateHPSS(input, { windowSize: 512, hopSize: 0 })).not.toThrow();
+    const r = separateHPSS(input, { windowSize: 512, hopSize: 0 });
+    expect(r.harmonic.length).toBe(input.length);
+    for (const v of r.harmonic) expect(Number.isFinite(v)).toBe(true);
+  });
+
+  it('negative hopSize is clamped (no hang, finite output)', () => {
+    const input = sine(440, 16000, 0.05);
+    const r = separateHPSS(input, { windowSize: 512, hopSize: -100 });
+    expect(r.harmonic.length).toBe(input.length);
+    for (const v of r.percussive) expect(Number.isFinite(v)).toBe(true);
+  });
 });
 
 // ─── Helper ───────────────────────────────────────────────────────────────────

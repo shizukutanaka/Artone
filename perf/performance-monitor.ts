@@ -134,7 +134,12 @@ class RollingStats {
   get variance(): number {
     if (this.values.length < 2) return 0;
     const n = this.values.length;
-    return (this.sumSq - (this.sum * this.sum) / n) / (n - 1);
+    // Naive sum-of-squares variance is subject to catastrophic cancellation:
+    // when samples cluster tightly (e.g. a steady 60fps frametime) the two
+    // large terms nearly cancel and floating-point error can yield a small
+    // NEGATIVE result, which would make stdDev = Math.sqrt(negative) = NaN and
+    // poison frametimeVariance in the metrics. Clamp to 0.
+    return Math.max(0, (this.sumSq - (this.sum * this.sum) / n) / (n - 1));
   }
 
   get stdDev(): number {

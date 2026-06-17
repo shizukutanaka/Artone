@@ -141,6 +141,32 @@ describe('PerformanceMonitor', () => {
     }
   });
 
+  it('REGRESSION: frametimeVariance is non-negative for a perfectly steady framerate', () => {
+    // A steady framerate produces a run of identical frametimes. The naive
+    // sum-of-squares variance formula suffers catastrophic cancellation here and
+    // previously returned a tiny NEGATIVE value, making stdDev = sqrt(neg) = NaN
+    // and reporting a negative frametimeVariance. Variance must be >= 0.
+    const m = new PerformanceMonitor({ sampleWindow: 120, enableMemoryProfiling: false });
+    let fakeNow = 0;
+    vi.spyOn(globalThis.performance, 'now').mockImplementation(() => fakeNow);
+    try {
+      // 60 frames, each exactly 16.7ms long, back to back.
+      for (let i = 0; i < 60; i++) {
+        fakeNow = i * 16.7;
+        m.beginFrame();
+        fakeNow = i * 16.7 + 16.7;
+        m.endFrame();
+      }
+      const v = m.getMetrics().frametimeVariance;
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(v)).toBe(true);
+      // stdDev would be NaN if variance were negative — confirm it isn't.
+      expect(Number.isNaN(Math.sqrt(v))).toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('subscribe() receives metrics and unsubscribe stops notifications', () => {
     const received: number[] = [];
     const unsub = monitor.subscribe(m => received.push(m.totalFrames));

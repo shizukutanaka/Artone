@@ -100,6 +100,51 @@ describe('setupI18n / i18n() / t() global helpers', () => {
   });
 });
 
+// ─── ICU plural interpolation (brace-aware) ──────────────────────────────────
+
+describe('i18n — ICU plural interpolation (REGRESSION)', () => {
+  function mgrWith(map: Record<string, unknown>): I18nManager {
+    const m = makeManager();
+    (m as unknown as { translations: Map<string, unknown> }).translations.set('en', map);
+    (m as unknown as { currentLocale: string }).currentLocale = 'en';
+    return m;
+  }
+
+  it('REGRESSION: nested-brace plural selects the right form with no literal leakage', () => {
+    // The old regex captured `one {# item` (truncated at the first }) and left
+    // ` other {# items}}` as literal text in the output.
+    const m = mgrWith({ plurals: { items: '{count, plural, one {# item} other {# items}}' } });
+    expect(m.t('plurals.items', { count: 1 })).toBe('1 item');
+    expect(m.t('plurals.items', { count: 5 })).toBe('5 items');
+    const five = m.t('plurals.items', { count: 5 });
+    expect(five).not.toContain('plural');
+    expect(five).not.toContain('{');
+    expect(five).not.toContain('}');
+  });
+
+  it('REGRESSION: plural construct embedded in surrounding literal text', () => {
+    const m = mgrWith({ msg: 'You have {count, plural, one {# message} other {# messages}} today' });
+    expect(m.t('msg', { count: 1 })).toBe('You have 1 message today');
+    expect(m.t('msg', { count: 3 })).toBe('You have 3 messages today');
+  });
+
+  it('plural option text may contain a simple {var} placeholder', () => {
+    const m = mgrWith({ msg: '{count, plural, one {# file for {name}} other {# files for {name}}}' });
+    expect(m.t('msg', { count: 2, name: 'Bob' })).toBe('2 files for Bob');
+  });
+
+  it('multiple # placeholders in one option are all replaced', () => {
+    const m = mgrWith({ msg: '{count, plural, other {#/# done}}' });
+    expect(m.t('msg', { count: 4 })).toBe('4/4 done');
+  });
+
+  it('the bundled en.json plural format resolves correctly', () => {
+    // Mirrors i18n/en.json "plurals.items".
+    const m = mgrWith({ plurals: { items: '{count, plural, one {# item} other {# items}}' } });
+    expect(m.t('plurals.items', { count: 0 })).toBe('0 items');
+  });
+});
+
 describe('locales — TIER1_LOCALES', () => {
   it('contains at least 10 locales', () => {
     expect(TIER1_LOCALES.length).toBeGreaterThanOrEqual(10);

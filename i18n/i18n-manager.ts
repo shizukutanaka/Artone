@@ -236,17 +236,11 @@ export class I18nManager {
   ): string {
     if (!params) return template;
 
-    let result = template;
-
     // 複数形対応: {count, plural, one {...} other {...}}
-    result = result.replace(
-      /\{(\w+),\s*plural,\s*([^}]+)\}/g,
-      (_, key, rules) => {
-        const count = Number(params[key]);
-        if (Number.isNaN(count)) return '';
-        return this.selectPlural(count, rules, locale);
-      }
-    );
+    // Brace-aware (not regex): ICU plural option bodies themselves contain
+    // braces, so a `[^}]+` capture truncated the body at the first `}` and left
+    // the remainder (e.g. " other {# items}}") as literal garbage in the output.
+    let result = this.replacePlurals(template, params, locale);
 
     // 通常変数: {name}
     result = result.replace(/\{(\w+)\}/g, (_, key) => {
@@ -265,21 +259,81 @@ export class I18nManager {
   }
 
   /**
+   * Replace every `{key, plural, …}` construct using brace-depth matching so
+   * nested option braces are handled correctly. Non-plural `{…}` spans are left
+   * untouched for the simple-variable pass.
+   */
+  private replacePlurals(
+    template: string,
+    params: InterpolationParams,
+    locale: LocaleCode
+  ): string {
+    let result = '';
+    let i = 0;
+    while (i < template.length) {
+      if (template[i] === '{') {
+        const head = /^\{(\w+),\s*plural,\s*/.exec(template.slice(i));
+        if (head) {
+          const end = this.matchBrace(template, i);
+          if (end !== -1) {
+            const key = head[1];
+            const body = template.slice(i + head[0].length, end); // option list, sans final '}'
+            const count = Number(params[key]);
+            result += Number.isNaN(count) ? '' : this.selectPlural(count, body, locale);
+            i = end + 1;
+            continue;
+          }
+        }
+      }
+      result += template[i];
+      i++;
+    }
+    return result;
+  }
+
+  /**
+   * Return the index of the `}` matching the `{` at `open`, or -1 if unbalanced.
+   */
+  private matchBrace(s: string, open: number): number {
+    let depth = 0;
+    for (let j = open; j < s.length; j++) {
+      if (s[j] === '{') depth++;
+      else if (s[j] === '}' && --depth === 0) return j;
+    }
+    return -1;
+  }
+
+  /**
    * 複数形ルール選択 (簡易ICU MessageFormat)。
    */
   private selectPlural(count: number, rules: string, locale: LocaleCode): string {
     const pluralRules = new Intl.PluralRules(locale);
     const category = pluralRules.select(count);
     const ruleMap = this.parsePluralRules(rules);
-    return (ruleMap.get(category) || ruleMap.get('other') || '').replace('#', String(count));
+    const chosen = ruleMap.get(category) ?? ruleMap.get('other') ?? '';
+    // ICU '#' is the count placeholder; may appear multiple times.
+    return chosen.replace(/#/g, String(count));
   }
 
+  /**
+   * Parse `category {text}` option pairs with brace-depth matching, so option
+   * text containing braces is captured intact (the old `\{([^}]*)\}` regex
+   * stopped at the first inner `}`).
+   */
   private parsePluralRules(rules: string): Map<string, string> {
     const map = new Map<string, string>();
-    const regex = /(\w+)\s*\{([^}]*)\}/g;
-    let match;
-    while ((match = regex.exec(rules)) !== null) {
-      map.set(match[1], match[2]);
+    let i = 0;
+    while (i < rules.length) {
+      while (i < rules.length && /\s/.test(rules[i])) i++;          // skip whitespace
+      const start = i;
+      while (i < rules.length && /\w/.test(rules[i])) i++;          // category word
+      const category = rules.slice(start, i);
+      while (i < rules.length && /\s/.test(rules[i])) i++;          // skip whitespace
+      if (rules[i] !== '{') break;                                  // malformed → stop
+      const end = this.matchBrace(rules, i);
+      if (end === -1) break;
+      if (category) map.set(category, rules.slice(i + 1, end));
+      i = end + 1;
     }
     return map;
   }

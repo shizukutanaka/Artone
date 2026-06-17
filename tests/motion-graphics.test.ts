@@ -214,7 +214,9 @@ describe('updateParticleSystem', () => {
   });
 
   it('particles die and are removed when life reaches 0', () => {
-    const sys = engine.createParticleSystem({ rate: 5, lifetime: { min: 0.1, max: 0.1 } });
+    // rate=100 so that rate*0.05=5 whole particles emit in the first frame even
+    // with correct fractional accumulation (rate is particles-per-second).
+    const sys = engine.createParticleSystem({ rate: 100, lifetime: { min: 0.1, max: 0.1 } });
     engine.updateParticleSystem(sys.id, 0.05); // emit, not yet dead
     const count = sys.particles.length;
     expect(count).toBeGreaterThan(0);
@@ -227,6 +229,28 @@ describe('updateParticleSystem', () => {
     sys.maxParticles = 5;
     engine.updateParticleSystem(sys.id, 10);
     expect(sys.particles.length).toBeLessThanOrEqual(5);
+  });
+
+  it('REGRESSION: emitter rate is particles-per-second, not per-frame (no over-emission)', () => {
+    // rate=10. Simulate 1 second as 60 frames of 1/60s each. Correct accumulation
+    // emits ~10 particles total. The old ceil-per-frame bug emitted one particle
+    // EVERY frame (~60), so the fix must keep the total near 10, not 60.
+    const sys = engine.createParticleSystem({ rate: 10, lifetime: { min: 100, max: 100 } });
+    const dt = 1 / 60;
+    for (let f = 0; f < 60; f++) engine.updateParticleSystem(sys.id, dt);
+    // Long lifetime means none die, so particle count == total emitted.
+    expect(sys.particles.length).toBeGreaterThanOrEqual(9);
+    expect(sys.particles.length).toBeLessThanOrEqual(11);
+  });
+
+  it('REGRESSION: fractional emission accumulates across frames (rate=10, dt=1/60 emits over time)', () => {
+    // A single sub-threshold frame (rate*dt = 0.16 < 1) emits 0 particles, but
+    // the remainder carries over so a particle appears within ~6-7 frames.
+    const sys = engine.createParticleSystem({ rate: 10, lifetime: { min: 100, max: 100 } });
+    engine.updateParticleSystem(sys.id, 1 / 60); // 0.16 → 0 particles this frame
+    expect(sys.particles.length).toBe(0);
+    for (let f = 0; f < 6; f++) engine.updateParticleSystem(sys.id, 1 / 60); // total ~1.16
+    expect(sys.particles.length).toBe(1);
   });
 
   it('REGRESSION: 3-digit hex particle colors produce valid rgb() output', () => {
@@ -247,7 +271,8 @@ describe('updateParticleSystem', () => {
     // Use Math.random = 0 for deterministic lifetime at min, max speed at min
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const sys = engine.createParticleSystem({
-      rate: 5,
+      // rate=100 so rate*0.01=1 whole particle emits under correct accumulation.
+      rate: 100,
       particleColor: { start: '#ff0000', end: '#0000ff' },
       lifetime: { min: 2, max: 2 },
     });

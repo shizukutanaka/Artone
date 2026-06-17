@@ -211,6 +211,9 @@ export class MotionGraphicsEngine {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private listeners: Set<() => void> = new Set();
+  // Fractional particle-emission remainder per system, carried across frames so
+  // `emitter.rate` is honored as particles-per-second (see updateParticleSystem).
+  private emitAccumulators: Map<string, number> = new Map();
 
   constructor(animator?: KeyframeAnimator) {
     this.animator = animator || new KeyframeAnimator();
@@ -371,8 +374,15 @@ export class MotionGraphicsEngine {
 
     const { emitter } = system;
 
-    // Emit new particles
-    const toEmit = emitter.rate * deltaTime;
+    // Emit new particles. `emitter.rate` is particles-PER-SECOND, so the count
+    // for this frame is rate*deltaTime, which is usually fractional (e.g. rate=10
+    // at 60fps → 0.16). The previous `for (i=0; i<rate*deltaTime; i++)` loop ran
+    // once whenever the product was > 0, emitting ceil(rate*deltaTime) every
+    // frame (~60/s for a rate-10 emitter) and racing to maxParticles. Accumulate
+    // the fractional remainder across frames and emit only whole particles.
+    const pending = (this.emitAccumulators.get(systemId) ?? 0) + emitter.rate * Math.max(0, deltaTime);
+    const toEmit = Math.floor(pending);
+    this.emitAccumulators.set(systemId, pending - toEmit);
     for (let i = 0; i < toEmit && system.particles.length < system.maxParticles; i++) {
       const angle = this.randomRange(emitter.direction.min, emitter.direction.max) * Math.PI / 180;
       const speed = this.randomRange(emitter.speed.min, emitter.speed.max);
@@ -610,6 +620,7 @@ export class MotionGraphicsEngine {
 
   deleteLayer(id: string): void {
     this.layers.delete(id);
+    this.emitAccumulators.delete(id); // avoid leaking remainder state for removed systems
     this.notify();
   }
 

@@ -609,11 +609,30 @@ export class ColorGradingEngine {
   }
 
   importGrade(json: string): ColorGrade {
-    const data = JSON.parse(json);
+    // Validate untrusted external grade JSON at the entry point (CLAUDE.md:
+    // 入力バリデーション全入口). A raw JSON.parse throws a bare SyntaxError,
+    // and a foreign-but-valid JSON without grade.nodes would throw an opaque
+    // "iterable" error inside new Map(); wrap both with a clear message.
+    let data: unknown;
+    try {
+      data = JSON.parse(json);
+    } catch (err) {
+      throw new Error(`Invalid grade file: ${(err as Error).message}`);
+    }
+
+    const gradeData = (data as { grade?: unknown }).grade;
+    if (!gradeData || typeof gradeData !== 'object') {
+      throw new Error('Invalid grade file: missing "grade" object');
+    }
+    const nodes = (gradeData as { nodes?: unknown }).nodes;
+    if (!Array.isArray(nodes)) {
+      throw new Error('Invalid grade file: "grade.nodes" must be an array of [id, node] entries');
+    }
+
     const grade: ColorGrade = {
-      ...data.grade,
+      ...(gradeData as Omit<ColorGrade, 'id' | 'nodes'>),
       id: crypto.randomUUID(),
-      nodes: new Map(data.grade.nodes)
+      nodes: new Map(nodes as Array<[string, ColorNode]>),
     };
     this.grades.set(grade.id, grade);
     return grade;

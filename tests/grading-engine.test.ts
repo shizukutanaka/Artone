@@ -287,6 +287,18 @@ describe('ColorGradingEngine — exportGrade / importGrade', () => {
     // Nodes should be present — importGrade reconstructs from JSON array
     expect(imported.nodes).toBeDefined();
   });
+
+  it('REGRESSION: importGrade rejects malformed JSON with a clear error (not raw SyntaxError)', () => {
+    expect(() => engine.importGrade('{broken json::')).toThrow(/Invalid grade file/i);
+  });
+
+  it('REGRESSION: importGrade rejects valid JSON missing the grade object', () => {
+    expect(() => engine.importGrade('{"version":"1.0"}')).toThrow(/Invalid grade file/i);
+  });
+
+  it('REGRESSION: importGrade rejects grade with non-array nodes (no opaque Map error)', () => {
+    expect(() => engine.importGrade('{"grade":{"name":"X","nodes":{}}}')).toThrow(/Invalid grade file/i);
+  });
 });
 
 // ─── applyWheels (CPU math) ───────────────────────────────────

@@ -94,14 +94,14 @@ export class RecoveryManager {
   constructor(config: Partial<RecoveryConfig> = {}) {
     this.config = {
       autoSaveInterval: 30000, // 30 seconds
-      maxSnapshots: 50,
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       dbName: 'ArtoneRecovery',
       storeName: 'snapshots',
       ...config,
+      // maxSnapshots is set last (no default above it) to avoid a duplicate key.
       // Guard against 0: enforceLimit checks `kept >= maxSnapshots`, so
       // maxSnapshots=0 would delete every snapshot including the just-saved one
-      // (complete data loss). Minimum meaningful value is 1.
+      // (complete data loss). Default 50; minimum meaningful value is 1.
       maxSnapshots: Math.max(1, config.maxSnapshots ?? 50),
     };
   }

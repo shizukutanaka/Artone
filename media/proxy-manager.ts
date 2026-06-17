@@ -164,15 +164,17 @@ export class ProxyManager {
 
       try {
         await this.processJob(job);
-        // cancelJob() may have set status='cancelled' while processJob was running;
-        // do not overwrite it.
-        if (job.status !== 'cancelled') {
+        // cancelJob() may have set status='cancelled' while processJob was
+        // running; do not overwrite it. The cast widens the control-flow
+        // narrowing from the `job.status = 'processing'` assignment above, which
+        // TS otherwise keeps across the await (it cannot see cancelJob's write).
+        if ((job.status as ProxyJob['status']) !== 'cancelled') {
           job.status = 'complete';
           job.progress = 1;
           job.endTime = Date.now();
         }
       } catch (error) {
-        if (job.status !== 'cancelled') {
+        if ((job.status as ProxyJob['status']) !== 'cancelled') {
           job.status = 'error';
           job.error = error instanceof Error ? error.message : String(error);
         }

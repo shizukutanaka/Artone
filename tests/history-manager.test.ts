@@ -1,8 +1,8 @@
 /**
  * Tests for undo/history-manager.ts
  *
- * HistoryManager uses IndexedDB for persistence; we mock indexedDB globally
- * so pure-logic tests can run in jsdom without a real IDB implementation.
+ * HistoryManager uses IndexedDB for persistence; these tests construct it with
+ * autoPersist:false so the pure undo/redo logic runs in jsdom without IDB.
  *
  * # AI generated (reviewed)
  */
@@ -14,56 +14,6 @@ import {
   type Command,
   type ClipLike,
 } from '../undo/history-manager';
-
-// ============================================================
-// Minimal IndexedDB stub
-// ============================================================
-
-function makeIDBStub() {
-  const store: Map<string, unknown> = new Map();
-  const makeRequest = <T>(result: T) => {
-    const req = {
-      result,
-      error: null as DOMException | null,
-      onsuccess: null as ((e: Event) => void) | null,
-      onerror: null as ((e: Event) => void) | null,
-    };
-    // Fire asynchronously so tests that await runAllTimersAsync() can catch it.
-    setTimeout(() => req.onsuccess?.({} as Event), 0);
-    return req;
-  };
-
-  const objectStore = {
-    put: (record: { id: string; state: unknown }) => {
-      store.set(record.id, record.state);
-      return makeRequest(undefined);
-    },
-    get: (key: string) => makeRequest(store.has(key) ? { state: store.get(key) } : undefined),
-    delete: (key: string) => { store.delete(key); return makeRequest(undefined); },
-  };
-
-  const tx = { objectStore: () => objectStore };
-  const db = {
-    transaction: () => tx,
-    createObjectStore: () => objectStore,
-    objectStoreNames: { contains: () => false },
-  };
-
-  const openReq = {
-    result: db,
-    error: null as DOMException | null,
-    onsuccess: null as ((e: Event) => void) | null,
-    onerror: null as ((e: Event) => void) | null,
-    onupgradeneeded: null as ((e: IDBVersionChangeEvent) => void) | null,
-  };
-
-  setTimeout(() => {
-    openReq.onupgradeneeded?.({ target: { result: db } } as unknown as IDBVersionChangeEvent);
-    openReq.onsuccess?.({} as Event);
-  }, 0);
-
-  return { open: () => openReq };
-}
 
 // ============================================================
 // Helpers

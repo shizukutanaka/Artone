@@ -332,7 +332,7 @@ describe('PluginManager — executeSandboxed', () => {
     // ran concurrently, the second `this.sandbox = worker` overwrote the first.
     // dispose() then only terminated the second worker — the first kept running,
     // leaking resources and leaving a potential security hole.
-    const pm = makeManager() as unknown as PluginManager & SandboxPrivate;
+    const pm = makeManager() as unknown as SandboxPrivate;
     // Start two concurrent executions — both workers land in sandboxes Set.
     pm.executeSandboxed('a', {}).catch(() => {});
     pm.executeSandboxed('b', {}).catch(() => {});

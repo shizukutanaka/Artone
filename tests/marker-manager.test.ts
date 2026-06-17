@@ -450,6 +450,38 @@ describe('exportJSON / importJSON', () => {
     const imported = mm2.getAllMarkers()[0];
     expect(imported.id).not.toBe(orig.id);
   });
+
+  it('REGRESSION: importJSON of a valid-JSON string does not create per-character markers', () => {
+    const mm = makeManager();
+    // JSON.parse('"abc"') === 'abc' — a string is iterable, so the old for...of
+    // spread each char into a bogus marker. Must import 0, not 3.
+    expect(mm.importJSON('"abc"')).toBe(0);
+    expect(mm.getAllMarkers()).toHaveLength(0);
+  });
+
+  it('REGRESSION: importJSON of a numeric array creates no markers (no id-only garbage)', () => {
+    const mm = makeManager();
+    // [1,2,3] previously spread numbers (no-op) into markers with only an id.
+    expect(mm.importJSON('[1, 2, 3]')).toBe(0);
+    expect(mm.getAllMarkers()).toHaveLength(0);
+  });
+
+  it('REGRESSION: importJSON skips entries lacking a finite numeric time', () => {
+    const mm = makeManager();
+    // One valid marker, one missing time, one with non-finite time.
+    const payload = JSON.stringify([
+      { time: 12, name: 'Valid', type: 'standard', duration: 0, notes: '', color: '#fff', tags: [], metadata: {} },
+      { name: 'NoTime' },
+      { time: null, name: 'NullTime' },
+    ]);
+    expect(mm.importJSON(payload)).toBe(1);
+    expect(mm.getAllMarkers().map(m => m.name)).toEqual(['Valid']);
+  });
+
+  it('importJSON of a non-array object returns 0', () => {
+    const mm = makeManager();
+    expect(mm.importJSON('{"time":5}')).toBe(0);
+  });
 });
 
 // ============================================================

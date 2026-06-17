@@ -413,25 +413,36 @@ export class MarkerManager {
   }
 
   importJSON(json: string): number {
+    let data: unknown;
     try {
-      const data = JSON.parse(json) as Marker[];
-      let count = 0;
-      
-      for (const marker of data) {
-        const newMarker: Marker = {
-          ...marker,
-          id: crypto.randomUUID()
-        };
-        this.markers.set(newMarker.id, newMarker);
-        count++;
-      }
-
-      if (count > 0) this.notify();
-      return count;
+      data = JSON.parse(json);
     } catch {
-      // Parsing failed — return 0 imported captions
+      // Parsing failed — return 0 imported markers
       return 0;
     }
+
+    // Must be an array of marker objects. A bare string is iterable, so the
+    // previous `for...of data` spread each character into a bogus marker; a
+    // numeric array spread no-op'd into markers with only an id. Both polluted
+    // the marker set. Validate the array shape and each entry's required `time`.
+    if (!Array.isArray(data)) return 0;
+
+    let count = 0;
+    for (const entry of data) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const time = (entry as { time?: unknown }).time;
+      if (typeof time !== 'number' || !Number.isFinite(time)) continue;
+
+      const newMarker: Marker = {
+        ...(entry as Marker),
+        id: crypto.randomUUID(),
+      };
+      this.markers.set(newMarker.id, newMarker);
+      count++;
+    }
+
+    if (count > 0) this.notify();
+    return count;
   }
 
   exportEDL(): string {

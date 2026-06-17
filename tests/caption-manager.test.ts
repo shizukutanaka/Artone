@@ -254,6 +254,21 @@ describe('SRT import/export', () => {
   it('exportSRT returns empty string for unknown track', () => {
     expect(cm.exportSRT('nonexistent')).toBe('');
   });
+
+  it('REGRESSION: importSRT handles Windows CRLF line endings', () => {
+    // Standard SRT files use \r\n. Blocks separated by \r\n\r\n must still split
+    // into individual cues (the /\n\n+/ splitter never matches inside \r\n\r\n).
+    const crlf = [
+      '1', '00:00:01,000 --> 00:00:04,000', 'First caption', '',
+      '2', '00:00:05,500 --> 00:00:08,000', 'Second caption', '',
+    ].join('\r\n');
+    const track = cm.importSRT(crlf);
+    expect(track.captions).toHaveLength(2);
+    expect(track.captions[0].text).toBe('First caption');
+    expect(track.captions[1].text).toBe('Second caption');
+    // No stray carriage returns leaked into the parsed text.
+    expect(track.captions[0].text).not.toContain('\r');
+  });
 });
 
 // ============================================================
@@ -296,6 +311,18 @@ describe('VTT import/export', () => {
   it('exportVTT uses dot millisecond separator', () => {
     const track = cm.importVTT(vtt);
     expect(cm.exportVTT(track.id)).toContain('00:00:01.000');
+  });
+
+  it('REGRESSION: importVTT handles Windows CRLF line endings', () => {
+    const crlf = [
+      'WEBVTT', '',
+      '00:00:01.000 --> 00:00:04.000', 'Hello world', '',
+      '00:00:05.000 --> 00:00:07.000', 'Second line', '',
+    ].join('\r\n');
+    const track = cm.importVTT(crlf);
+    expect(track.captions).toHaveLength(2);
+    expect(track.captions[0].text).toBe('Hello world');
+    expect(track.captions[0].text).not.toContain('\r');
   });
 });
 

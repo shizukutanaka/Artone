@@ -322,12 +322,24 @@ export class CaptionManager {
     return track;
   }
 
+  /**
+   * Normalize CRLF / lone-CR line endings to LF.
+   *
+   * SRT/VTT files are very commonly authored on Windows with CRLF endings, so
+   * blocks are separated by "\r\n\r\n". The block splitter uses /\n\n+/, which
+   * never matches inside "\r\n\r\n" (no two adjacent \n) — without this the whole
+   * file collapses into a single block and only the first cue is parsed.
+   */
+  private normalizeLineEndings(content: string): string {
+    return content.replace(/\r\n?/g, '\n');
+  }
+
   importSRT(content: string, trackId?: string): CaptionTrack {
-    const track = trackId 
+    const track = trackId
       ? this.tracks.get(trackId) || this.createTrack('Imported')
       : this.createTrack('Imported SRT');
 
-    const blocks = content.trim().split(/\n\n+/);
+    const blocks = this.normalizeLineEndings(content).trim().split(/\n\n+/);
 
     for (const block of blocks) {
       const lines = block.split('\n');
@@ -353,8 +365,10 @@ export class CaptionManager {
       ? this.tracks.get(trackId) || this.createTrack('Imported')
       : this.createTrack('Imported VTT');
 
-    // Remove WEBVTT header
-    const lines = content.replace(/^WEBVTT.*\n\n?/, '').trim().split(/\n\n+/);
+    // Normalize line endings first (CRLF files would otherwise not split into
+    // blocks), then remove the WEBVTT header.
+    const normalized = this.normalizeLineEndings(content);
+    const lines = normalized.replace(/^WEBVTT.*\n\n?/, '').trim().split(/\n\n+/);
 
     for (const block of lines) {
       const blockLines = block.split('\n');
@@ -387,7 +401,8 @@ export class CaptionManager {
       ? this.tracks.get(trackId) || this.createTrack('Imported')
       : this.createTrack('Imported ASS');
 
-    const lines = content.split('\n');
+    // Normalize CRLF so trailing \r does not leak into dialogue text / styles.
+    const lines = this.normalizeLineEndings(content).split('\n');
     let inEvents = false;
 
     for (const line of lines) {

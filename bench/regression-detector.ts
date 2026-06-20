@@ -180,6 +180,11 @@ export class RegressionDetector {
       if (!base) continue; // 新規ベンチは比較対象外
 
       const t = this.perBenchThresholds.get(cur.name) ?? defaults;
+      // Guard: a 0ms baseline (sub-resolution timer or a degenerate bench)
+      // would make the delta Infinity/NaN and permanently fail CI as a phantom
+      // "critical regression". Skip the comparison — there is no meaningful
+      // percentage change relative to zero.
+      if (base.meanMs === 0) continue;
       const delta = ((cur.meanMs - base.meanMs) / base.meanMs) * 100;
 
       if (delta > t.minor) {

@@ -197,6 +197,20 @@ describe('RegressionDetector', () => {
     expect(report.passed).toBe(false);
   });
 
+  it('REGRESSION: zero-baseline mean does not produce a phantom Infinity regression', () => {
+    // A 0ms baseline (sub-resolution timer) would make delta = x/0 = Infinity,
+    // which is > critical → CI would fail forever on a bench that cannot be
+    // meaningfully compared. The detector must skip it instead.
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 0)]);
+    const current = [makeResult('a', 5)];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions).toHaveLength(0);
+    expect(report.passed).toBe(true);
+    for (const r of report.regressions) {
+      expect(Number.isFinite(r.deltaPercent)).toBe(true);
+    }
+  });
+
   it('detect() records improvements', () => {
     // 10% faster → improvement
     const baseline = makeBaseline('1.0.0', [makeResult('a', 100)]);

@@ -301,4 +301,28 @@ describe('applyParametricEQ', () => {
     const out = applyParametricEQ(signal, SR, []);
     expect(out).toBe(signal); // same reference (no copy)
   });
+
+  it('REGRESSION: Q=0 does not produce NaN output (alpha clamps Q)', () => {
+    // sin(w0)/(2·0) = Infinity → NaN coefficients → NaN poisons filter state.
+    const signal = cosine(1000, 1024);
+    for (const type of ['lowpass', 'highpass', 'bandpass', 'notch'] as const) {
+      const out = applyParametricEQ(signal, SR, [{ type, freq: 1000, Q: 0 }]);
+      expect(Array.from(out).some(Number.isNaN)).toBe(false);
+    }
+  });
+
+  it('REGRESSION: negative Q does not produce NaN output', () => {
+    const signal = cosine(1000, 1024);
+    const out = applyParametricEQ(signal, SR, [{ type: 'peakEQ', freq: 1000, Q: -2, dBGain: 6 }]);
+    expect(Array.from(out).some(Number.isNaN)).toBe(false);
+  });
+});
+
+describe('makePeakEQ — REGRESSION: degenerate Q', () => {
+  it('Q=0 yields finite coefficients (no NaN)', () => {
+    const pk = makePeakEQ(1000, SR, 0, 6);
+    for (const c of [pk.b0, pk.b1, pk.b2, pk.a1, pk.a2]) {
+      expect(Number.isFinite(c)).toBe(true);
+    }
+  });
 });

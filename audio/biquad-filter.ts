@@ -54,7 +54,13 @@ function omega(freq: number, sampleRate: number): number {
 }
 
 function alpha(w0: number, Q: number): number {
-  return Math.sin(w0) / (2 * Q);
+  // Q ≤ 0 (or non-finite) makes sin(w0)/(2Q) = ±Infinity, and after coefficient
+  // normalization (norm = 1 + a) every coefficient becomes NaN. A single NaN
+  // sample then permanently poisons the streaming filter state (s1/s2), so all
+  // subsequent output is NaN. Clamp to a small positive Q (a valid, very narrow
+  // filter) instead of producing NaN.
+  const safeQ = Number.isFinite(Q) && Q > 1e-6 ? Q : 1e-6;
+  return Math.sin(w0) / (2 * safeQ);
 }
 
 /** 2nd-order Butterworth-style lowpass. */

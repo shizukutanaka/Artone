@@ -635,3 +635,26 @@ describe('PerformanceMonitor — dispose()', () => {
     expect(() => monitor.dispose()).not.toThrow();
   });
 });
+
+describe('RollingStats — sampleWindow edge cases', () => {
+  it('REGRESSION: sampleWindow=0 does not NaN-poison statistics', () => {
+    // Before fix: RollingStats(0) → push() called shift() on empty array →
+    // removed = undefined → this.sum -= undefined → NaN → getMetrics() returned NaN.
+    let fakeNow = 0;
+    vi.spyOn(globalThis.performance, 'now').mockImplementation(() => fakeNow);
+    try {
+      const m = new PerformanceMonitor({ sampleWindow: 0 });
+      for (let i = 0; i < 5; i++) {
+        fakeNow = i * 16;
+        m.beginFrame();
+        fakeNow = i * 16 + 16;
+        m.endFrame();
+      }
+      const metrics = m.getMetrics();
+      expect(Number.isFinite(metrics.frametime)).toBe(true);
+      expect(Number.isFinite(metrics.fps)).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

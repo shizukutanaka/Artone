@@ -112,7 +112,9 @@ class RollingStats {
   private sumSq = 0;
 
   constructor(maxSize: number) {
-    this.maxSize = maxSize;
+    // maxSize ≤ 0 would make shift() on an empty array return undefined,
+    // causing this.sum -= undefined → NaN that poisons all statistics.
+    this.maxSize = Math.max(1, maxSize);
   }
 
   push(value: number): void {

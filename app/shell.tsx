@@ -281,7 +281,12 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
         duration, proxyStatus: 'none',
       };
       setMediaItems((prev) => {
-        if (prev.some((m) => m.name === file.name && m.size === file.size)) return prev;
+        if (prev.some((m) => m.name === file.name && m.size === file.size)) {
+          // Duplicate: the item is discarded, so revoke its freshly-created
+          // blob URL instead of leaking it.
+          URL.revokeObjectURL(url);
+          return prev;
+        }
         return [...prev, item];
       });
       // Auto-add clip to the first matching track after existing clips
@@ -457,7 +462,14 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
                 onImport={(files) => { handleImport(files).catch(() => undefined); }}
                 onSelect={(item) => setSelectedMediaId(item.id)}
                 onDelete={(id) => {
-                  setMediaItems((prev) => prev.filter((m) => m.id !== id));
+                  setMediaItems((prev) => {
+                    // Release the blob URL created at import time; otherwise it
+                    // leaks until document unload (revoke is a no-op if already
+                    // released, so StrictMode double-invoke is safe).
+                    const removed = prev.find((m) => m.id === id);
+                    if (removed) URL.revokeObjectURL(removed.url);
+                    return prev.filter((m) => m.id !== id);
+                  });
                   if (selectedMediaId === id) setSelectedMediaId(undefined);
                 }}
               />

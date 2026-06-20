@@ -89,8 +89,17 @@ export class PluginBridge {
   private instances: Map<string, PluginInstance> = new Map();
   private chains: Map<string, PluginChain> = new Map();
   private workletReady = false;
-  
+  /** AbortControllers for active plugin UIs — aborted on close/unload to remove all listeners. */
+  private uiCleanups = new Map<string, AbortController>();
+
   private readonly BLOCK_SIZE = 128;
+
+  /** Escape HTML special characters to prevent XSS when injecting plugin metadata into innerHTML. */
+  private static escapeHtml(s: string): string {
+    return s.replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!
+    ));
+  }
   
   constructor(audioContext: AudioContext) {
     this.audioContext = audioContext;
@@ -328,6 +337,9 @@ export class PluginBridge {
       instance.audioNode?.disconnect();
       this.instances.delete(instanceId);
     }
+    // Abort any active UI listeners (message + document mousemove/mouseup).
+    this.uiCleanups.get(instanceId)?.abort();
+    this.uiCleanups.delete(instanceId);
   }
   
   // ==================== Parameter Control ====================
@@ -560,7 +572,12 @@ export class PluginBridge {
   async openPluginUI(instanceId: string, container: HTMLElement): Promise<void> {
     const instance = this.instances.get(instanceId);
     if (!instance) return;
-    
+
+    // Abort any prior UI listeners for this instance (re-open replaces previous).
+    this.uiCleanups.get(instanceId)?.abort();
+    const uiController = new AbortController();
+    this.uiCleanups.set(instanceId, uiController);
+
     if (instance.descriptor.uiUrl) {
       // Determine expected message origin for cross-origin security checks.
       // Relative URLs (e.g. /plugins/ui.html) resolve to the same origin as
@@ -588,22 +605,26 @@ export class PluginBridge {
         }, expectedOrigin);
       };
 
+      // Use signal so this listener is removed when unloadPlugin() or a
+      // subsequent openPluginUI() call aborts uiController — preventing leaks
+      // that previously accumulated one permanent listener per open call.
       window.addEventListener('message', (e) => {
         // Reject messages from origins other than the plugin's own UI origin.
         if (e.origin !== expectedOrigin) return;
         if (e.data.type === 'parameterChange' && e.data.instanceId === instanceId) {
           this.setParameter(instanceId, e.data.parameterId, e.data.value);
         }
-      });
+      }, { signal: uiController.signal });
 
       container.appendChild(iframe);
     } else {
-      // Generate generic UI
-      container.appendChild(this.createGenericUI(instance));
+      // Generate generic UI — pass signal so knob listeners are also cleaned up.
+      container.appendChild(this.createGenericUI(instance, uiController.signal));
     }
   }
   
-  private createGenericUI(instance: PluginInstance): HTMLElement {
+  private createGenericUI(instance: PluginInstance, signal?: AbortSignal): HTMLElement {
+    const esc = PluginBridge.escapeHtml;
     const container = document.createElement('div');
     container.className = 'plugin-ui';
     container.innerHTML = `
@@ -659,18 +680,18 @@ export class PluginBridge {
       
       <div class="plugin-header">
         <div>
-          <div class="plugin-name">${instance.descriptor.name}</div>
-          <div class="plugin-vendor">${instance.descriptor.vendor}</div>
+          <div class="plugin-name">${esc(instance.descriptor.name)}</div>
+          <div class="plugin-vendor">${esc(instance.descriptor.vendor)}</div>
         </div>
         <button class="plugin-bypass ${instance.bypassed ? 'active' : ''}">Bypass</button>
       </div>
-      
+
       <div class="plugin-params"></div>
-      
+
       <div class="plugin-presets">
         <select class="plugin-preset-select">
           <option value="-1">-- プリセット --</option>
-          ${instance.presets.map((p, i) => `<option value="${i}">${p.name}</option>`).join('')}
+          ${instance.presets.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join('')}
         </select>
       </div>
     `;
@@ -690,8 +711,8 @@ export class PluginBridge {
             <line class="knob-pointer" x1="30" y1="30" x2="30" y2="10" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </div>
-        <div class="plugin-param-name">${param.shortName || param.name}</div>
-        <div class="plugin-param-value">${this.formatValue(instance.parameters.get(param.id) || param.defaultValue, param)}</div>
+        <div class="plugin-param-name">${esc(param.shortName || param.name)}</div>
+        <div class="plugin-param-value">${esc(this.formatValue(instance.parameters.get(param.id) || param.defaultValue, param))}</div>
       `;
       
       // Knob interaction
@@ -707,18 +728,21 @@ export class PluginBridge {
         startValue = instance.parameters.get(param.id) || param.defaultValue;
       });
       
+      // Pass signal so these document-level listeners are cleaned up when the
+      // plugin UI is closed (unloadPlugin) or re-opened (openPluginUI).
+      // Without signal, each createGenericUI call leaked 2 listeners per param.
       document.addEventListener('mousemove', (e: MouseEvent) => {
         if (!isDragging) return;
-        
+
         const delta = (startY - e.clientY) / 100;
         const range = param.maxValue - param.minValue;
         const newValue = Math.max(param.minValue, Math.min(param.maxValue, startValue + delta * range));
-        
+
         this.setParameter(instance.id, param.id, newValue);
         this.updateKnob(paramEl, param, newValue);
-      });
-      
-      document.addEventListener('mouseup', () => { isDragging = false; });
+      }, { signal });
+
+      document.addEventListener('mouseup', () => { isDragging = false; }, { signal });
       
       this.updateKnob(paramEl, param, instance.parameters.get(param.id) || param.defaultValue);
       paramsContainer.appendChild(paramEl);

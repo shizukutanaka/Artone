@@ -789,3 +789,115 @@ describe('PluginBridge — loadPlugin', () => {
     }
   });
 });
+
+// ============================================================
+// Security: XSS prevention in createGenericUI
+// ============================================================
+
+describe('PluginBridge — createGenericUI XSS prevention', () => {
+  it('REGRESSION: plugin name with HTML is escaped, not executed', async () => {
+    const bridge = makeBridge();
+    const inst = injectInstance(bridge, makeDescriptor({ name: '<img src=x onerror=alert(1)>' }));
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const nameEl = container.querySelector('.plugin-name');
+    expect(nameEl?.textContent).toContain('<img');
+    expect(nameEl?.innerHTML).not.toContain('<img');
+    expect(nameEl?.innerHTML).toContain('&lt;img');
+  });
+
+  it('REGRESSION: vendor name with HTML is escaped', async () => {
+    const bridge = makeBridge();
+    const inst = injectInstance(bridge, makeDescriptor({ vendor: '<script>bad()</script>' }));
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const vendorEl = container.querySelector('.plugin-vendor');
+    expect(vendorEl?.innerHTML).toContain('&lt;script&gt;');
+    expect(vendorEl?.innerHTML).not.toContain('<script>');
+  });
+
+  it('REGRESSION: preset names with HTML are escaped in select options', async () => {
+    const bridge = makeBridge();
+    const inst = injectInstance(bridge);
+    bridge.savePreset(inst.id, '<b>Bold Preset</b>');
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const select = container.querySelector('.plugin-preset-select') as HTMLSelectElement;
+    // The option text should be the raw string, not rendered HTML
+    const opt = select.options[1]; // first real option (index 0 = placeholder)
+    expect(opt.textContent).toContain('<b>');
+    expect(opt.innerHTML).toContain('&lt;b&gt;');
+  });
+
+  it('REGRESSION: param shortName with HTML is escaped in knob label', async () => {
+    const desc = makeDescriptor({
+      parameters: [
+        { id: 'g', name: 'Gain', shortName: '<em>G</em>', unit: 'dB', minValue: -12, maxValue: 12, defaultValue: 0, stepCount: 0, flags: { automatable: true, readonly: false, hidden: false, programChange: false } },
+      ],
+    });
+    const bridge = makeBridge();
+    const inst = injectInstance(bridge, desc);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const nameEl = container.querySelector('.plugin-param-name');
+    expect(nameEl?.innerHTML).toContain('&lt;em&gt;');
+    expect(nameEl?.innerHTML).not.toContain('<em>');
+  });
+});
+
+// ============================================================
+// Listener lifecycle: openPluginUI + unloadPlugin cleanup
+// ============================================================
+
+describe('PluginBridge — UI listener cleanup', () => {
+  it('REGRESSION: document mousemove listener is removed after unloadPlugin', async () => {
+    const bridge = makeBridge();
+    const inst = injectInstance(bridge);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+
+    // Start drag
+    const knob = container.querySelector('.plugin-param-knob') as HTMLElement;
+    knob.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientY: 100 }));
+    document.dispatchEvent(new MouseEvent('mousemove', { clientY: 50 }));
+    expect(bridge.getParameter(inst.id, 'gain')).toBe(12); // drag worked
+
+    // Unload removes all UI listeners
+    bridge.unloadPlugin(inst.id);
+
+    // Now mousemove should not fire (instance is gone; no crash either)
+    expect(() => document.dispatchEvent(new MouseEvent('mousemove', { clientY: 0 }))).not.toThrow();
+  });
+
+  it('REGRESSION: re-opening plugin UI does not double-fire message listener', async () => {
+    // Before fix: each openPluginUI call with uiUrl added a permanent message
+    // listener that was never removed, so N opens → N handlers fired per message.
+    // Use a relative URL so the catch branch sets expectedOrigin = window.location.origin,
+    // matching the origin we use in dispatchEvent below. ('about:blank' has origin "null".)
+    const desc = makeDescriptor({ uiUrl: '/plugin-ui.html' });
+    const bridge = makeBridge();
+    const inst = injectInstance(bridge, desc);
+    const container = document.createElement('div');
+
+    let callCount = 0;
+    const origSetParam = bridge.setParameter.bind(bridge);
+    vi.spyOn(bridge, 'setParameter').mockImplementation((...args) => {
+      callCount++;
+      return origSetParam(...args);
+    });
+
+    // Open twice — before fix this created 2 permanent window.message listeners
+    await bridge.openPluginUI(inst.id, container);
+    await bridge.openPluginUI(inst.id, container);
+
+    // Dispatch a parameterChange message from the expected origin
+    const msg = new MessageEvent('message', {
+      origin: window.location.origin,
+      data: { type: 'parameterChange', instanceId: inst.id, parameterId: 'gain', value: 5 },
+    });
+    window.dispatchEvent(msg);
+
+    // After fix: exactly 1 handler fires (the second open replaced the first)
+    expect(callCount).toBe(1);
+  });
+});

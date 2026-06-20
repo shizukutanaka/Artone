@@ -358,6 +358,53 @@ describe('REGRESSION: AudioData.close() called even when AudioEncoder.encode() t
   });
 });
 
+describe('REGRESSION: export() rejects fps=0 before muxer arithmetic (NaN stts box)', () => {
+  it('export() throws RangeError for fps=0 (prevents u32(NaN)=0 corrupting MP4 stts)', async () => {
+    // Before fix: buildVideoStbl received fps=0 → Math.round(timescale/0) = NaN
+    // → u32(NaN) = [0,0,0,0] → all stts sample deltas = 0 → video plays at ∞ speed.
+    const engine = new ExportEngine();
+    const badConfig: ExportConfig = {
+      format: 'mp4', codec: 'avc1.640028', width: 1920, height: 1080,
+      fps: 0,  // ← invalid
+      bitrate: 5_000_000, audioBitrate: 192_000, quality: 'high',
+      hardwareAcceleration: false,
+    };
+    const job = engine.createJob('p', badConfig);
+    const fakeRender = vi.fn(async () => ({ close: vi.fn() } as unknown as VideoFrame));
+    await expect(
+      engine.export(job, fakeRender, null, 1)
+    ).rejects.toThrow(RangeError);
+  });
+
+  it('export() throws RangeError for width=0', async () => {
+    const engine = new ExportEngine();
+    const badConfig: ExportConfig = {
+      format: 'mp4', codec: 'avc1.640028', width: 0, height: 1080,
+      fps: 30, bitrate: 5_000_000, audioBitrate: 192_000, quality: 'high',
+      hardwareAcceleration: false,
+    };
+    const job = engine.createJob('p', badConfig);
+    await expect(
+      engine.export(job, vi.fn(), null, 1)
+    ).rejects.toThrow(RangeError);
+  });
+
+  it('export() succeeds when fps > 0 (no early rejection)', async () => {
+    // We can't run a real WebCodecs encode in jsdom, but the RangeError path
+    // must NOT fire for valid config — it should throw later (WebCodecs absent).
+    const engine = new ExportEngine();
+    const goodConfig: ExportConfig = {
+      format: 'mp4', codec: 'avc1.640028', width: 1920, height: 1080,
+      fps: 30, bitrate: 5_000_000, audioBitrate: 192_000, quality: 'high',
+      hardwareAcceleration: false,
+    };
+    const job = engine.createJob('p', goodConfig);
+    const error = await engine.export(job, vi.fn(), null, 0).catch(e => e as Error);
+    // Must NOT be a RangeError from our new guard
+    expect(error).not.toBeInstanceOf(RangeError);
+  });
+});
+
 describe('REGRESSION: encodeAudio planar layout', () => {
   it('planar layout fix: data[ch * length + i] not data[i * channels + ch]', async () => {
     // We cannot call private encodeAudio directly without a real AudioEncoder,

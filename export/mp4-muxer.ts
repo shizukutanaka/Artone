@@ -421,6 +421,8 @@ function buildVideoStbl(
   entryType: string,
   chunkOffset: number,
 ): Uint8Array {
+  // fps=0 → timescale=0 → 0/0 = NaN → u32(NaN)=0 → all stts deltas zero → corrupt MP4.
+  if (!(fps > 0)) throw new RangeError(`buildVideoStbl: fps must be > 0, got ${fps}`);
   const sampleDelta = Math.round(timescale / fps);
   return box('stbl', concat([
     buildStsd(true, stsdEntry, entryType),

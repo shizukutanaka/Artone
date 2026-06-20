@@ -258,6 +258,12 @@ export class ExportEngine {
     duration: number,
     onProgress?: ProgressCallback
   ): Promise<Blob> {
+    // Validate fps/dimensions at the entry point so downstream muxer arithmetic
+    // never receives 0 (which would produce NaN sampleDelta → corrupt stts box).
+    if (!(job.config.fps > 0)) throw new RangeError(`ExportConfig.fps must be > 0, got ${job.config.fps}`);
+    if (!(job.config.width > 0)) throw new RangeError(`ExportConfig.width must be > 0, got ${job.config.width}`);
+    if (!(job.config.height > 0)) throw new RangeError(`ExportConfig.height must be > 0, got ${job.config.height}`);
+
     this.abortController = new AbortController();
     job.startTime = Date.now();
     job.totalFrames = Math.ceil(duration * job.config.fps);

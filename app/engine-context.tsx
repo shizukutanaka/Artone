@@ -301,6 +301,9 @@ export function configFromFirstRun(
     hardwareAcceleration: level !== 'beginner',
     proxyEditing: level === 'beginner',
     autoSave: true,
-    autoSaveInterval: level === 'pro' ? 120 : 60,
+    // autoSaveInterval is in milliseconds (AppConfig contract). 120s for pro, 60s otherwise.
+    // Bug before fix: was 120/60 (seconds), causing setInterval to fire every ~60-120 ms
+    // (8-16 times per second), thrashing localStorage with full JSON serialization.
+    autoSaveInterval: level === 'pro' ? 120_000 : 60_000,
   };
 }

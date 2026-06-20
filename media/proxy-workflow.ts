@@ -259,9 +259,11 @@ class ProxyEncoder {
         duration: frameInterval * 1_000_000
       });
 
-      const isKeyFrame = frameCount % 60 === 0;
-      encoder.encode(frame, { keyFrame: isKeyFrame });
-      frame.close();
+      try {
+        encoder.encode(frame, { keyFrame: frameCount % 60 === 0 });
+      } finally {
+        frame.close();
+      }
 
       frameCount++;
       currentTime += frameInterval;

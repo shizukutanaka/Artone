@@ -542,6 +542,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     // Word wrap
     const lines = this.wrapText(ctx, text, maxWidth);
+    // Guard: Math.max(...[]) returns -Infinity, making fillRect width -Infinity.
+    if (lines.length === 0) return;
 
     // Calculate background bounds
     const lineHeight = style.fontSize * style.lineHeight;

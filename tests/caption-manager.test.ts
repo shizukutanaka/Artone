@@ -481,3 +481,50 @@ describe('CaptionManager — wrapText (private)', () => {
     expect(result).toEqual([]);
   });
 });
+
+// ─── REGRESSION: renderCaption with empty text ────────────────────────────────
+describe('REGRESSION: renderCaption() with empty text does not call fillRect(-Infinity)', () => {
+  it('returns early without drawing when wrapText produces no lines', () => {
+    const manager = new CaptionManager();
+    const track = manager.createTrack('t', 'en');
+    // Add a caption with empty text — valid in SRT (blank cue)
+    const caption = manager.addCaption(track.id, 0, 1, '')!;
+    expect(caption).not.toBeNull();
+
+    const fillRectCalls: unknown[][] = [];
+    const mockCtx = {
+      font: '',
+      textAlign: 'left',
+      textBaseline: 'alphabetic',
+      shadowColor: '',
+      shadowBlur: 0,
+      shadowOffsetX: 0,
+      shadowOffsetY: 0,
+      strokeStyle: '',
+      lineWidth: 0,
+      lineJoin: 'miter',
+      fillStyle: '',
+      globalAlpha: 1,
+      measureText: () => ({ width: 0 }),
+      fillRect: (...args: unknown[]) => { fillRectCalls.push(args); },
+      strokeText: () => undefined,
+      fillText: () => undefined,
+    };
+
+    // Must not throw and must not call fillRect with -Infinity width
+    expect(() =>
+      (manager as unknown as { renderCaption: (...a: unknown[]) => void }).renderCaption(
+        mockCtx as unknown as CanvasRenderingContext2D,
+        caption,
+        1920,
+        1080
+      )
+    ).not.toThrow();
+
+    // fillRect should not have been called (early return before background draw)
+    for (const call of fillRectCalls) {
+      // If somehow called, width must not be -Infinity
+      expect(call[2]).not.toBe(-Infinity);
+    }
+  });
+});

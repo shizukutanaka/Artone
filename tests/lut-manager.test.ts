@@ -506,6 +506,21 @@ describe('LUTManager — importLUT / parseCube', () => {
     ].join('\n');
     expect(await lm.importLUT(makeFile(truncated3dl, 'truncated.3dl'))).toBeNull();
   });
+  it('REGRESSION: LUT is stored before generateThumbnail so applyLUT can find it', async () => {
+    // Before fix: luts.set() came AFTER generateThumbnail(), so applyLUT()
+    // returned early (lut not found) and thumbnails were always the raw gradient.
+    const lm2 = new LUTManager();
+    let wasStoredDuringThumb = false;
+    vi.spyOn(
+      lm2 as unknown as { generateThumbnail(l: LUT): Promise<string> },
+      'generateThumbnail',
+    ).mockImplementation(async (lut: LUT) => {
+      wasStoredDuringThumb = (lm2 as unknown as { luts: Map<string, LUT> }).luts.has(lut.id);
+      return 'data:image/jpeg;base64,thumb';
+    });
+    await lm2.importLUT(makeFile(VALID_CUBE_2, 'order.cube'));
+    expect(wasStoredDuringThumb).toBe(true);
+  });
 });
 
 // ─── Export → import round-trip ───────────────────────────────

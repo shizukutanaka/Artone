@@ -96,8 +96,9 @@ export class LUTManager {
         : this.parse3DL(content, file.name);
 
       if (lut) {
-        lut.thumbnail = await this.generateThumbnail(lut);
+        // Store before generateThumbnail so applyLUT can find the LUT by id.
         this.luts.set(lut.id, lut);
+        lut.thumbnail = await this.generateThumbnail(lut);
         this.notify();
       }
 

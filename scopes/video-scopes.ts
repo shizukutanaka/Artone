@@ -258,7 +258,8 @@ export class Vectorscope {
     const { width, height } = this.config;
     const centerX = width / 2;
     const centerY = height / 2;
-    const radius = Math.min(width, height) / 2 - 20;
+    // Subtract padding; clamp to ≥1 so ctx.arc() never receives a negative radius.
+    const radius = Math.max(1, Math.min(width, height) / 2 - 20);
     
     // Clear
     this.ctx.fillStyle = this.config.backgroundColor;

@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   HistoryManager,
   CommandFactory,
+  HistoryPanelUI,
   type Command,
   type ClipLike,
 } from '../undo/history-manager';
@@ -413,5 +414,37 @@ describe('CommandFactory.composite', () => {
     composite.undo();
 
     expect(log).toEqual(['exec:A', 'exec:B', 'exec:C', 'undo:C', 'undo:B', 'undo:A']);
+  });
+});
+
+// ============================================================
+// HistoryPanelUI — XSS prevention
+// ============================================================
+
+describe('HistoryPanelUI — XSS prevention', () => {
+  function makeHMWithCmd(description: string): HistoryManager {
+    const hm = makeManager();
+    const cell = { value: 0 };
+    const cmd: Command = {
+      ...counterCmd(cell),
+      description,
+    };
+    hm.execute(cmd);
+    return hm;
+  }
+
+  it('REGRESSION: description with HTML special chars is escaped to prevent XSS', () => {
+    const hm = makeHMWithCmd('<script>alert(1)</script>');
+    const html = HistoryPanelUI({ history: hm });
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('REGRESSION: description with double-quote injection is escaped in HTML context', () => {
+    const hm = makeHMWithCmd('"><img src=x onerror=alert(1)>');
+    const html = HistoryPanelUI({ history: hm });
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
+    expect(html).toContain('&quot;');
   });
 });

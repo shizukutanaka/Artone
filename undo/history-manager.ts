@@ -991,7 +991,7 @@ export function HistoryPanelUI(props: { history: HistoryManager }): string {
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
-              ">${item.description}</div>
+              ">${escapeHtml(item.description)}</div>
               <div style="font-size: 10px; color: #666;">
                 ${formatTime(item.timestamp)}
               </div>
@@ -1001,6 +1001,12 @@ export function HistoryPanelUI(props: { history: HistoryManager }): string {
       </div>
     </div>
   `;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!
+  ));
 }
 
 function getTypeColor(type: string): string {

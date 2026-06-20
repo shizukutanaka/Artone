@@ -171,3 +171,22 @@ describe('computeDuckingGain', () => {
     expect(gain[Math.round(0.5 * SR)]).toBeCloseTo(1, 2);
   });
 });
+
+describe('kWeightingCoeffs — input validation regression', () => {
+  it('REGRESSION: kWeightingCoeffs(0) throws RangeError instead of producing NaN', () => {
+    // Before fix: Math.tan(π·f / 0) = Math.tan(Infinity) = NaN, which then
+    // propagated through all biquad coefficients, silently corrupting every
+    // loudness measurement (LUFS / LRA / True Peak all returned NaN).
+    expect(() => kWeightingCoeffs(0)).toThrow(RangeError);
+    expect(() => kWeightingCoeffs(-48000)).toThrow(RangeError);
+  });
+
+  it('kWeightingCoeffs with valid sampleRate returns finite coefficients', () => {
+    const c = kWeightingCoeffs(48000);
+    for (const stage of [c.stage1, c.stage2]) {
+      for (const v of Object.values(stage)) {
+        expect(Number.isFinite(v)).toBe(true);
+      }
+    }
+  });
+});

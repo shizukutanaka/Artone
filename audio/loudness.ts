@@ -103,6 +103,9 @@ function channelWeight(index: number): number {
  * 48kHz で BS.1770-4 の規定係数に一致 (libebur128/pyloudnorm と同一導出)。
  */
 export function kWeightingCoeffs(sampleRate: number): KWeightingCoeffs {
+  if (!(sampleRate > 0)) {
+    throw new RangeError(`kWeightingCoeffs: sampleRate must be > 0, got ${sampleRate}`);
+  }
   // Stage 1: high-shelf
   const f0 = 1681.9744509555319;
   const gainDb = 3.99984385397;

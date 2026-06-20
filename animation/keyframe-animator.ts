@@ -385,7 +385,10 @@ export class KeyframeAnimator {
     } else if (from.easing === 'hold') {
       return from.value;
     } else {
-      easedT = EASING_FUNCTIONS[from.easing](t);
+      // Fall back to linear if easing value is unknown (e.g., stale project data
+      // from an older version that used a since-removed easing name).
+      const fn = EASING_FUNCTIONS[from.easing] ?? EASING_FUNCTIONS.linear;
+      easedT = fn(t);
     }
 
     return from.value + (to.value - from.value) * easedT;

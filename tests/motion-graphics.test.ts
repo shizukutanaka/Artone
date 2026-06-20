@@ -231,6 +231,21 @@ describe('updateParticleSystem', () => {
     expect(sys.particles.length).toBeLessThanOrEqual(5);
   });
 
+  it('REGRESSION: zero-lifetime emitter produces no NaN in particle properties', () => {
+    // lifetime { min:0, max:0 } → maxLife=0 → p.life/p.maxLife = 0/0 = NaN without fix
+    vi.restoreAllMocks(); // use real Math.random
+    const sys = engine.createParticleSystem({
+      rate: 1000,
+      lifetime: { min: 0, max: 0 },
+    });
+    engine.updateParticleSystem(sys.id, 0.1);
+    // All zero-lifetime particles must be removed, not lingering with NaN size/opacity
+    for (const p of sys.particles) {
+      expect(Number.isFinite(p.size)).toBe(true);
+      expect(Number.isFinite(p.opacity)).toBe(true);
+    }
+  });
+
   it('REGRESSION: emitter rate is particles-per-second, not per-frame (no over-emission)', () => {
     // rate=10. Simulate 1 second as 60 frames of 1/60s each. Correct accumulation
     // emits ~10 particles total. The old ceil-per-frame bug emitted one particle

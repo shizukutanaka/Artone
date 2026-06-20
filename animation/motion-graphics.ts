@@ -423,6 +423,8 @@ export class MotionGraphicsEngine {
       p.y += p.vy * deltaTime;
       p.life -= deltaTime;
 
+      // Zero-lifetime particles are immediately dead; skip NaN arithmetic.
+      if (p.maxLife <= 0) { system.particles.splice(i, 1); continue; }
       const t = 1 - p.life / p.maxLife;
       p.size = this.lerp(emitter.particleSize.start, emitter.particleSize.end, t);
       p.opacity = this.lerp(emitter.particleOpacity.start, emitter.particleOpacity.end, t);
@@ -600,7 +602,7 @@ export class MotionGraphicsEngine {
       this.ctx.globalAlpha = p.opacity;
       this.ctx.fillStyle = p.color;
       this.ctx.beginPath();
-      this.ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
+      this.ctx.arc(p.x, p.y, Math.max(0, p.size / 2), 0, Math.PI * 2);
       this.ctx.fill();
       this.ctx.restore();
     }

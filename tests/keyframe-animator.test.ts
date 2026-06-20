@@ -218,6 +218,21 @@ describe('Keyframe CRUD', () => {
 // ============================================================
 
 describe('Edge cases', () => {
+  it('REGRESSION: unknown easing string falls back to linear instead of crashing', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('test').id;
+    anim.addKeyframe(id, 'x', 0, 0, 'easeIn');
+    anim.addKeyframe(id, 'x', 1.0, 100, 'easeIn');
+    // Corrupt the easing via updateKeyframe (mimics deserialized stale data)
+    const kfs = anim.getKeyframesInRange(id, 0, 1.0);
+    anim.updateKeyframe(id, 'x', kfs[0].keyframe.id, {
+      easing: 'unknownEasing' as EasingType,
+    });
+    expect(() => anim.getValue(id, 'x', 0.5)).not.toThrow();
+    // Falls back to linear: midpoint value ≈ 50
+    expect(anim.getValue(id, 'x', 0.5)).toBeCloseTo(50, 0);
+  });
+
   it('getValue returns 0 for unknown animation', () => {
     const anim = new KeyframeAnimator();
     expect(anim.getValue('nonexistent', 'x', 0.5)).toBe(0);

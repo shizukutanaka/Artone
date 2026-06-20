@@ -383,11 +383,16 @@ export class CaptionManager {
       }
 
       const timeLine = blockLines[timeLineIndex];
-      const match = timeLine.match(/(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})\.(\d{3})/);
+      // WebVTT cue timings allow the hours component to be omitted for cues
+      // under one hour (mm:ss.ttt), and may carry trailing cue settings after
+      // the end timestamp (e.g. "align:start position:10%"). Capture the two
+      // timestamps loosely and parse each with the spec-compliant helper.
+      const match = timeLine.match(/([\d:.]+)\s*-->\s*([\d:.]+)/);
       if (!match) continue;
 
-      const startTime = this.timeToSeconds(match[1], match[2], match[3], match[4]);
-      const endTime = this.timeToSeconds(match[5], match[6], match[7], match[8]);
+      const startTime = this.vttTimeToSeconds(match[1]);
+      const endTime = this.vttTimeToSeconds(match[2]);
+      if (startTime === null || endTime === null) continue;
       const text = blockLines.slice(timeLineIndex + 1).join('\n').replace(/<[^>]+>/g, '');
 
       this.addCaption(track.id, startTime, endTime, text);
@@ -490,6 +495,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
   private timeToSeconds(h: string, m: string, s: string, ms: string): number {
     return parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s) + parseInt(ms) / 1000;
+  }
+
+  /**
+   * Parse a single WebVTT timestamp into seconds. Per the WebVTT spec the
+   * hours component is optional for cues shorter than one hour, so both
+   * `hh:mm:ss.ttt` and `mm:ss.ttt` are accepted. Returns null when the string
+   * is not a valid timestamp so the caller can skip the cue.
+   */
+  private vttTimeToSeconds(ts: string): number | null {
+    const m = ts.match(/^(?:(\d+):)?(\d{2}):(\d{2})\.(\d{3})$/);
+    if (!m) return null;
+    const h = m[1] ? parseInt(m[1]) : 0;
+    return h * 3600 + parseInt(m[2]) * 60 + parseInt(m[3]) + parseInt(m[4]) / 1000;
   }
 
   private assTimeToSeconds(time: string): number {

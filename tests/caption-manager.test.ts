@@ -324,6 +324,34 @@ describe('VTT import/export', () => {
     expect(track.captions[0].text).toBe('Hello world');
     expect(track.captions[0].text).not.toContain('\r');
   });
+
+  it('REGRESSION: importVTT parses spec-compliant mm:ss.ttt timestamps (optional hours)', () => {
+    // WebVTT allows omitting the hours component for cues under one hour —
+    // the form browsers and YouTube commonly emit. The old hh:mm:ss-only
+    // regex silently dropped every such cue.
+    const shortForm = [
+      'WEBVTT', '',
+      '00:01.000 --> 00:04.000', 'Hello world', '',
+      '01:05.500 --> 01:07.000', 'Second line', '',
+    ].join('\n');
+    const track = cm.importVTT(shortForm);
+    expect(track.captions).toHaveLength(2);
+    expect(track.captions[0].startTime).toBeCloseTo(1, 3);
+    expect(track.captions[0].endTime).toBeCloseTo(4, 3);
+    expect(track.captions[1].startTime).toBeCloseTo(65.5, 3);
+  });
+
+  it('REGRESSION: importVTT ignores trailing cue settings after the end timestamp', () => {
+    const withSettings = [
+      'WEBVTT', '',
+      '00:00:01.000 --> 00:00:04.000 align:start position:10%', 'Hello', '',
+    ].join('\n');
+    const track = cm.importVTT(withSettings);
+    expect(track.captions).toHaveLength(1);
+    expect(track.captions[0].startTime).toBeCloseTo(1, 3);
+    expect(track.captions[0].endTime).toBeCloseTo(4, 3);
+    expect(track.captions[0].text).toBe('Hello');
+  });
 });
 
 // ============================================================

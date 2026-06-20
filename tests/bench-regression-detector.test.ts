@@ -312,6 +312,43 @@ describe('toBaseline / serializeBaseline / deserializeBaseline', () => {
     expect(() => JSON.parse(json)).not.toThrow();
     expect(json).toContain('\n'); // pretty-printed
   });
+
+  // REGRESSION: malformed JSON must throw a descriptive Error, not a raw SyntaxError
+  // that surfaces a confusing stack trace from inside JSON.parse when the CI gate reads
+  // a corrupt baseline.json.
+  it('REGRESSION: deserializeBaseline() throws Error on malformed JSON', () => {
+    expect(() => deserializeBaseline('{invalid json}')).toThrow(
+      /baseline\.json is not valid JSON/
+    );
+  });
+
+  it('REGRESSION: deserializeBaseline() throws Error when results field is missing', () => {
+    expect(() =>
+      deserializeBaseline('{"version":"1.0","timestamp":0}')
+    ).toThrow(/invalid shape/);
+  });
+
+  it('REGRESSION: deserializeBaseline() throws Error when parsed value is null', () => {
+    expect(() => deserializeBaseline('null')).toThrow(/invalid shape/);
+  });
+
+  it('REGRESSION: deserializeBaseline() throws Error when version is not a string', () => {
+    expect(() =>
+      deserializeBaseline('{"version":1,"timestamp":0,"results":{}}')
+    ).toThrow(/invalid shape/);
+  });
+
+  it('REGRESSION: deserializeBaseline() throws Error when results is null', () => {
+    expect(() =>
+      deserializeBaseline('{"version":"1.0","timestamp":0,"results":null}')
+    ).toThrow(/invalid shape/);
+  });
+
+  it('REGRESSION: valid-but-minimal baseline parses without error', () => {
+    const bl = deserializeBaseline('{"version":"2.0","timestamp":1000,"results":{}}');
+    expect(bl.version).toBe('2.0');
+    expect(bl.results).toEqual({});
+  });
 });
 
 // ── BaselineStore (deprecated namespace) ──────────────────────────────────────

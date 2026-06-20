@@ -259,7 +259,26 @@ export function serializeBaseline(baseline: BenchmarkBaseline): string {
 }
 
 export function deserializeBaseline(json: string): BenchmarkBaseline {
-  return JSON.parse(json) as BenchmarkBaseline;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (e) {
+    throw new Error(`baseline.json is not valid JSON: ${(e as Error).message}`);
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    typeof obj['version'] !== 'string' ||
+    typeof obj['timestamp'] !== 'number' ||
+    typeof obj['results'] !== 'object' ||
+    obj['results'] === null
+  ) {
+    throw new Error(
+      'baseline.json has invalid shape: expected { version: string, timestamp: number, results: object }'
+    );
+  }
+  return parsed as BenchmarkBaseline;
 }
 
 /** @deprecated 関数 toBaseline / serializeBaseline / deserializeBaseline を使うこと */

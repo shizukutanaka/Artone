@@ -141,6 +141,21 @@ export class ArtoneApp {
   private autoSaveTimer: number | null = null;
   private recoveryKey = 'artone_recovery';
 
+  // Named handler references so they can be removed in dispose() without leaking
+  // closures that keep the ArtoneApp instance alive after disposal.
+  private readonly _onBeforeUnload = (): void => { this.saveRecoveryData(); };
+  private readonly _onVisibilityChange = (): void => {
+    if (document.hidden) this.saveRecoveryData();
+  };
+  private readonly _onError = (e: ErrorEvent): void => {
+    log.error('Artone crash:', e.error);
+    this.saveRecoveryData();
+  };
+  private readonly _onUnhandledRejection = (e: PromiseRejectionEvent): void => {
+    log.error('Artone unhandled rejection:', e.reason);
+    this.saveRecoveryData();
+  };
+
   constructor(config: Partial<AppConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
 
@@ -414,28 +429,10 @@ export class ArtoneApp {
   }
 
   private setupCrashRecovery(): void {
-    // Save on page unload
-    window.addEventListener('beforeunload', () => {
-      this.saveRecoveryData();
-    });
-
-    // Save on visibility change (tab hidden)
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        this.saveRecoveryData();
-      }
-    });
-
-    // Error boundary
-    window.addEventListener('error', (e) => {
-      log.error('Artone crash:', e.error);
-      this.saveRecoveryData();
-    });
-
-    window.addEventListener('unhandledrejection', (e) => {
-      log.error('Artone unhandled rejection:', e.reason);
-      this.saveRecoveryData();
-    });
+    window.addEventListener('beforeunload', this._onBeforeUnload);
+    document.addEventListener('visibilitychange', this._onVisibilityChange);
+    window.addEventListener('error', this._onError);
+    window.addEventListener('unhandledrejection', this._onUnhandledRejection);
   }
 
   private saveRecoveryData(): void {
@@ -601,10 +598,17 @@ export class ArtoneApp {
 
   dispose(): void {
     this.stopPlaybackLoop();
-    
+
     if (this.autoSaveTimer) {
       clearInterval(this.autoSaveTimer);
     }
+
+    // Remove crash-recovery listeners so disposed instances are not kept alive
+    // by listener closures (prevents stale callbacks during HMR / test teardown).
+    window.removeEventListener('beforeunload', this._onBeforeUnload);
+    document.removeEventListener('visibilitychange', this._onVisibilityChange);
+    window.removeEventListener('error', this._onError);
+    window.removeEventListener('unhandledrejection', this._onUnhandledRejection);
 
     this.history.clear();
     this.scopes.dispose();

@@ -562,25 +562,40 @@ export class PluginBridge {
     if (!instance) return;
     
     if (instance.descriptor.uiUrl) {
+      // Determine expected message origin for cross-origin security checks.
+      // Relative URLs (e.g. /plugins/ui.html) resolve to the same origin as
+      // the host app; absolute URLs specify their own origin. '*' is never used
+      // to prevent parameter leakage to or injection from unrelated origins.
+      let expectedOrigin: string;
+      try {
+        expectedOrigin = new URL(instance.descriptor.uiUrl).origin;
+      } catch {
+        // Relative URL — plugin UI is served from the same origin
+        expectedOrigin = window.location.origin;
+      }
+
       // Load custom UI
       const iframe = document.createElement('iframe');
       iframe.src = instance.descriptor.uiUrl;
       iframe.style.cssText = 'width:100%;height:400px;border:none;';
-      
+
       iframe.onload = () => {
-        // Send current parameters to UI
+        // Target the exact expected origin so parameters are never sent to an
+        // unintended origin if the iframe navigated away.
         iframe.contentWindow?.postMessage({
           type: 'init',
           parameters: Object.fromEntries(instance.parameters)
-        }, '*');
+        }, expectedOrigin);
       };
-      
+
       window.addEventListener('message', (e) => {
+        // Reject messages from origins other than the plugin's own UI origin.
+        if (e.origin !== expectedOrigin) return;
         if (e.data.type === 'parameterChange' && e.data.instanceId === instanceId) {
           this.setParameter(instanceId, e.data.parameterId, e.data.value);
         }
       });
-      
+
       container.appendChild(iframe);
     } else {
       // Generate generic UI

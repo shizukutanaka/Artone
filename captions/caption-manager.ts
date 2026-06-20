@@ -247,6 +247,10 @@ export class CaptionManager {
     const track = this.tracks.get(trackId);
     if (!track) return null;
 
+    // A zero- or negative-duration caption is invisible and can cause
+    // downstream renderers to loop or produce NaN/Infinity in time calculations.
+    if (!(endTime > startTime)) return null;
+
     const caption: Caption = {
       id: crypto.randomUUID(),
       startTime,

@@ -115,6 +115,20 @@ describe('CaptionManager — caption operations', () => {
     expect(cm.addCaption('nonexistent', 0, 2, 'x')).toBeNull();
   });
 
+  it('REGRESSION: addCaption rejects endTime <= startTime (invisible/corrupt captions)', () => {
+    // Before fix: zero/negative-duration captions were stored silently.
+    // getCaptionsAtTime() would never return them (since time >= start && time < end
+    // is unsatisfiable), and renderer code computing endTime-startTime could
+    // produce NaN/Infinity in animated transitions.
+    expect(cm.addCaption(trackId, 2, 2, 'zero-dur')).toBeNull();   // endTime == startTime
+    expect(cm.addCaption(trackId, 3, 1, 'negative')).toBeNull();   // endTime < startTime
+    expect(cm.getActiveTrack()!.captions).toHaveLength(0);          // none stored
+  });
+
+  it('addCaption accepts endTime just above startTime', () => {
+    expect(cm.addCaption(trackId, 1, 1.001, 'short')).not.toBeNull();
+  });
+
   it('captions are kept sorted by startTime', () => {
     cm.addCaption(trackId, 5, 6, 'C');
     cm.addCaption(trackId, 0, 1, 'A');

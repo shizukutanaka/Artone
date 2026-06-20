@@ -454,6 +454,58 @@ describe('LUTManager — importLUT / parseCube', () => {
     await lm.importLUT(makeFile('bad data', 'bad.cube'));
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it('REGRESSION: truncated .cube (fewer than size³ entries) is rejected', async () => {
+    // Declares size 2 (needs 8 RGB triples = 24 numbers) but provides only 3.
+    // Before fix: parsed with size=2 and short data → trilinearInterpolate reads
+    // past the array (getValue → 0) and silently renders black. Must reject.
+    const truncated = [
+      'LUT_3D_SIZE 2',
+      '0.0 0.0 0.0',
+      '1.0 0.0 0.0',
+      '0.0 1.0 0.0',
+    ].join('\n');
+    expect(await lm.importLUT(makeFile(truncated, 'truncated.cube'))).toBeNull();
+  });
+
+  it('REGRESSION: .cube with a non-numeric data row does not inject NaN', async () => {
+    // A corrupt/keyword row would map to [NaN,NaN,NaN] and be pushed as data.
+    // After the fix it is skipped; the remaining 7 triples are < 8 so the
+    // truncation guard rejects the file rather than importing NaN-laden data.
+    const withGarbage = [
+      'LUT_3D_SIZE 2',
+      '0.0 0.0 0.0', '1.0 0.0 0.0', '0.0 1.0 0.0', '1.0 1.0 0.0',
+      'foo bar baz',            // <- non-numeric
+      '1.0 0.0 1.0', '0.0 1.0 1.0', '1.0 1.0 1.0',
+    ].join('\n');
+    const result = await lm.importLUT(makeFile(withGarbage, 'garbage.cube'));
+    expect(result).toBeNull();
+  });
+
+  it('REGRESSION: a complete .cube with a trailing non-numeric line still parses (no NaN in data)', async () => {
+    // 8 valid triples + a stray comment-like row (no '#'); the row is skipped,
+    // count == 24 so it imports, and no NaN leaks into the LUT data.
+    const trailing = [
+      'LUT_3D_SIZE 2',
+      '0.0 0.0 0.0', '1.0 0.0 0.0', '0.0 1.0 0.0', '1.0 1.0 0.0',
+      '0.0 0.0 1.0', '1.0 0.0 1.0', '0.0 1.0 1.0', '1.0 1.0 1.0',
+      'LUT_1D_SIZE 16',         // unsupported keyword, must be ignored not pushed
+    ].join('\n');
+    const lut = await lm.importLUT(makeFile(trailing, 'trailing.cube'));
+    expect(lut).not.toBeNull();
+    expect(lut!.data).toHaveLength(24);
+    expect(Array.from(lut!.data).some(Number.isNaN)).toBe(false);
+  });
+
+  it('REGRESSION: truncated .3dl (fewer than size³ entries) is rejected', async () => {
+    const truncated3dl = [
+      'Mesh 2 2 2',
+      '0 0 0',
+      '4095 0 0',
+      '0 4095 0',
+    ].join('\n');
+    expect(await lm.importLUT(makeFile(truncated3dl, 'truncated.3dl'))).toBeNull();
+  });
 });
 
 // ─── Export → import round-trip ───────────────────────────────

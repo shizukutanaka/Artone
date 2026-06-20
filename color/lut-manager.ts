@@ -132,9 +132,14 @@ export class LUTManager {
         const parts = trimmed.split(/\s+/).slice(1).map(Number);
         domainMax = [parts[0], parts[1], parts[2]];
       } else {
-        // Data line
+        // Data line — accept only fully-numeric RGB triples. A non-numeric line
+        // (stray keyword, corrupt row) would otherwise push NaN,NaN,NaN, which
+        // propagates through trilinearInterpolate into NaN output pixels.
         const values = trimmed.split(/\s+/).map(Number);
-        if (values.length >= 3) {
+        if (
+          values.length >= 3 &&
+          Number.isFinite(values[0]) && Number.isFinite(values[1]) && Number.isFinite(values[2])
+        ) {
           data.push(values[0], values[1], values[2]);
         }
       }
@@ -143,6 +148,15 @@ export class LUTManager {
     // Guard: parseInt(undefined) = NaN when the size token is missing;
     // NaN === 0 is false so the original check silently passed.
     if (size === 0 || isNaN(size) || data.length === 0) return null;
+
+    // Reject truncated/incomplete LUTs: a declared size N requires N³ RGB
+    // triples. Without this, trilinearInterpolate indexes past the data
+    // (getValue returns 0) and silently renders BLACK in the missing region
+    // instead of the malformed import being rejected.
+    if (data.length < size * size * size * 3) {
+      log.error(`Malformed .cube: declared size ${size} needs ${size ** 3} entries, got ${Math.floor(data.length / 3)}`);
+      return null;
+    }
 
     metadata.domainMin = domainMin;
     metadata.domainMax = domainMax;
@@ -183,13 +197,23 @@ export class LUTManager {
 
     for (let i = startIndex; i < lines.length; i++) {
       const values = lines[i].trim().split(/\s+/).map(Number);
-      if (values.length >= 3) {
+      if (
+        values.length >= 3 &&
+        Number.isFinite(values[0]) && Number.isFinite(values[1]) && Number.isFinite(values[2])
+      ) {
         data.push(
           values[0] / maxVal,
           values[1] / maxVal,
           values[2] / maxVal
         );
       }
+    }
+
+    // Reject truncated/incomplete LUTs (same rationale as parseCube): a size N
+    // mesh requires N³ RGB triples or apply silently renders black.
+    if (data.length < size * size * size * 3) {
+      log.error(`Malformed .3dl: declared size ${size} needs ${size ** 3} entries, got ${Math.floor(data.length / 3)}`);
+      return null;
     }
 
     return {

@@ -174,10 +174,20 @@ export class ShortcutManager {
   private callbacks: Map<string, () => void> = new Map();
   private listeners: Set<() => void> = new Set();
   private enabled = true;
+  /** Stored so the same reference can be passed to removeEventListener(). */
+  private readonly _boundKeyDown: (e: KeyboardEvent) => void;
 
   constructor() {
+    this._boundKeyDown = this.handleKeyDown.bind(this);
     this.loadDefaults();
     this.setupEventListener();
+  }
+
+  /** Remove the document keydown listener and clear all registered callbacks. */
+  dispose(): void {
+    document.removeEventListener('keydown', this._boundKeyDown);
+    this.callbacks.clear();
+    this.listeners.clear();
   }
 
   private loadDefaults(): void {
@@ -192,7 +202,7 @@ export class ShortcutManager {
   }
 
   private setupEventListener(): void {
-    document.addEventListener('keydown', this.handleKeyDown.bind(this));
+    document.addEventListener('keydown', this._boundKeyDown);
   }
 
   private handleKeyDown(event: KeyboardEvent): void {

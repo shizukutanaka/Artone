@@ -610,6 +610,7 @@ export class ArtoneApp {
     window.removeEventListener('error', this._onError);
     window.removeEventListener('unhandledrejection', this._onUnhandledRejection);
 
+    this.shortcuts.dispose();
     this.history.clear();
     this.scopes.dispose();
     this.perf.dispose();

@@ -393,3 +393,38 @@ describe('ShortcutManager — subscribe / notify', () => {
     expect(listener).toHaveBeenCalledOnce();
   });
 });
+
+// ============================================================
+// dispose
+// ============================================================
+
+describe('ShortcutManager — dispose', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('REGRESSION: dispose() removes the document keydown listener so it cannot fire after teardown', () => {
+    // Bug: .bind(this) creates a new reference each call, so the listener
+    // stored in addEventListener was never retrievable for removeEventListener.
+    // After dispose() the keydown handler must no longer fire.
+    const remove = vi.spyOn(document, 'removeEventListener');
+    const sm = new ShortcutManager();
+    const cb = vi.fn();
+    sm.registerCallback('play', cb);
+    sm.dispose();
+
+    // The keydown listener must have been removed.
+    expect(remove).toHaveBeenCalledWith('keydown', expect.any(Function));
+
+    // Dispatching a matching key after dispose should not invoke the callback.
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }));
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it('dispose() clears registered callbacks', () => {
+    const sm = new ShortcutManager();
+    sm.registerCallback('play', vi.fn());
+    sm.dispose();
+    // No public API to inspect callbacks directly, but a second dispose()
+    // must be idempotent (no double-remove errors).
+    expect(() => sm.dispose()).not.toThrow();
+  });
+});

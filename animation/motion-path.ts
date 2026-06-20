@@ -457,6 +457,9 @@ export function evaluateAtLength(
   table: ArcLengthTable,
   s:     number,
 ): Vec2 {
+  // Consistent with evaluateAt(): empty paths return origin rather than
+  // crashing when arcLengthToParameter returns segmentIndex:0 on a zero-length segments array.
+  if (path.segments.length === 0) return { x: 0, y: 0 };
   const { segmentIndex, segmentT } = arcLengthToParameter(path, table, s);
   return bezierPoint(path.segments[segmentIndex], segmentT);
 }
@@ -473,6 +476,11 @@ export function sampleAtLength(
   table: ArcLengthTable,
   s:     number,
 ): PathSample {
+  // Consistent with evaluateAtLength(): empty paths return a degenerate sample
+  // at the origin rather than crashing on path.segments[0] === undefined.
+  if (path.segments.length === 0) {
+    return { position: { x: 0, y: 0 }, tangent: { x: 1, y: 0 }, normal: { x: 0, y: 1 }, curvature: 0, arcLength: 0 };
+  }
   const { segmentIndex, segmentT } = arcLengthToParameter(path, table, s);
   const seg = path.segments[segmentIndex];
   const pos = bezierPoint(seg, segmentT);

@@ -374,6 +374,13 @@ describe('buildArcLengthTable', () => {
 // ─── evaluateAtLength ────────────────────────────────────────────────────────
 
 describe('evaluateAtLength', () => {
+  it('REGRESSION: empty path returns origin without crashing', () => {
+    const emptyPath: MotionPath = { segments: [] };
+    const table = buildArcLengthTable(emptyPath);
+    expect(() => evaluateAtLength(emptyPath, table, 0)).not.toThrow();
+    expect(evaluateAtLength(emptyPath, table, 0)).toEqual({ x: 0, y: 0 });
+  });
+
   it('s=0 returns start of path', () => {
     const path  = makeLinearPath(p(0, 0), p(10, 0));
     const table = buildArcLengthTable(path);
@@ -409,6 +416,15 @@ describe('evaluateAtLength', () => {
 // ─── sampleAtLength ───────────────────────────────────────────────────────────
 
 describe('sampleAtLength', () => {
+  it('REGRESSION: empty path returns origin sample without crashing', () => {
+    const emptyPath: MotionPath = { segments: [] };
+    const table = buildArcLengthTable(emptyPath);
+    expect(() => sampleAtLength(emptyPath, table, 0)).not.toThrow();
+    const sample = sampleAtLength(emptyPath, table, 0);
+    expect(sample.position).toEqual({ x: 0, y: 0 });
+    expect(sample.curvature).toBe(0);
+  });
+
   it('returns correct arcLength field', () => {
     const path  = makeLinearPath(p(0,0), p(10,0));
     const table = buildArcLengthTable(path);

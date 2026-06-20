@@ -56,7 +56,10 @@ export class TimecodeUtil {
     const framesPer10Min = Math.round(fps * 600);
     const framesPerMin = Math.round(fps * 60);
 
-    let f = frames % framesPer24Hours;
+    // Floor to integer frame count — mirrors the Math.floor(frames) applied by the
+    // non-drop-frame path in framesToTC. Without this, fractional inputs produce
+    // a fractional ff field (e.g. "00:01:00;0.7") that is not a valid timecode.
+    let f = Math.floor(frames) % framesPer24Hours;
     const d = Math.floor(f / framesPer10Min);
     const m = f % framesPer10Min;
     if (m > dropFrames) {

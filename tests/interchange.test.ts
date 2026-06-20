@@ -100,6 +100,22 @@ describe('Timecode utilities', () => {
       }
     }
   });
+
+  it('REGRESSION: drop-frame TC floors fractional input (no fractional ff field)', () => {
+    // Before fix: framesToDropFrameTC did not floor `frames` before calculation,
+    // while the non-drop-frame path did. Fractional input produced e.g. "00:01:00;0.7"
+    // instead of "00:01:00;00". 1800.7 frames at 29.97df should equal 1800 frames.
+    expect(TC.framesToTC(1800.7, 29.97, true)).toBe(TC.framesToTC(1800, 29.97, true));
+    // Output must match the strict HH:MM:SS;FF format (no decimal point)
+    expect(TC.framesToTC(7199.9, 29.97, true)).toMatch(/^\d{2}:\d{2}:\d{2};\d{2}$/);
+  });
+
+  it('drop-frame TC round-trips through tcToFrames', () => {
+    for (const frames of [0, 1800, 107892]) {
+      const tc = TC.framesToTC(frames, 29.97, true);
+      expect(TC.tcToFrames(tc, 29.97)).toBe(frames);
+    }
+  });
 });
 
 describe('EDL Export', () => {

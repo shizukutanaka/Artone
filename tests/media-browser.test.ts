@@ -358,3 +358,71 @@ describe('MediaBrowser — importFiles', () => {
     expect(fn).toHaveBeenCalled();
   });
 });
+
+// ============================================================
+// Thumbnail generation — zero-dimension guards
+// ============================================================
+
+describe('MediaBrowser — thumbnail zero-dimension guards', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('REGRESSION: generateImageThumbnail returns empty string for a 0×0 image (no Infinity scale)', async () => {
+    const browser = new MediaBrowser();
+    const toDataURL = vi.fn(() => 'data:image/jpeg;base64,FAKE');
+    // Image fires onload with zero intrinsic dimensions (broken image).
+    vi.stubGlobal('Image', class {
+      width = 0;
+      height = 0;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_v: string) { Promise.resolve().then(() => this.onload?.()); }
+    });
+    vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      if (tag === 'canvas') {
+        return { getContext: () => ({ drawImage: () => {} }), toDataURL } as unknown as HTMLElement;
+      }
+      return {} as HTMLElement;
+    }) as typeof document.createElement);
+
+    const result = await (browser as unknown as {
+      generateImageThumbnail(url: string): Promise<string>;
+    }).generateImageThumbnail('blob:fake');
+
+    expect(result).toBe('');
+    expect(toDataURL).not.toHaveBeenCalled(); // returned before NaN canvas
+  });
+
+  it('REGRESSION: generateVideoThumbnail returns empty string for 0×0 dimensions', async () => {
+    const browser = new MediaBrowser();
+    const toDataURL = vi.fn(() => 'data:image/jpeg;base64,FAKE');
+    vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      if (tag === 'video') {
+        const v: Record<string, unknown> = { preload: '', muted: false, duration: 10, currentTime: 0 };
+        Object.defineProperty(v, 'src', {
+          set() {
+            Promise.resolve().then(() => {
+              (v.onloadeddata as (() => void) | undefined)?.();
+              (v.onseeked as (() => void) | undefined)?.();
+            });
+          },
+          configurable: true,
+        });
+        return v as unknown as HTMLElement;
+      }
+      if (tag === 'canvas') {
+        return { getContext: () => ({ drawImage: () => {} }), toDataURL } as unknown as HTMLElement;
+      }
+      return {} as HTMLElement;
+    }) as typeof document.createElement);
+
+    const result = await (browser as unknown as {
+      generateVideoThumbnail(url: string, w: number, h: number): Promise<string>;
+    }).generateVideoThumbnail('blob:fake', 0, 0);
+
+    expect(result).toBe('');
+    expect(toDataURL).not.toHaveBeenCalled();
+  });
+});

@@ -312,8 +312,13 @@ export class MediaBrowser {
       };
 
       video.onseeked = () => {
+        // Corrupted/streaming videos can report 0 dimensions; 160/0 = Infinity
+        // would make the canvas size NaN and emit a broken thumbnail. Fail
+        // gracefully like the onerror path instead.
+        const longest = Math.max(width, height);
+        if (!(longest > 0)) { resolve(''); return; }
         const canvas = document.createElement('canvas');
-        const scale = 160 / Math.max(width, height);
+        const scale = 160 / longest;
         canvas.width = width * scale;
         canvas.height = height * scale;
 
@@ -376,8 +381,12 @@ export class MediaBrowser {
       const img = new Image();
       
       img.onload = () => {
+        // Broken images can fire onload with 0 intrinsic dimensions; 160/0 =
+        // Infinity poisons the canvas size. Fail gracefully like onerror.
+        const longest = Math.max(img.width, img.height);
+        if (!(longest > 0)) { resolve(''); return; }
         const canvas = document.createElement('canvas');
-        const scale = 160 / Math.max(img.width, img.height);
+        const scale = 160 / longest;
         canvas.width = img.width * scale;
         canvas.height = img.height * scale;
 

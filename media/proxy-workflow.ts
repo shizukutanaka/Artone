@@ -289,6 +289,8 @@ export class ProxyWorkflow {
   private active = new Map<string, ProxyJob>();
   private listeners = new Set<(job: ProxyJob) => void>();
   private mappingCache = new Map<string, ProxyMapping>();
+  /** Cache of proxyId → Blob URL so resolveUrl() never creates duplicate URLs. */
+  private blobUrlCache = new Map<string, string>();
   private initialized = false;
 
   constructor(config: Partial<ProxyConfig> = {}) {
@@ -440,8 +442,17 @@ export class ProxyWorkflow {
 
     const cached = this.mappingCache.get(sourceId);
     if (cached) {
+      // Return cached Blob URL if already created — resolveUrl is called once
+      // per clip per render tick, so without this cache each call would create
+      // a new unrevoced Blob URL (O(fps × clips) permanent leak).
+      const existing = this.blobUrlCache.get(cached.proxyId);
+      if (existing) return existing;
       const rec = await this.storage.get(cached.proxyId);
-      if (rec) return URL.createObjectURL(rec.blob);
+      if (rec) {
+        const url = URL.createObjectURL(rec.blob);
+        this.blobUrlCache.set(cached.proxyId, url);
+        return url;
+      }
     }
 
     const mappings = await this.storage.findBySourceId(sourceId);
@@ -449,8 +460,13 @@ export class ProxyWorkflow {
 
     const mapping = mappings[0];
     this.mappingCache.set(sourceId, mapping);
+    const existing = this.blobUrlCache.get(mapping.proxyId);
+    if (existing) return existing;
     const rec = await this.storage.get(mapping.proxyId);
-    return rec ? URL.createObjectURL(rec.blob) : sourceUrl;
+    if (!rec) return sourceUrl;
+    const url = URL.createObjectURL(rec.blob);
+    this.blobUrlCache.set(mapping.proxyId, url);
+    return url;
   }
 
   // --- Storage Management ---
@@ -458,20 +474,30 @@ export class ProxyWorkflow {
   async getStorageInfo(): Promise<{ usedMB: number; quotaMB: number; percent: number }> {
     const used = await this.storage.getTotalSize();
     const usedMB = used / 1_048_576;
+    const quota = this.config.storageQuotaMB;
     return {
       usedMB,
-      quotaMB: this.config.storageQuotaMB,
-      percent: (usedMB / this.config.storageQuotaMB) * 100
+      quotaMB: quota,
+      percent: quota > 0 ? (usedMB / quota) * 100 : 0,
     };
   }
 
   async clearAll(): Promise<void> {
     await this.storage.clear();
     this.mappingCache.clear();
+    // Revoke all cached Blob URLs to release memory.
+    for (const url of this.blobUrlCache.values()) URL.revokeObjectURL(url);
+    this.blobUrlCache.clear();
   }
 
   async deleteProxy(proxyId: string): Promise<void> {
     await this.storage.delete(proxyId);
+    // Revoke the Blob URL for this proxy so the browser can release the memory.
+    const url = this.blobUrlCache.get(proxyId);
+    if (url) {
+      URL.revokeObjectURL(url);
+      this.blobUrlCache.delete(proxyId);
+    }
     for (const [k, v] of this.mappingCache.entries()) {
       if (v.proxyId === proxyId) {
         this.mappingCache.delete(k);

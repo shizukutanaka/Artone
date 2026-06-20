@@ -362,3 +362,60 @@ describe('ProxyWorkflow — getQueue / getActive', () => {
     expect(new ProxyWorkflow().getActive()).toHaveLength(0);
   });
 });
+
+// ============================================================
+// Blob URL leak regressions
+// ============================================================
+
+describe('ProxyWorkflow — Blob URL caching (regression)', () => {
+  it('REGRESSION: resolveUrl returns the same Blob URL on repeated calls (no duplicates)', async () => {
+    // Before fix: every resolveUrl() call for a cached proxy called
+    // URL.createObjectURL() unconditionally, leaking one URL per call.
+    const pw = new ProxyWorkflow();
+    const urls: string[] = [];
+    const createdUrls: string[] = [];
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      const u = `blob:fake/${createdUrls.length}`;
+      createdUrls.push(u);
+      return u;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+    const fakeBlob = new Blob(['proxy'], { type: 'video/mp4' });
+    const pw2 = pw as unknown as {
+      storage: { get(id: string): Promise<{ blob: Blob } | null>; findBySourceId(id: string): Promise<Array<{ sourceId: string; proxyId: string; preset: string; createdAt: number; sizeBytes: number }>>; };
+      mappingCache: Map<string, unknown>;
+      blobUrlCache: Map<string, string>;
+      config: { useEditing: boolean; useExporting: boolean };
+    };
+
+    // Simulate a cached mapping
+    const mapping = { sourceId: 'src-1', proxyId: 'proxy-1', preset: 'quarter', createdAt: Date.now(), sizeBytes: 100 };
+    pw2.mappingCache.set('src-1', mapping);
+    pw2.storage.get = vi.fn().mockResolvedValue({ blob: fakeBlob });
+
+    const url1 = await pw.resolveUrl('src-1', 'original://');
+    const url2 = await pw.resolveUrl('src-1', 'original://');
+    const url3 = await pw.resolveUrl('src-1', 'original://');
+
+    // After fix: only one Blob URL was ever created
+    expect(createdUrls).toHaveLength(1);
+    expect(url1).toBe(url2);
+    expect(url1).toBe(url3);
+    urls.push(url1);
+
+    vi.restoreAllMocks();
+  });
+
+  it('REGRESSION: getStorageInfo returns 0 percent when storageQuotaMB is 0', async () => {
+    // Before fix: (usedMB / 0) * 100 = Infinity, corrupting the storage badge.
+    const pw = new ProxyWorkflow({ storageQuotaMB: 0 });
+    const pw2 = pw as unknown as {
+      storage: { getTotalSize(): Promise<number> };
+    };
+    pw2.storage.getTotalSize = vi.fn().mockResolvedValue(1024 * 1024); // 1 MB
+    const info = await pw.getStorageInfo();
+    expect(Number.isFinite(info.percent)).toBe(true);
+    expect(info.percent).toBe(0);
+  });
+});

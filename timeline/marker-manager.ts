@@ -433,9 +433,17 @@ export class MarkerManager {
       const time = (entry as { time?: unknown }).time;
       if (typeof time !== 'number' || !Number.isFinite(time)) continue;
 
+      const raw = entry as Record<string, unknown>;
       const newMarker: Marker = {
-        ...(entry as Marker),
+        ...(raw as unknown as Marker),
         id: crypto.randomUUID(),
+        // Normalise mutable collections from untrusted input: if tags arrives as
+        // a non-array (e.g. a string), addTag() / removeTag() calling .push()
+        // or .filter() would throw TypeError.
+        tags: Array.isArray(raw.tags) ? [...(raw.tags as string[])] : [],
+        metadata: (typeof raw.metadata === 'object' && raw.metadata !== null && !Array.isArray(raw.metadata))
+          ? { ...(raw.metadata as Record<string, unknown>) }
+          : {},
       };
       this.markers.set(newMarker.id, newMarker);
       count++;

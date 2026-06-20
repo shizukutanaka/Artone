@@ -482,6 +482,30 @@ describe('exportJSON / importJSON', () => {
     const mm = makeManager();
     expect(mm.importJSON('{"time":5}')).toBe(0);
   });
+
+  it('REGRESSION: importJSON normalises non-array tags to [] so addTag() does not crash', () => {
+    const mm = makeManager();
+    const payload = JSON.stringify([
+      { time: 5, type: 'standard', name: 'Bad', duration: 0, notes: '', color: '#fff',
+        tags: 'not-an-array', metadata: {} },
+    ]);
+    expect(mm.importJSON(payload)).toBe(1);
+    const m = mm.getAllMarkers()[0];
+    // Without the fix, addTag() throws TypeError: marker.tags.push is not a function
+    expect(() => mm.addTag(m.id, 'new')).not.toThrow();
+    expect(mm.getMarker(m.id)!.tags).toContain('new');
+  });
+
+  it('REGRESSION: importJSON normalises non-object metadata to {} to prevent aliasing crash', () => {
+    const mm = makeManager();
+    const payload = JSON.stringify([
+      { time: 5, type: 'standard', name: 'BadMeta', duration: 0, notes: '', color: '#fff',
+        tags: [], metadata: ['not', 'an', 'object'] },
+    ]);
+    expect(mm.importJSON(payload)).toBe(1);
+    const m = mm.getAllMarkers()[0];
+    expect(m.metadata).toEqual({});
+  });
 });
 
 // ============================================================

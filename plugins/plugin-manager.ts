@@ -418,12 +418,13 @@ export class PluginManager {
   }
 
   private validateManifest(manifest: PluginManifest): boolean {
+    const VALID_TYPES: PluginType[] = ['effect', 'transition', 'generator', 'exporter', 'panel', 'tool'];
     return !!(
       manifest.id &&
       manifest.name &&
       manifest.version &&
       manifest.author &&
-      manifest.type &&
+      VALID_TYPES.includes(manifest.type) &&
       manifest.main
     );
   }

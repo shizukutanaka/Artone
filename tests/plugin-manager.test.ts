@@ -103,6 +103,11 @@ describe('installPlugin()', () => {
     expect(await pm.installPlugin(collide, 'code')).toBeNull();
   });
 
+  it('REGRESSION: rejects a manifest with an unknown plugin type (input validation at security boundary)', async () => {
+    const bad: PluginManifest = { ...validManifest, type: 'admin' as PluginManifest['type'] };
+    expect(await pm.installPlugin(bad, 'code')).toBeNull();
+  });
+
   it('notifies listeners on install', async () => {
     const fn = vi.fn();
     pm.subscribe(fn);

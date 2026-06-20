@@ -419,13 +419,22 @@ export class PluginManager {
 
   private validateManifest(manifest: PluginManifest): boolean {
     const VALID_TYPES: PluginType[] = ['effect', 'transition', 'generator', 'exporter', 'panel', 'tool'];
+    // id: alphanumeric + hyphens/dots/underscores to prevent storage injection / path traversal.
+    const safeId = /^[a-zA-Z0-9][a-zA-Z0-9\-_.]{0,127}$/;
+    // version: strict semver (major.minor.patch) — rejects pre-release/build-metadata variants.
+    const semver = /^\d+\.\d+\.\d+$/;
+    // icon: block javascript: and data: schemes — both execute arbitrary code when set as <img src>.
+    const isUnsafeIcon = (url: string) => /^(javascript|data):/i.test(url.trim());
+
     return !!(
-      manifest.id &&
-      manifest.name &&
-      manifest.version &&
-      manifest.author &&
+      manifest.id && safeId.test(manifest.id) &&
+      manifest.name && manifest.name.length <= 128 &&
+      manifest.version && semver.test(manifest.version) &&
+      manifest.author && manifest.author.length <= 128 &&
+      manifest.description && manifest.description.length <= 1024 &&
       VALID_TYPES.includes(manifest.type) &&
-      manifest.main
+      manifest.main &&
+      (!manifest.icon || !isUnsafeIcon(manifest.icon))
     );
   }
 

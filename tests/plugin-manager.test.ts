@@ -108,6 +108,38 @@ describe('installPlugin()', () => {
     expect(await pm.installPlugin(bad, 'code')).toBeNull();
   });
 
+  it('REGRESSION: rejects javascript: icon URL (XSS via <img src> if rendered downstream)', async () => {
+    // Before fix: validateManifest only checked field existence, not content.
+    // A javascript: icon URL passes the old truthy check and is stored as-is.
+    const bad = { ...validManifest, id: 'xss-icon', icon: 'javascript:alert(1)' };
+    expect(await pm.installPlugin(bad, 'code')).toBeNull();
+  });
+
+  it('REGRESSION: rejects data: icon URL (XSS vector)', async () => {
+    const bad = { ...validManifest, id: 'xss-data', icon: 'data:text/html,<script>alert(1)</script>' };
+    expect(await pm.installPlugin(bad, 'code')).toBeNull();
+  });
+
+  it('REGRESSION: rejects id with path-traversal characters (storage injection)', async () => {
+    const bad = { ...validManifest, id: '../../../etc/passwd' };
+    expect(await pm.installPlugin(bad, 'code')).toBeNull();
+  });
+
+  it('REGRESSION: rejects non-semver version string', async () => {
+    const bad = { ...validManifest, id: 'bad-version', version: 'latest' };
+    expect(await pm.installPlugin(bad, 'code')).toBeNull();
+  });
+
+  it('REGRESSION: rejects name exceeding 128 characters', async () => {
+    const bad = { ...validManifest, id: 'long-name', name: 'x'.repeat(129) };
+    expect(await pm.installPlugin(bad, 'code')).toBeNull();
+  });
+
+  it('accepts a valid manifest with a safe https icon URL', async () => {
+    const good = { ...validManifest, id: 'safe-icon', icon: 'https://example.com/icon.png' };
+    expect(await pm.installPlugin(good, 'code')).not.toBeNull();
+  });
+
   it('notifies listeners on install', async () => {
     const fn = vi.fn();
     pm.subscribe(fn);

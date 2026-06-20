@@ -362,9 +362,18 @@ export class RecoveryManager {
 
   async clearProject(projectId: string): Promise<void> {
     const snapshots = await this.getSnapshots(projectId);
-    for (const snapshot of snapshots) {
-      await this.deleteSnapshot(snapshot.id);
-    }
+    // Guard: getSnapshots already returns [] when db is null; skip early.
+    if (snapshots.length === 0) return;
+    // Delete the whole set in ONE transaction — recovery/CLAUDE.md requires
+    // "既存リカバリデータを削除するコードは必ずトランザクショナル設計".
+    return new Promise((resolve, reject) => {
+      const tx = this.requireDB().transaction(this.config.storeName, 'readwrite');
+      const store = tx.objectStore(this.config.storeName);
+      for (const snapshot of snapshots) store.delete(snapshot.id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error ?? new Error('clearProject transaction aborted'));
+    });
   }
 
   async clearAll(): Promise<void> {
@@ -476,6 +485,13 @@ export class RecoveryManager {
 // Recovery Dialog UI
 // ============================================================
 
+/** Escape HTML special characters to prevent XSS when injecting into innerHTML. */
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!
+  ));
+}
+
 export function RecoveryDialogUI(props: {
   snapshots: RecoverySnapshot[];
   onRestore: (id: string) => void;
@@ -550,8 +566,8 @@ export function RecoveryDialogUI(props: {
           margin-bottom: 16px;
         ">
           ${props.snapshots.slice(0, 10).map(snap => `
-            <div class="snapshot-item" 
-              data-id="${snap.id}"
+            <div class="snapshot-item"
+              data-id="${escapeHtml(snap.id)}"
               style="
                 padding: 12px;
                 margin-bottom: 8px;
@@ -571,14 +587,14 @@ export function RecoveryDialogUI(props: {
               ">
                 <span>${typeIcon(snap.type)}</span>
                 <span style="color: #fff; font-weight: 500;">
-                  ${snap.projectName}
+                  ${escapeHtml(snap.projectName)}
                 </span>
                 <span style="
                   color: ${snap.type === 'crash' ? '#ef4444' : '#888'};
                   font-size: 11px;
                   text-transform: uppercase;
                 ">
-                  ${snap.type}
+                  ${escapeHtml(snap.type)}
                 </span>
               </div>
               <div style="

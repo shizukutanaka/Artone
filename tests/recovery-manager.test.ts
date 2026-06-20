@@ -514,4 +514,22 @@ describe('RecoveryDialogUI', () => {
     });
     expect(html).toContain('just now');
   });
+
+  it('REGRESSION: projectName with HTML special chars is escaped to prevent XSS', () => {
+    const html = RecoveryDialogUI({
+      snapshots: [snap({ projectName: '<script>alert(1)</script>' })],
+      onRestore: () => {}, onDiscard: () => {},
+    });
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('REGRESSION: snapshot id with HTML special chars is escaped in data-id attribute', () => {
+    const html = RecoveryDialogUI({
+      snapshots: [snap({ id: '"><img src=x onerror=alert(1)>' })],
+      onRestore: () => {}, onDiscard: () => {},
+    });
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
+  });
 });

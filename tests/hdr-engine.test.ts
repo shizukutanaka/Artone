@@ -287,3 +287,37 @@ describe('HDREngine — subscribe / notify', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 });
+
+describe('HDREngine — transfer function negative-input NaN regression', () => {
+  let hdr: HDREngine;
+  beforeEach(() => { hdr = new HDREngine(); });
+
+  it('REGRESSION: pqEOTF with negative code value returns 0, not NaN', () => {
+    // Before fix: Math.pow(negative, 1/m2) = NaN, poisoning all channels.
+    // Negative inputs arise from floating-point overshoot in matrix transforms.
+    const result = hdr.pqEOTF(-0.1);
+    expect(Number.isFinite(result)).toBe(true);
+    expect(result).toBeGreaterThanOrEqual(0);
+  });
+
+  it('REGRESSION: pqOETF with negative luminance returns 0, not NaN', () => {
+    // Before fix: Math.pow(negative/10000, m1) = NaN.
+    const result = hdr.pqOETF(-100);
+    expect(Number.isFinite(result)).toBe(true);
+    expect(result).toBeGreaterThanOrEqual(0);
+  });
+
+  it('REGRESSION: hlgOETF with negative scene value returns 0, not NaN', () => {
+    // Before fix: Math.sqrt(3 * negative) = NaN.
+    const result = hdr.hlgOETF(-0.05);
+    expect(result).toBe(0);
+  });
+
+  it('pqEOTF/pqOETF round-trip is still correct at positive values after fix', () => {
+    const nits = 1000;
+    const code = hdr.pqOETF(nits);
+    expect(code).toBeGreaterThan(0);
+    expect(code).toBeLessThanOrEqual(1);
+    expect(hdr.pqEOTF(code)).toBeCloseTo(nits, 0);
+  });
+});

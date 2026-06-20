@@ -154,7 +154,10 @@ export class HDREngine {
     const c2 = 2413 / 4096 * 32;
     const c3 = 2392 / 4096 * 32;
 
-    const Vp = Math.pow(value, 1 / m2);
+    // PQ code values are in [0, 1] per SMPTE ST 2084. Clamp negative inputs
+    // (e.g. from floating-point overshoot) before the fractional-exponent pow
+    // so we never produce NaN which would propagate silently through all channels.
+    const Vp = Math.pow(Math.max(0, value), 1 / m2);
     const n = Math.max(Vp - c1, 0);
     const L = Math.pow(n / (c2 - c3 * Vp), 1 / m1);
     
@@ -162,7 +165,9 @@ export class HDREngine {
   }
 
   pqOETF(luminance: number): number {
-    const L = luminance / 10000;
+    // Luminance is in [0, 10000] nits per ITU-R BT.2100. Negative inputs
+    // (floating-point overshoot from matrix transforms) would produce NaN.
+    const L = Math.max(0, luminance) / 10000;
     const m1 = 2610 / 16384;
     const m2 = 2523 / 4096 * 128;
     const c1 = 3424 / 4096;
@@ -179,6 +184,9 @@ export class HDREngine {
     const b = 0.28466892;
     const c = 0.55991073;
 
+    // Scene linear values are non-negative per ARIB STD-B67. Negative inputs
+    // (floating-point overshoot) would produce NaN via Math.sqrt(negative).
+    if (value <= 0) return 0;
     if (value <= 1 / 12) {
       return Math.sqrt(3 * value);
     } else {

@@ -389,10 +389,13 @@ export class ExportEngine {
           }
 
           const frame = await renderFrame(i);
-          const isKeyFrame = i % keyFrameInterval === 0;
-
-          this.encoder!.encode(frame, { keyFrame: isKeyFrame });
-          frame.close();
+          try {
+            this.encoder!.encode(frame, { keyFrame: i % keyFrameInterval === 0 });
+          } finally {
+            // Ensure VideoFrame GPU resources are always released, even when
+            // encode() throws (e.g. encoder transitioned to 'closed' on error).
+            frame.close();
+          }
 
           job.currentFrame = i + 1;
           onProgress((i + 1) / job.totalFrames);
@@ -481,8 +484,11 @@ export class ExportEngine {
           data
         });
 
-        this.audioEncoder.encode(audioData);
-        audioData.close();
+        try {
+          this.audioEncoder.encode(audioData);
+        } finally {
+          audioData.close();
+        }
       }
 
       this.audioEncoder.flush().then(() => resolve(chunks)).catch(reject);

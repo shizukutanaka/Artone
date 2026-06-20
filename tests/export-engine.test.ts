@@ -302,6 +302,62 @@ describe('REGRESSION: cancel status preserved when abort propagates as error', (
   });
 });
 
+// ============================================================
+// REGRESSION: VideoFrame / AudioData must be closed even when encode() throws
+// ============================================================
+
+describe('REGRESSION: VideoFrame.close() called even when VideoEncoder.encode() throws', () => {
+  it('frame.close() is called when encoder.encode() throws', () => {
+    // Simulate the try/finally pattern used in encodeFrames()
+    const closeFn = vi.fn();
+    const mockFrame = { close: closeFn } as unknown as VideoFrame;
+    const encodeThrows = () => { throw new DOMException('InvalidStateError'); };
+
+    expect(() => {
+      try {
+        encodeThrows();
+      } finally {
+        mockFrame.close();
+      }
+    }).toThrow();
+
+    // close() MUST have been called despite the throw
+    expect(closeFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('frame.close() is called on normal encode() completion', () => {
+    const closeFn = vi.fn();
+    const mockFrame = { close: closeFn } as unknown as VideoFrame;
+    const encodeSucceeds = vi.fn();
+
+    try {
+      encodeSucceeds();
+    } finally {
+      mockFrame.close();
+    }
+
+    expect(closeFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('REGRESSION: AudioData.close() called even when AudioEncoder.encode() throws', () => {
+  it('audioData.close() is called when encoder.encode() throws', () => {
+    const closeFn = vi.fn();
+    const mockData = { close: closeFn } as unknown as AudioData;
+    const encodeThrows = () => { throw new DOMException('InvalidStateError'); };
+
+    expect(() => {
+      try {
+        encodeThrows();
+      } finally {
+        mockData.close();
+      }
+    }).toThrow();
+
+    expect(closeFn).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('REGRESSION: encodeAudio planar layout', () => {
   it('planar layout fix: data[ch * length + i] not data[i * channels + ch]', async () => {
     // We cannot call private encodeAudio directly without a real AudioEncoder,

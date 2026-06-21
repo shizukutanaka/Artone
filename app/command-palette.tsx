@@ -16,6 +16,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ds, color, space, radius, motion, shadow, z, type FeatureTier } from './design-system';
 import { t } from '../i18n/i18n-manager';
+import { trapTabKey, captureFocus } from './focus-trap';
 
 // === 型定義 ===
 
@@ -117,19 +118,21 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const paletteRef = useRef<HTMLDivElement>(null);
 
   const results = useMemo(
     () => searchItems(items, query, currentTier),
     [items, query, currentTier]
   );
 
-  // フォーカス
+  // フォーカス: 開いたら入力にフォーカスし、閉じたら元の要素へ戻す (WCAG AAA)
   useEffect(() => {
-    if (isOpen) {
-      setQuery('');
-      setSelectedIndex(0);
-      requestAnimationFrame(() => inputRef.current?.focus());
-    }
+    if (!isOpen) return;
+    setQuery('');
+    setSelectedIndex(0);
+    const restoreFocus = captureFocus();
+    requestAnimationFrame(() => inputRef.current?.focus());
+    return restoreFocus;
   }, [isOpen]);
 
   // 選択追従スクロール
@@ -154,6 +157,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         onClose();
       } else if (e.key === 'Escape') {
         onClose();
+      } else if (e.key === 'Tab' && paletteRef.current) {
+        // Trap focus inside the modal so Tab cannot reach background UI (WCAG AAA).
+        trapTabKey(paletteRef.current, e.nativeEvent, document.activeElement);
       }
     },
     [results, selectedIndex, onClose]
@@ -179,6 +185,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
       {/* Palette */}
       <div
+        ref={paletteRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('palette.placeholder')}
         style={{
           position: 'fixed',
           top: '15%',
@@ -208,6 +218,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           <input
             ref={inputRef}
             type="text"
+            role="combobox"
+            aria-expanded={results.length > 0}
+            aria-autocomplete="list"
+            aria-label={t('palette.placeholder')}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);

@@ -19,6 +19,7 @@
 - entry.tsx
 - error-boundary.tsx
 - first-run.tsx
+- focus-trap.ts
 - logger.ts
 - main.ts
 - shell.tsx

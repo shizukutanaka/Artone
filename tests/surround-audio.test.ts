@@ -148,6 +148,57 @@ describe('SurroundAudioEngine — channel control', () => {
   it('setChannelGain ignores unknown labels', () => {
     expect(() => engine.setChannelGain('XYZ' as ChannelLabel, 1)).not.toThrow();
   });
+
+  // ── Click/pop guard (Zenn: rerrah/articles/5b649722ffc3c2) ──
+  //
+  // Direct `.gain.value = …` on mute/solo creates an instantaneous step in
+  // the sample stream, audible as a click. The engine must schedule the
+  // change via cancelScheduledValues + setValueAtTime + linearRampToValueAtTime
+  // so the transition spans a short ramp (~10ms).
+
+  /** Grab the internal GainNode for a channel via the engine's private map. */
+  function nodeFor(eng: SurroundAudioEngine, label: ChannelLabel) {
+    const map = (eng as unknown as { channelNodes: Map<string, GainNode> }).channelNodes;
+    return map.get(label)!;
+  }
+
+  it('REGRESSION: setChannelMute schedules a ramp (no direct gain.value step)', () => {
+    const node = nodeFor(engine, 'L');
+    engine.setChannelMute('L', true);
+    // The click-guard helper always issues all three calls; before the fix the
+    // implementation set `.gain.value` directly and never touched the schedule.
+    expect(node.gain.cancelScheduledValues).toHaveBeenCalled();
+    expect(node.gain.setValueAtTime).toHaveBeenCalled();
+    expect(node.gain.linearRampToValueAtTime).toHaveBeenCalled();
+    // Final scheduled target reflects the mute (gain → 0).
+    const ramp = (node.gain.linearRampToValueAtTime as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(ramp[0]).toBe(0);
+  });
+
+  it('soloChannel ramps every other channel to 0 (smooth, not stepped)', () => {
+    const nodeR = nodeFor(engine, 'R');
+    engine.soloChannel('L');
+    expect(nodeR.gain.linearRampToValueAtTime).toHaveBeenCalled();
+    const ramp = (nodeR.gain.linearRampToValueAtTime as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(ramp[0]).toBe(0); // non-solo channels duck to silence
+  });
+
+  it('setChannelGain schedules a ramp to the new gain value', () => {
+    const node = nodeFor(engine, 'C');
+    engine.setChannelGain('C', 0.7);
+    const ramp = (node.gain.linearRampToValueAtTime as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(ramp[0]).toBeCloseTo(0.7, 5);
+  });
+
+  it('unsoloAll ramps each channel back to its prior gain', () => {
+    engine.setChannelGain('L', 0.9);
+    engine.soloChannel('R');     // L ducked to 0
+    const nodeL = nodeFor(engine, 'L');
+    (nodeL.gain.linearRampToValueAtTime as ReturnType<typeof vi.fn>).mockClear();
+    engine.unsoloAll();
+    const ramp = (nodeL.gain.linearRampToValueAtTime as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(ramp[0]).toBeCloseTo(0.9, 5); // restored to stored channel gain
+  });
 });
 
 // ============================================================

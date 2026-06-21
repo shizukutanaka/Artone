@@ -154,6 +154,26 @@ export class SurroundAudioEngine {
   private lfeFilter: BiquadFilterNode;
   private monitorFormat: SurroundFormat = 'stereo';
   private listeners: Set<() => void> = new Set();
+  /**
+   * Click/pop guard ramp length (seconds). Direct `.gain.value =` on mute/solo
+   * causes an audible step in the sample stream; a short linear ramp (≈10ms)
+   * is the standard fix without introducing perceptible latency.
+   * Zenn: https://zenn.dev/rerrah/articles/5b649722ffc3c2
+   */
+  private static readonly CLICK_GUARD_SEC = 0.01;
+
+  /**
+   * Schedule a smooth gain change to avoid click/pop. Cancels any in-flight
+   * automation, anchors the current value at "now", then linearly ramps to the
+   * target by `now + CLICK_GUARD_SEC`. Cheap and idempotent — safe to call on
+   * every mute/solo toggle.
+   */
+  private smoothGain(gainParam: AudioParam, target: number): void {
+    const t = this.audioContext.currentTime;
+    gainParam.cancelScheduledValues(t);
+    gainParam.setValueAtTime(gainParam.value, t);
+    gainParam.linearRampToValueAtTime(target, t + SurroundAudioEngine.CLICK_GUARD_SEC);
+  }
 
   constructor(audioContext: AudioContext) {
     this.audioContext = audioContext;
@@ -222,10 +242,10 @@ export class SurroundAudioEngine {
   setChannelGain(label: ChannelLabel, gain: number): void {
     const channel = this.channels.get(label);
     const node = this.channelNodes.get(label);
-    
+
     if (channel && node) {
       channel.gain = Math.max(0, Math.min(2, gain));
-      node.gain.value = channel.muted ? 0 : channel.gain;
+      this.smoothGain(node.gain, channel.muted ? 0 : channel.gain);
       this.notify();
     }
   }
@@ -233,10 +253,10 @@ export class SurroundAudioEngine {
   setChannelMute(label: ChannelLabel, muted: boolean): void {
     const channel = this.channels.get(label);
     const node = this.channelNodes.get(label);
-    
+
     if (channel && node) {
       channel.muted = muted;
-      node.gain.value = muted ? 0 : channel.gain;
+      this.smoothGain(node.gain, muted ? 0 : channel.gain);
       this.notify();
     }
   }
@@ -246,7 +266,7 @@ export class SurroundAudioEngine {
       const node = this.channelNodes.get(l);
       if (node) {
         const isSolo = l === label;
-        node.gain.value = isSolo ? channel.gain : 0;
+        this.smoothGain(node.gain, isSolo ? channel.gain : 0);
       }
     }
     this.notify();
@@ -256,7 +276,7 @@ export class SurroundAudioEngine {
     for (const [label, channel] of this.channels) {
       const node = this.channelNodes.get(label);
       if (node) {
-        node.gain.value = channel.muted ? 0 : channel.gain;
+        this.smoothGain(node.gain, channel.muted ? 0 : channel.gain);
       }
     }
     this.notify();

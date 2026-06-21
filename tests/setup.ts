@@ -253,7 +253,14 @@ if (typeof globalThis.VideoFrame === 'undefined') {
 // AudioEngine / SurroundAudioEngine が使う AudioNode ファクトリを網羅。
 // 返却ノードは connect/disconnect と必要な AudioParam (gain/pan/frequency 等) を持つ。
 function makeAudioParam(value = 0) {
-  return { value, setTargetAtTime: vi.fn(), setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() };
+  return {
+    value,
+    setTargetAtTime: vi.fn(),
+    setValueAtTime: vi.fn(),
+    linearRampToValueAtTime: vi.fn(),
+    exponentialRampToValueAtTime: vi.fn(),
+    cancelScheduledValues: vi.fn(),
+  };
 }
 function makeAudioNode(extra: Record<string, unknown> = {}) {
   return { connect: vi.fn(), disconnect: vi.fn(), ...extra };

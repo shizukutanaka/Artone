@@ -145,6 +145,46 @@ describe('i18n — ICU plural interpolation (REGRESSION)', () => {
   });
 });
 
+// ─── Intl formatter caching (perf) ───────────────────────────────────────────
+
+describe('i18n — Intl formatter caching', () => {
+  function mgrWith(map: Record<string, unknown>): I18nManager {
+    const m = makeManager();
+    (m as unknown as { translations: Map<string, unknown> }).translations.set('en', map);
+    (m as unknown as { currentLocale: string }).currentLocale = 'en';
+    return m;
+  }
+
+  it('number interpolation still formats correctly with the cached formatter', () => {
+    const m = mgrWith({ msg: 'Total: {n}' });
+    // en-US groups thousands with commas.
+    expect(m.t('msg', { n: 1234567 })).toBe(`Total: ${(1234567).toLocaleString('en')}`);
+  });
+
+  it('reuses one NumberFormat instance per locale across many t() calls', () => {
+    const m = mgrWith({ msg: '{n}' });
+    const cache = (m as unknown as { numberFormatters: Map<string, Intl.NumberFormat> }).numberFormatters;
+    for (let i = 0; i < 50; i++) m.t('msg', { n: i });
+    expect(cache.size).toBe(1); // single 'en' formatter, not 50
+    expect(cache.has('en')).toBe(true);
+  });
+
+  it('reuses one PluralRules instance per locale across many t() calls', () => {
+    const m = mgrWith({ msg: '{count, plural, one {# item} other {# items}}' });
+    const cache = (m as unknown as { pluralRulesCache: Map<string, Intl.PluralRules> }).pluralRulesCache;
+    for (let i = 0; i < 50; i++) m.t('msg', { count: i });
+    expect(cache.size).toBe(1);
+  });
+
+  it('caches a DateTimeFormat per locale for Date params', () => {
+    const m = mgrWith({ msg: 'At {when}' });
+    const cache = (m as unknown as { dateTimeFormatters: Map<string, Intl.DateTimeFormat> }).dateTimeFormatters;
+    m.t('msg', { when: new Date(0) });
+    m.t('msg', { when: new Date(1_000_000) });
+    expect(cache.size).toBe(1);
+  });
+});
+
 describe('locales — TIER1_LOCALES', () => {
   it('contains at least 10 locales', () => {
     expect(TIER1_LOCALES.length).toBeGreaterThanOrEqual(10);

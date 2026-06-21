@@ -79,6 +79,33 @@ export class I18nManager {
   private translations = new Map<LocaleCode, TranslationMap>();
   private loadingPromises = new Map<LocaleCode, Promise<void>>();
   private listeners = new Set<(locale: LocaleCode) => void>();
+  // Intl constructors resolve locale data and are among the most expensive
+  // platform calls. t() runs on every render/list-item, so cache one formatter
+  // per locale instead of constructing a fresh one on every interpolation.
+  private numberFormatters = new Map<string, Intl.NumberFormat>();
+  private dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+  private pluralRulesCache = new Map<string, Intl.PluralRules>();
+
+  /** Cached default Intl.NumberFormat for a locale. */
+  private getNumberFormatter(locale: LocaleCode): Intl.NumberFormat {
+    let f = this.numberFormatters.get(locale);
+    if (!f) { f = new Intl.NumberFormat(locale); this.numberFormatters.set(locale, f); }
+    return f;
+  }
+
+  /** Cached default Intl.DateTimeFormat for a locale. */
+  private getDateTimeFormatter(locale: LocaleCode): Intl.DateTimeFormat {
+    let f = this.dateTimeFormatters.get(locale);
+    if (!f) { f = new Intl.DateTimeFormat(locale); this.dateTimeFormatters.set(locale, f); }
+    return f;
+  }
+
+  /** Cached Intl.PluralRules for a locale. */
+  private getPluralRules(locale: LocaleCode): Intl.PluralRules {
+    let p = this.pluralRulesCache.get(locale);
+    if (!p) { p = new Intl.PluralRules(locale); this.pluralRulesCache.set(locale, p); }
+    return p;
+  }
 
   constructor(config: I18nConfig) {
     this.config = config;
@@ -247,10 +274,10 @@ export class I18nManager {
       const value = params[key];
       if (value === undefined) return `{${key}}`;
       if (value instanceof Date) {
-        return new Intl.DateTimeFormat(locale).format(value);
+        return this.getDateTimeFormatter(locale).format(value);
       }
       if (typeof value === 'number') {
-        return new Intl.NumberFormat(locale).format(value);
+        return this.getNumberFormatter(locale).format(value);
       }
       return String(value);
     });
@@ -307,8 +334,7 @@ export class I18nManager {
    * 複数形ルール選択 (簡易ICU MessageFormat)。
    */
   private selectPlural(count: number, rules: string, locale: LocaleCode): string {
-    const pluralRules = new Intl.PluralRules(locale);
-    const category = pluralRules.select(count);
+    const category = this.getPluralRules(locale).select(count);
     const ruleMap = this.parsePluralRules(rules);
     const chosen = ruleMap.get(category) ?? ruleMap.get('other') ?? '';
     // ICU '#' is the count placeholder; may appear multiple times.

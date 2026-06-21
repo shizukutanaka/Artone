@@ -102,12 +102,26 @@ function makeGLMock() {
   return gl;
 }
 
+/** Canvas mock with a working event-target so context-loss handling is testable. */
 function makeCanvas(gl: ReturnType<typeof makeGLMock> | null = makeGLMock()) {
+  const listeners = new Map<string, Set<EventListener>>();
   return {
     width: 1920,
     height: 1080,
     getContext: vi.fn(() => gl),
-  } as unknown as HTMLCanvasElement;
+    addEventListener: vi.fn((type: string, cb: EventListener) => {
+      (listeners.get(type) ?? listeners.set(type, new Set()).get(type)!).add(cb);
+    }),
+    removeEventListener: vi.fn((type: string, cb: EventListener) => {
+      listeners.get(type)?.delete(cb);
+    }),
+    /** Test helper: dispatch a synthetic event with a working preventDefault(). */
+    __emit(type: string): { defaultPrevented: boolean } {
+      const ev = { type, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+      for (const cb of listeners.get(type) ?? []) cb(ev as unknown as Event);
+      return ev;
+    },
+  } as unknown as HTMLCanvasElement & { __emit(type: string): { defaultPrevented: boolean } };
 }
 
 import type { RenderLayer } from '../render/webgpu-engine';
@@ -400,5 +414,84 @@ describe('WebGLFallbackRenderer — getStats()', () => {
     expect(renderer.getStats().textureCount).toBe(2);
     renderer.releaseTexture('t1');
     expect(renderer.getStats().textureCount).toBe(1);
+  });
+});
+
+// ============================================================
+// Context loss / restore (Qiita: WebGL コンテキストロスト復元)
+// ============================================================
+
+describe('WebGLFallbackRenderer — context loss/restore', () => {
+  type EmittingCanvas = HTMLCanvasElement & { __emit(type: string): { defaultPrevented: boolean } };
+
+  it('webglcontextlost handler calls preventDefault (required for restore to fire)', () => {
+    const renderer = new WebGLFallbackRenderer();
+    const canvas = makeCanvas() as EmittingCanvas;
+    renderer.initialize(canvas);
+    const ev = canvas.__emit('webglcontextlost');
+    expect(ev.defaultPrevented).toBe(true);
+    expect(renderer.isContextLost()).toBe(true);
+  });
+
+  it('renderFrame is a no-op while the context is lost', () => {
+    const gl = makeGLMock();
+    const canvas = makeCanvas(gl) as EmittingCanvas;
+    const renderer = new WebGLFallbackRenderer();
+    renderer.initialize(canvas);
+    canvas.__emit('webglcontextlost');
+    (gl.clear as ReturnType<typeof vi.fn>).mockClear();
+    renderer.renderFrame([makeLayer()]);
+    expect(gl.clear).not.toHaveBeenCalled();
+  });
+
+  it('uploadTexture is a no-op while the context is lost', () => {
+    const gl = makeGLMock();
+    const canvas = makeCanvas(gl) as EmittingCanvas;
+    const renderer = new WebGLFallbackRenderer();
+    renderer.initialize(canvas);
+    canvas.__emit('webglcontextlost');
+    expect(renderer.getStats().textureCount).toBe(0);
+    renderer.uploadTexture('t1', {} as HTMLCanvasElement);
+    expect(renderer.getStats().textureCount).toBe(0); // skipped, no texture created
+  });
+
+  it('webglcontextrestored reinitializes and clears the lost flag', () => {
+    const canvas = makeCanvas() as EmittingCanvas;
+    const renderer = new WebGLFallbackRenderer();
+    renderer.initialize(canvas);
+    canvas.__emit('webglcontextlost');
+    expect(renderer.isContextLost()).toBe(true);
+    canvas.__emit('webglcontextrestored');
+    expect(renderer.isContextLost()).toBe(false);
+  });
+
+  it('onContextChange notifies subscribers of lost then restored', () => {
+    const canvas = makeCanvas() as EmittingCanvas;
+    const renderer = new WebGLFallbackRenderer();
+    renderer.initialize(canvas);
+    const states: boolean[] = [];
+    renderer.onContextChange((lost) => states.push(lost));
+    canvas.__emit('webglcontextlost');
+    canvas.__emit('webglcontextrestored');
+    expect(states).toEqual([true, false]);
+  });
+
+  it('OffscreenCanvas-style unprefixed contextlost event is also handled', () => {
+    const canvas = makeCanvas() as EmittingCanvas;
+    const renderer = new WebGLFallbackRenderer();
+    renderer.initialize(canvas);
+    canvas.__emit('contextlost');
+    expect(renderer.isContextLost()).toBe(true);
+  });
+
+  it('destroy removes context listeners (no fire after teardown)', () => {
+    const canvas = makeCanvas() as EmittingCanvas;
+    const renderer = new WebGLFallbackRenderer();
+    renderer.initialize(canvas);
+    renderer.destroy();
+    const states: boolean[] = [];
+    renderer.onContextChange((lost) => states.push(lost));
+    canvas.__emit('webglcontextlost'); // listener was removed → no effect
+    expect(states).toEqual([]);
   });
 });

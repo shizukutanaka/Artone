@@ -58,6 +58,51 @@ export class WebGLFallbackRenderer {
   private uniforms: Record<string, WebGLUniformLocation | null> = {};
   private frameCount = 0;
   private lastFrameTime = 0;
+  // GPU context loss (driver crash, GPU reset, tab backgrounding on mobile) is a
+  // normal event that MUST be handled or the renderer silently dies. Critically,
+  // preventDefault() on the lost event is required or the browser never fires the
+  // restored event. (Qiita: WebGL コンテキストロスト復元)
+  private contextLost = false;
+  private readonly contextListeners = new Set<(lost: boolean) => void>();
+  private readonly _onContextLost = (e: Event): void => {
+    // Without preventDefault the 'restored' event is never dispatched.
+    e.preventDefault();
+    this.contextLost = true;
+    // All GL objects are now invalid; drop references without calling gl.delete*
+    // (the underlying objects are already gone). Textures are re-uploaded by the
+    // frame source on the next frame after restore.
+    this.program = null;
+    this.positionBuffer = null;
+    this.texCoordBuffer = null;
+    this.textures.clear();
+    log.warn('WebGL context lost — rendering paused until restore');
+    this.notifyContext(true);
+  };
+  private readonly _onContextRestored = (): void => {
+    if (!this.canvas) return;
+    log.info('WebGL context restored — reinitializing GPU resources');
+    if (this.setupGLResources()) {
+      this.contextLost = false;
+      this.notifyContext(false);
+    }
+  };
+
+  /** Subscribe to context-lost/restored transitions (UI can show a banner). */
+  onContextChange(listener: (lost: boolean) => void): () => void {
+    this.contextListeners.add(listener);
+    return () => this.contextListeners.delete(listener);
+  }
+
+  /** Whether the GL context is currently lost (renderFrame is a no-op while true). */
+  isContextLost(): boolean {
+    return this.contextLost;
+  }
+
+  private notifyContext(lost: boolean): void {
+    for (const l of this.contextListeners) {
+      try { l(lost); } catch (e) { log.error('context listener threw', e); }
+    }
+  }
 
   /** WebGL 2.0 コンテキストを初期化。成功時 true。 */
   initialize(canvas: HTMLCanvasElement | OffscreenCanvas): boolean {
@@ -76,6 +121,31 @@ export class WebGLFallbackRenderer {
     this.gl = gl;
     this.canvas = canvas;
 
+    // Listen for GPU context loss/restore. HTMLCanvasElement uses the
+    // 'webgl'-prefixed names; OffscreenCanvas uses the unprefixed ones. Register
+    // both — a listener for an event that never fires on a given canvas type is
+    // harmless.
+    const target = canvas as unknown as EventTarget;
+    target.addEventListener('webglcontextlost', this._onContextLost as EventListener);
+    target.addEventListener('webglcontextrestored', this._onContextRestored as EventListener);
+    target.addEventListener('contextlost', this._onContextLost as EventListener);
+    target.addEventListener('contextrestored', this._onContextRestored as EventListener);
+
+    if (!this.setupGLResources()) return false;
+
+    log.info('WebGL 2.0 fallback renderer initialized');
+    return true;
+  }
+
+  /**
+   * Create the shader program, uniforms, geometry and blend state on the current
+   * GL context. Extracted from initialize() so it can be re-run verbatim on
+   * context restore. Returns false if program creation fails.
+   */
+  private setupGLResources(): boolean {
+    const gl = this.gl;
+    if (!gl) return false;
+
     const program = this.createProgram(VERTEX_SHADER, FRAGMENT_SHADER);
     if (!program) return false;
     this.program = program;
@@ -89,8 +159,6 @@ export class WebGLFallbackRenderer {
     this.setupGeometry();
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-    log.info('WebGL 2.0 fallback renderer initialized');
     return true;
   }
 
@@ -161,7 +229,9 @@ export class WebGLFallbackRenderer {
    * GPU-to-CPU コピーを避けるため texImage2D に直接ソースを渡す。
    */
   uploadTexture(id: string, source: VideoFrame | ImageBitmap | HTMLCanvasElement): void {
-    const gl = this.gl!;
+    // Texture uploads against a lost context are invalid; skip until restored.
+    if (this.contextLost || !this.gl) return;
+    const gl = this.gl;
     let texture = this.textures.get(id);
     if (!texture) {
       const created = gl.createTexture();
@@ -195,7 +265,8 @@ export class WebGLFallbackRenderer {
   renderFrame(layers: RenderLayer[]): void {
     const gl = this.gl;
     const program = this.program;
-    if (!gl || !program) return;
+    // Skip while the context is lost — GL calls would be no-ops or warnings.
+    if (this.contextLost || !gl || !program) return;
 
     const start = performance.now();
 
@@ -265,7 +336,18 @@ export class WebGLFallbackRenderer {
       if (this.positionBuffer) gl.deleteBuffer(this.positionBuffer);
       if (this.texCoordBuffer) gl.deleteBuffer(this.texCoordBuffer);
     }
+    // Remove context-loss listeners so a disposed renderer is not kept alive by
+    // the canvas, and stale handlers don't fire after teardown.
+    const target = this.canvas as unknown as EventTarget | null;
+    if (target) {
+      target.removeEventListener('webglcontextlost', this._onContextLost as EventListener);
+      target.removeEventListener('webglcontextrestored', this._onContextRestored as EventListener);
+      target.removeEventListener('contextlost', this._onContextLost as EventListener);
+      target.removeEventListener('contextrestored', this._onContextRestored as EventListener);
+    }
+    this.contextListeners.clear();
     this.gl = null;
     this.program = null;
+    this.canvas = null;
   }
 }

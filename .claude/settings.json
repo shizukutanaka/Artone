@@ -1,0 +1,58 @@
+{
+  "showThinkingSummaries": true,
+  "effortLevel": "max",
+  "hooks": {
+    "preWrite": [
+      {
+        "match": "**/recovery/**",
+        "action": "warn",
+        "message": "recovery/ はデータ損失リスクゾーン。CLAUDE.md 参照後に変更"
+      },
+      {
+        "match": "**/plugins/**",
+        "action": "warn",
+        "message": "plugins/ はセキュリティ境界。サンドボックス制約を確認"
+      },
+      {
+        "match": "**/audio/**",
+        "action": "warn",
+        "message": "audio/ はリアルタイム制約。GC を発生させない実装"
+      },
+      {
+        "match": "**/render/**",
+        "action": "warn",
+        "message": "render/ は GPU リソース管理。destroy() 漏れに注意"
+      }
+    ],
+    "postWrite": [
+      {
+        "match": "**/*.ts",
+        "action": "format",
+        "command": "prettier --write"
+      },
+      {
+        "match": "**/*.tsx",
+        "action": "format",
+        "command": "prettier --write"
+      }
+    ],
+    "preCommit": [
+      {
+        "action": "test",
+        "command": "npm test"
+      },
+      {
+        "action": "lint",
+        "command": "npm run lint"
+      }
+    ],
+    "blockedPaths": [
+      ".env",
+      ".env.*",
+      "*.key",
+      "*.pem",
+      "secrets/**"
+    ]
+  },
+  "skillsDir": ".claude/skills"
+}

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Artone v3 — オフライン</title>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --fg: #f5f5f5;
+      --accent: #00C4CC;
+      --muted: #888;
+      --border: #2a2a2a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 480px;
+      text-align: center;
+    }
+    .icon {
+      width: 96px;
+      height: 96px;
+      margin: 0 auto 24px;
+      border: 2px solid var(--accent);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 48px;
+      color: var(--accent);
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+    p {
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: rgba(255,80,80,0.1);
+      border: 1px solid rgba(255,80,80,0.3);
+      border-radius: 20px;
+      font-size: 14px;
+      color: #ff5050;
+      margin-bottom: 32px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background: #ff5050;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 12px 24px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg);
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    button:hover {
+      background: var(--border);
+    }
+    button.primary {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+    }
+    button.primary:hover {
+      opacity: 0.9;
+    }
+    .features {
+      margin-top: 40px;
+      padding-top: 32px;
+      border-top: 1px solid var(--border);
+      text-align: left;
+    }
+    .features h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+    .features ul {
+      list-style: none;
+    }
+    .features li {
+      padding: 8px 0;
+      color: var(--muted);
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .features li::before {
+      content: '✓';
+      color: var(--accent);
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">⌁</div>
+    <div class="status">
+      <span class="status-dot"></span>
+      <span>オフライン</span>
+    </div>
+    <h1>接続が切れた</h1>
+    <p>Artoneはオフラインでも動作する。保存済みプロジェクトの編集を続行可能。</p>
+    <div class="actions">
+      <button class="primary" onclick="location.reload()">再接続</button>
+      <button onclick="location.href='/'">プロジェクトを開く</button>
+    </div>
+    <div class="features">
+      <h2>オフラインで利用可能</h2>
+      <ul>
+        <li>保存済みプロジェクトの編集</li>
+        <li>ローカルメディアの読み込み</li>
+        <li>カラーグレーディング</li>
+        <li>オーディオミキシング</li>
+        <li>キャッシュ済みAIモデル</li>
+        <li>書き出し（H.264 / H.265 / VP9）</li>
+      </ul>
+    </div>
+  </div>
+  <script>
+    window.addEventListener('online', () => location.reload());
+  </script>
+</body>
+</html>

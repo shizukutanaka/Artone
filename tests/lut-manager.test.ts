@@ -1,0 +1,664 @@
+/**
+ * LUT Manager Tests
+ * # AI generated (reviewed)
+ */
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { LUTManager, type LUT } from '../color/lut-manager';
+
+// ─── helpers ───────────────────────────────────────────────────
+
+function makeLUT(overrides: Partial<LUT> = {}): LUT {
+  return {
+    id: 'lut-1',
+    name: 'Test LUT',
+    filename: 'test.cube',
+    format: 'cube',
+    size: 2,
+    // 2×2×2 identity-like LUT (B-slow, G-mid, R-fast, values are [R,G,B,…])
+    data: new Float32Array([
+      0, 0, 0,   1, 0, 0,   0, 1, 0,   1, 1, 0,
+      0, 0, 1,   1, 0, 1,   0, 1, 1,   1, 1, 1,
+    ]),
+    category: 'custom',
+    favorite: false,
+    metadata: {},
+    ...overrides,
+  };
+}
+
+function addLUT(lm: LUTManager, lut: LUT): void {
+  (lm as unknown as { luts: Map<string, LUT> }).luts.set(lut.id, lut);
+}
+
+/** jsdom's File lacks .text(); this wrapper injects it. */
+function makeFile(content: string, name: string): File {
+  const file = new File([content], name);
+  if (typeof (file as unknown as { text?: unknown }).text !== 'function') {
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(content) });
+  }
+  return file;
+}
+
+function mockThumbnail(lm: LUTManager): void {
+  vi.spyOn(
+    lm as unknown as { generateThumbnail(l: LUT): Promise<string> },
+    'generateThumbnail',
+  ).mockResolvedValue('data:image/jpeg;base64,test');
+}
+
+// ─── Category Management ───────────────────────────────────────
+
+describe('LUTManager — category management', () => {
+  let lm: LUTManager;
+
+  beforeEach(() => { lm = new LUTManager(); });
+
+  it('returns 6 default categories', () => {
+    const cats = lm.getCategories();
+    expect(cats).toHaveLength(6);
+    const ids = cats.map(c => c.id);
+    expect(ids).toContain('cinematic');
+    expect(ids).toContain('film');
+    expect(ids).toContain('bw');
+    expect(ids).toContain('creative');
+    expect(ids).toContain('correction');
+    expect(ids).toContain('custom');
+  });
+
+  it('createCategory adds a new category', () => {
+    const cat = lm.createCategory('My Colors', '#FF0000');
+    expect(cat.name).toBe('My Colors');
+    expect(cat.color).toBe('#FF0000');
+    expect(cat.id).toBeTruthy();
+    expect(lm.getCategories()).toHaveLength(7);
+  });
+
+  it('createCategory uses default color when omitted', () => {
+    const cat = lm.createCategory('Untitled');
+    expect(cat.color).toBe('#666666');
+  });
+
+  it('deleteCategory removes it and migrates LUTs to custom', () => {
+    const lut = makeLUT({ id: 'a', category: 'cinematic' });
+    addLUT(lm, lut);
+    lm.deleteCategory('cinematic');
+    expect(lm.getCategories().find(c => c.id === 'cinematic')).toBeUndefined();
+    expect(lm.getLUT('a')?.category).toBe('custom');
+  });
+
+  it('deleteCategory does not affect LUTs in other categories', () => {
+    addLUT(lm, makeLUT({ id: 'b', category: 'film' }));
+    lm.deleteCategory('cinematic');
+    expect(lm.getLUT('b')?.category).toBe('film');
+  });
+
+  it('deleteCategory on a non-existent category is a no-op', () => {
+    expect(() => lm.deleteCategory('ghost')).not.toThrow();
+    expect(lm.getCategories()).toHaveLength(6);
+  });
+
+  it('setCategory moves a LUT to a valid category', () => {
+    addLUT(lm, makeLUT({ id: 'c', category: 'custom' }));
+    lm.setCategory('c', 'cinematic');
+    expect(lm.getLUT('c')?.category).toBe('cinematic');
+  });
+
+  it('setCategory is a no-op for unknown category', () => {
+    addLUT(lm, makeLUT({ id: 'd', category: 'custom' }));
+    lm.setCategory('d', 'nonexistent');
+    expect(lm.getLUT('d')?.category).toBe('custom');
+  });
+
+  it('setCategory is a no-op for unknown LUT id', () => {
+    expect(() => lm.setCategory('ghost', 'cinematic')).not.toThrow();
+  });
+
+  it('createCategory notifies listeners', () => {
+    const spy = vi.fn();
+    lm.subscribe(spy);
+    lm.createCategory('X');
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('deleteCategory notifies listeners', () => {
+    const spy = vi.fn();
+    lm.subscribe(spy);
+    lm.deleteCategory('bw');
+    expect(spy).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── LUT CRUD ─────────────────────────────────────────────────
+
+describe('LUTManager — LUT CRUD', () => {
+  let lm: LUTManager;
+
+  beforeEach(() => { lm = new LUTManager(); });
+
+  it('getLUT returns undefined for unknown id', () => {
+    expect(lm.getLUT('nope')).toBeUndefined();
+  });
+
+  it('getAllLUTs returns empty array initially', () => {
+    expect(lm.getAllLUTs()).toEqual([]);
+  });
+
+  it('getLUTsByCategory returns empty array initially', () => {
+    expect(lm.getLUTsByCategory('cinematic')).toEqual([]);
+  });
+
+  it('getFavorites returns empty array initially', () => {
+    expect(lm.getFavorites()).toEqual([]);
+  });
+
+  it('getLUT returns the LUT after adding', () => {
+    const lut = makeLUT();
+    addLUT(lm, lut);
+    expect(lm.getLUT('lut-1')).toEqual(lut);
+  });
+
+  it('getAllLUTs returns all added LUTs', () => {
+    addLUT(lm, makeLUT({ id: 'a', name: 'A' }));
+    addLUT(lm, makeLUT({ id: 'b', name: 'B' }));
+    expect(lm.getAllLUTs()).toHaveLength(2);
+    expect(lm.getAllLUTs().map(l => l.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('getLUTsByCategory filters by category', () => {
+    addLUT(lm, makeLUT({ id: 'a', category: 'cinematic' }));
+    addLUT(lm, makeLUT({ id: 'b', category: 'film' }));
+    const cinematic = lm.getLUTsByCategory('cinematic');
+    expect(cinematic).toHaveLength(1);
+    expect(cinematic[0].id).toBe('a');
+    expect(lm.getLUTsByCategory('film')).toHaveLength(1);
+  });
+
+  it('getFavorites returns only favorited LUTs', () => {
+    addLUT(lm, makeLUT({ id: 'a', favorite: false }));
+    addLUT(lm, makeLUT({ id: 'b', favorite: true }));
+    const favs = lm.getFavorites();
+    expect(favs).toHaveLength(1);
+    expect(favs[0].id).toBe('b');
+  });
+
+  it('updateLUT merges partial updates', () => {
+    addLUT(lm, makeLUT({ id: 'x', name: 'Old' }));
+    lm.updateLUT('x', { name: 'New' });
+    expect(lm.getLUT('x')?.name).toBe('New');
+  });
+
+  it('updateLUT does not throw for unknown id', () => {
+    expect(() => lm.updateLUT('ghost', { name: 'X' })).not.toThrow();
+  });
+
+  it('toggleFavorite flips false → true', () => {
+    addLUT(lm, makeLUT({ id: 'x', favorite: false }));
+    lm.toggleFavorite('x');
+    expect(lm.getLUT('x')?.favorite).toBe(true);
+  });
+
+  it('toggleFavorite flips true → false', () => {
+    addLUT(lm, makeLUT({ id: 'x', favorite: true }));
+    lm.toggleFavorite('x');
+    expect(lm.getLUT('x')?.favorite).toBe(false);
+  });
+
+  it('toggleFavorite does not throw for unknown id', () => {
+    expect(() => lm.toggleFavorite('ghost')).not.toThrow();
+  });
+
+  it('deleteLUT removes the LUT', () => {
+    addLUT(lm, makeLUT());
+    lm.deleteLUT('lut-1');
+    expect(lm.getLUT('lut-1')).toBeUndefined();
+    expect(lm.getAllLUTs()).toHaveLength(0);
+  });
+
+  it('deleteLUT notifies listeners', () => {
+    addLUT(lm, makeLUT());
+    const spy = vi.fn();
+    lm.subscribe(spy);
+    lm.deleteLUT('lut-1');
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('updateLUT notifies listeners', () => {
+    addLUT(lm, makeLUT());
+    const spy = vi.fn();
+    lm.subscribe(spy);
+    lm.updateLUT('lut-1', { name: 'Updated' });
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('toggleFavorite notifies listeners', () => {
+    addLUT(lm, makeLUT());
+    const spy = vi.fn();
+    lm.subscribe(spy);
+    lm.toggleFavorite('lut-1');
+    expect(spy).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── Subscribe / Unsubscribe ───────────────────────────────────
+
+describe('LUTManager — subscribe / unsubscribe', () => {
+  it('subscribe returns an unsubscribe function that stops notifications', () => {
+    const lm = new LUTManager();
+    const spy = vi.fn();
+    const unsub = lm.subscribe(spy);
+    lm.createCategory('X');
+    expect(spy).toHaveBeenCalledOnce();
+    unsub();
+    lm.createCategory('Y');
+    expect(spy).toHaveBeenCalledOnce(); // still once
+  });
+
+  it('multiple listeners all receive notifications', () => {
+    const lm = new LUTManager();
+    const spy1 = vi.fn();
+    const spy2 = vi.fn();
+    lm.subscribe(spy1);
+    lm.subscribe(spy2);
+    addLUT(lm, makeLUT());
+    lm.deleteLUT('lut-1');
+    expect(spy1).toHaveBeenCalledOnce();
+    expect(spy2).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── Export ────────────────────────────────────────────────────
+
+describe('LUTManager — exportLUT', () => {
+  let lm: LUTManager;
+
+  beforeEach(() => {
+    lm = new LUTManager();
+    addLUT(lm, makeLUT({ id: 'eid', name: 'Export Test', size: 2 }));
+  });
+
+  it('returns empty string for unknown id (cube)', () => {
+    expect(lm.exportLUT('ghost')).toBe('');
+  });
+
+  it('returns empty string for unknown id (3dl)', () => {
+    expect(lm.exportLUT('ghost', '3dl')).toBe('');
+  });
+
+  it('defaults to cube format', () => {
+    expect(lm.exportLUT('eid')).toContain('LUT_3D_SIZE');
+  });
+
+  it('cube output contains TITLE and LUT_3D_SIZE', () => {
+    const out = lm.exportLUT('eid', 'cube');
+    expect(out).toContain('TITLE "Export Test"');
+    expect(out).toContain('LUT_3D_SIZE 2');
+  });
+
+  it('cube output has exactly 8 data lines for size=2', () => {
+    const out = lm.exportLUT('eid', 'cube');
+    const dataLines = out.split('\n').filter(l => /^[\d]/.test(l.trim()) && l.includes(' '));
+    expect(dataLines).toHaveLength(8);
+  });
+
+  it('cube data lines each have 3 float values', () => {
+    const out = lm.exportLUT('eid', 'cube');
+    const dataLines = out.split('\n').filter(l => /^[\d]/.test(l.trim()) && l.includes(' '));
+    for (const line of dataLines) {
+      const parts = line.trim().split(/\s+/);
+      expect(parts).toHaveLength(3);
+      expect(parts.every(p => !isNaN(Number(p)))).toBe(true);
+    }
+  });
+
+  it('3dl output starts with Mesh header for size=2', () => {
+    const out = lm.exportLUT('eid', '3dl');
+    expect(out.startsWith('Mesh 2 2 2')).toBe(true);
+  });
+
+  it('3dl output has 1 header + 8 data lines for size=2', () => {
+    const out = lm.exportLUT('eid', '3dl');
+    const lines = out.split('\n');
+    expect(lines).toHaveLength(9);
+  });
+
+  it('3dl data values are 12-bit integers in [0, 4095]', () => {
+    const out = lm.exportLUT('eid', '3dl');
+    const dataLines = out.split('\n').slice(1);
+    for (const line of dataLines) {
+      const parts = line.trim().split(/\s+/).map(Number);
+      expect(parts).toHaveLength(3);
+      for (const v of parts) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(4095);
+        expect(Number.isInteger(v)).toBe(true);
+      }
+    }
+  });
+});
+
+// ─── Import / parseCube ─────────────────────────────────────────
+
+const VALID_CUBE_2 = [
+  '# Test LUT',
+  'TITLE "My LUT"',
+  'LUT_3D_SIZE 2',
+  '0.0 0.0 0.0',
+  '1.0 0.0 0.0',
+  '0.0 1.0 0.0',
+  '1.0 1.0 0.0',
+  '0.0 0.0 1.0',
+  '1.0 0.0 1.0',
+  '0.0 1.0 1.0',
+  '1.0 1.0 1.0',
+].join('\n');
+
+const VALID_3DL_2 = [
+  'Mesh 2 2 2',
+  '0 0 0',
+  '4095 0 0',
+  '0 4095 0',
+  '4095 4095 0',
+  '0 0 4095',
+  '4095 0 4095',
+  '0 4095 4095',
+  '4095 4095 4095',
+].join('\n');
+
+describe('LUTManager — importLUT / parseCube', () => {
+  let lm: LUTManager;
+
+  beforeEach(() => {
+    lm = new LUTManager();
+    mockThumbnail(lm);
+  });
+
+  it('rejects unsupported file extensions', async () => {
+    expect(await lm.importLUT(makeFile('data', 'lut.mga'))).toBeNull();
+  });
+
+  it('rejects an unknown extension silently', async () => {
+    expect(await lm.importLUT(makeFile('data', 'lut.csp'))).toBeNull();
+  });
+
+  it('parses a valid .cube file', async () => {
+    const lut = await lm.importLUT(makeFile(VALID_CUBE_2, 'test.cube'));
+    expect(lut).not.toBeNull();
+    expect(lut!.name).toBe('My LUT');
+    expect(lut!.format).toBe('cube');
+    expect(lut!.size).toBe(2);
+    expect(lut!.data).toHaveLength(24); // 2³ × 3
+  });
+
+  it('stores the parsed cube LUT in the manager', async () => {
+    const lut = await lm.importLUT(makeFile(VALID_CUBE_2, 'test.cube'));
+    expect(lm.getLUT(lut!.id)).toBe(lut);
+  });
+
+  it('parses a valid .3dl file', async () => {
+    const lut = await lm.importLUT(makeFile(VALID_3DL_2, 'test.3dl'));
+    expect(lut).not.toBeNull();
+    expect(lut!.format).toBe('3dl');
+    expect(lut!.size).toBe(2);
+    expect(lut!.data).toHaveLength(24);
+  });
+
+  it('cube parse handles DOMAIN_MIN / DOMAIN_MAX metadata', async () => {
+    const withDomain = [
+      'LUT_3D_SIZE 2',
+      'DOMAIN_MIN 0.0 0.0 0.0',
+      'DOMAIN_MAX 1.0 1.0 1.0',
+      '0.0 0.0 0.0',
+      '1.0 0.0 0.0',
+      '0.0 1.0 0.0',
+      '1.0 1.0 0.0',
+      '0.0 0.0 1.0',
+      '1.0 0.0 1.0',
+      '0.0 1.0 1.0',
+      '1.0 1.0 1.0',
+    ].join('\n');
+    const lut = await lm.importLUT(makeFile(withDomain, 'domain.cube'));
+    expect(lut).not.toBeNull();
+    expect(lut!.metadata.domainMin).toEqual([0, 0, 0]);
+    expect(lut!.metadata.domainMax).toEqual([1, 1, 1]);
+  });
+
+  it('parseCube returns null when data section is empty', async () => {
+    const headerOnly = 'TITLE "Empty"\nLUT_3D_SIZE 2\n';
+    expect(await lm.importLUT(makeFile(headerOnly, 'empty.cube'))).toBeNull();
+  });
+
+  it('REGRESSION: parseCube with LUT_3D_SIZE but no number returns null', async () => {
+    // "LUT_3D_SIZE\n" → split(/\s+/)[1] = undefined → parseInt(undefined) = NaN
+    // Before fix: NaN !== 0 bypasses the guard → LUT with size:NaN returned
+    // After fix:  isNaN(size) short-circuits → null returned
+    const malformed = [
+      '# Malformed',
+      'LUT_3D_SIZE',       // <- no number
+      '0.0 0.0 0.0',
+      '1.0 0.0 0.0',
+    ].join('\n');
+    const result = await lm.importLUT(makeFile(malformed, 'bad.cube'));
+    expect(result).toBeNull();
+  });
+
+  it('importLUT notifies listeners on success', async () => {
+    const spy = vi.fn();
+    lm.subscribe(spy);
+    await lm.importLUT(makeFile(VALID_CUBE_2, 'notify.cube'));
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('importLUT does not notify listeners on parse failure', async () => {
+    const spy = vi.fn();
+    lm.subscribe(spy);
+    await lm.importLUT(makeFile('bad data', 'bad.cube'));
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: truncated .cube (fewer than size³ entries) is rejected', async () => {
+    // Declares size 2 (needs 8 RGB triples = 24 numbers) but provides only 3.
+    // Before fix: parsed with size=2 and short data → trilinearInterpolate reads
+    // past the array (getValue → 0) and silently renders black. Must reject.
+    const truncated = [
+      'LUT_3D_SIZE 2',
+      '0.0 0.0 0.0',
+      '1.0 0.0 0.0',
+      '0.0 1.0 0.0',
+    ].join('\n');
+    expect(await lm.importLUT(makeFile(truncated, 'truncated.cube'))).toBeNull();
+  });
+
+  it('REGRESSION: .cube with a non-numeric data row does not inject NaN', async () => {
+    // A corrupt/keyword row would map to [NaN,NaN,NaN] and be pushed as data.
+    // After the fix it is skipped; the remaining 7 triples are < 8 so the
+    // truncation guard rejects the file rather than importing NaN-laden data.
+    const withGarbage = [
+      'LUT_3D_SIZE 2',
+      '0.0 0.0 0.0', '1.0 0.0 0.0', '0.0 1.0 0.0', '1.0 1.0 0.0',
+      'foo bar baz',            // <- non-numeric
+      '1.0 0.0 1.0', '0.0 1.0 1.0', '1.0 1.0 1.0',
+    ].join('\n');
+    const result = await lm.importLUT(makeFile(withGarbage, 'garbage.cube'));
+    expect(result).toBeNull();
+  });
+
+  it('REGRESSION: a complete .cube with a trailing non-numeric line still parses (no NaN in data)', async () => {
+    // 8 valid triples + a stray comment-like row (no '#'); the row is skipped,
+    // count == 24 so it imports, and no NaN leaks into the LUT data.
+    const trailing = [
+      'LUT_3D_SIZE 2',
+      '0.0 0.0 0.0', '1.0 0.0 0.0', '0.0 1.0 0.0', '1.0 1.0 0.0',
+      '0.0 0.0 1.0', '1.0 0.0 1.0', '0.0 1.0 1.0', '1.0 1.0 1.0',
+      'LUT_1D_SIZE 16',         // unsupported keyword, must be ignored not pushed
+    ].join('\n');
+    const lut = await lm.importLUT(makeFile(trailing, 'trailing.cube'));
+    expect(lut).not.toBeNull();
+    expect(lut!.data).toHaveLength(24);
+    expect(Array.from(lut!.data).some(Number.isNaN)).toBe(false);
+  });
+
+  it('REGRESSION: truncated .3dl (fewer than size³ entries) is rejected', async () => {
+    const truncated3dl = [
+      'Mesh 2 2 2',
+      '0 0 0',
+      '4095 0 0',
+      '0 4095 0',
+    ].join('\n');
+    expect(await lm.importLUT(makeFile(truncated3dl, 'truncated.3dl'))).toBeNull();
+  });
+  it('REGRESSION: LUT is stored before generateThumbnail so applyLUT can find it', async () => {
+    // Before fix: luts.set() came AFTER generateThumbnail(), so applyLUT()
+    // returned early (lut not found) and thumbnails were always the raw gradient.
+    const lm2 = new LUTManager();
+    let wasStoredDuringThumb = false;
+    vi.spyOn(
+      lm2 as unknown as { generateThumbnail(l: LUT): Promise<string> },
+      'generateThumbnail',
+    ).mockImplementation(async (lut: LUT) => {
+      wasStoredDuringThumb = (lm2 as unknown as { luts: Map<string, LUT> }).luts.has(lut.id);
+      return 'data:image/jpeg;base64,thumb';
+    });
+    await lm2.importLUT(makeFile(VALID_CUBE_2, 'order.cube'));
+    expect(wasStoredDuringThumb).toBe(true);
+  });
+});
+
+// ─── Export → import round-trip ───────────────────────────────
+
+describe('LUTManager — cube export→import round-trip', () => {
+  let lm: LUTManager;
+
+  beforeEach(() => {
+    lm = new LUTManager();
+    mockThumbnail(lm);
+  });
+
+  it('preserves LUT data through cube export and re-import', async () => {
+    const original = makeLUT({ id: 'orig', name: 'RT Test', size: 2 });
+    addLUT(lm, original);
+
+    const cubeText = lm.exportLUT('orig', 'cube');
+    const imported = await lm.importLUT(makeFile(cubeText, 'rt.cube'));
+
+    expect(imported).not.toBeNull();
+    expect(imported!.size).toBe(2);
+    expect(imported!.data).toHaveLength(original.data.length);
+    for (let i = 0; i < original.data.length; i++) {
+      expect(imported!.data[i]).toBeCloseTo(original.data[i], 4);
+    }
+  });
+
+  it('preserves LUT data through 3dl export and re-import', async () => {
+    const original = makeLUT({ id: 'orig3dl', name: 'RT 3DL', size: 2 });
+    addLUT(lm, original);
+
+    const dlText = lm.exportLUT('orig3dl', '3dl');
+    const imported = await lm.importLUT(makeFile(dlText, 'rt.3dl'));
+
+    expect(imported).not.toBeNull();
+    expect(imported!.size).toBe(2);
+    expect(imported!.data).toHaveLength(original.data.length);
+    // 3dl uses 12-bit integers so precision is ~0.024; use generous tolerance
+    for (let i = 0; i < original.data.length; i++) {
+      expect(imported!.data[i]).toBeCloseTo(original.data[i], 1);
+    }
+  });
+});
+
+// ─── applyLUT (trilinearInterpolate) ─────────────────────────────────────────
+
+describe('LUTManager — applyLUT', () => {
+  let lm: LUTManager;
+
+  beforeEach(() => { lm = new LUTManager(); });
+
+  it('returns original imageData when LUT id is unknown', () => {
+    const img = new ImageData(new Uint8ClampedArray([128, 64, 32, 255]), 1, 1);
+    const result = lm.applyLUT(img, 'nonexistent', 1);
+    expect(result).toBe(img);
+    expect(result.data[0]).toBe(128);
+  });
+
+  it('identity LUT preserves pixel values', () => {
+    const lut = makeLUT({ id: 'identity' });
+    addLUT(lm, lut);
+    const data = new Uint8ClampedArray([255, 0, 0, 255]); // pure red
+    const img = new ImageData(data, 1, 1);
+    const out = lm.applyLUT(img, 'identity', 1);
+    // Identity LUT: red pixel stays red
+    expect(out.data[0]).toBeCloseTo(255, -1);
+    expect(out.data[1]).toBeCloseTo(0, -1);
+    expect(out.data[2]).toBeCloseTo(0, -1);
+    expect(out.data[3]).toBe(255); // alpha unchanged
+  });
+
+  it('applies trilinear interpolation for non-corner pixel values', () => {
+    const lut = makeLUT({ id: 'interp' });
+    addLUT(lm, lut);
+    // Mid-gray: should interpolate between LUT corners
+    const data = new Uint8ClampedArray([128, 128, 128, 255]);
+    const img = new ImageData(data, 1, 1);
+    const out = lm.applyLUT(img, 'interp', 1);
+    // With the identity-like 2x2x2 LUT, mid-gray → approximately 0.5, 0.5, 0.5
+    expect(out.data[0]).toBeCloseTo(128, -1);
+    expect(out.data[1]).toBeCloseTo(128, -1);
+    expect(out.data[2]).toBeCloseTo(128, -1);
+  });
+
+  it('respects intensity parameter (0 = no change, 1 = full LUT)', () => {
+    // Non-identity LUT: maps everything to blue (0, 0, 1 in all corners)
+    const allBlue = new Float32Array(8 * 3).fill(0);
+    for (let i = 2; i < allBlue.length; i += 3) allBlue[i] = 1; // blue channel = 1
+    const blueLUT = makeLUT({ id: 'blue', data: allBlue });
+    addLUT(lm, blueLUT);
+
+    // intensity = 0: pixel unchanged
+    const data0 = new Uint8ClampedArray([255, 0, 0, 255]);
+    const img0 = new ImageData(data0, 1, 1);
+    const out0 = lm.applyLUT(img0, 'blue', 0);
+    expect(out0.data[0]).toBeCloseTo(255, -1); // red unchanged
+
+    // intensity = 1: pixel fully LUT-mapped to blue
+    const data1 = new Uint8ClampedArray([255, 0, 0, 255]);
+    const img1 = new ImageData(data1, 1, 1);
+    const out1 = lm.applyLUT(img1, 'blue', 1);
+    expect(out1.data[0]).toBeCloseTo(0, -1);   // red → 0
+    expect(out1.data[2]).toBeCloseTo(255, -1); // blue → 255
+  });
+
+  it('processes multiple pixels', () => {
+    const lut = makeLUT({ id: 'multi' });
+    addLUT(lm, lut);
+    // 2 pixels: black and white
+    const data = new Uint8ClampedArray([0, 0, 0, 255, 255, 255, 255, 255]);
+    const img = new ImageData(data, 2, 1);
+    const out = lm.applyLUT(img, 'multi', 1);
+    expect(out.data.length).toBe(8);
+    // Black stays black in identity LUT
+    expect(out.data[0]).toBeCloseTo(0, -1);
+    // White stays white
+    expect(out.data[4]).toBeCloseTo(255, -1);
+  });
+});
+
+// ─── generateWGSLShader ───────────────────────────────────────────────────────
+
+describe('LUTManager — generateWGSLShader', () => {
+  let lm: LUTManager;
+
+  beforeEach(() => { lm = new LUTManager(); });
+
+  it('returns empty string for unknown LUT id', () => {
+    expect(lm.generateWGSLShader('nonexistent')).toBe('');
+  });
+
+  it('returns a WGSL compute shader string for a valid LUT', () => {
+    addLUT(lm, makeLUT({ id: 'shade-lut', name: 'Shader LUT', size: 2 }));
+    const shader = lm.generateWGSLShader('shade-lut');
+    expect(typeof shader).toBe('string');
+    expect(shader.length).toBeGreaterThan(0);
+    expect(shader).toContain('@compute');
+    expect(shader).toContain('textureSampleLevel');
+    expect(shader).toContain('mix(color.rgb');
+  });
+});

@@ -1,0 +1,68 @@
+{
+  "name": "Artone v3",
+  "short_name": "Artone",
+  "description": "ブラウザ完結型プロフェッショナル動画編集",
+  "version": "3.0.0",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#0a0a0a",
+  "background_color": "#0a0a0a",
+  "categories": ["productivity", "video", "utilities"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-wide.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "新規プロジェクト",
+      "url": "/?action=new",
+      "icons": [{ "src": "/icon-new-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "最近のプロジェクト",
+      "url": "/?action=recent",
+      "icons": [{ "src": "/icon-recent-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "/?import",
+      "accept": {
+        "video/*": [".mp4", ".webm", ".mov", ".mkv"],
+        "audio/*": [".mp3", ".wav", ".flac", ".ogg"]
+      }
+    }
+  ],
+  "share_target": {
+    "action": "/?share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        {
+          "name": "media",
+          "accept": ["video/*", "audio/*", "image/*"]
+        }
+      ]
+    }
+  }
+}

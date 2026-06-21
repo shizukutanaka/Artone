@@ -1,61 +1,79 @@
 # Dependencies
 node_modules/
+.pnp
+.pnp.js
+
+# Build
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+
+# Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Production builds
-/dist
-/build
-/.next/
-/out/
+# Testing
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+playwright/.cache/
 
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# IDE files
+# IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS generated files
+# OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Logs
-*.log
-logs/
+# Env
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
 
-# Runtime data
-pids/
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-coverage/
-*.lcov
-
-# nyc test coverage
-.nyc_output
-
-# Dependency directories
-jspm_packages/
-
-# Optional npm cache directory
-.npm
-
-# Optional eslint cache
+# Misc
 .eslintcache
+.parcel-cache/
+.turbo/
+.tsbuildinfo
+*.tsbuildinfo
+
+# Mobile
+ios/
+android/
+.capacitor/
+
+# Generated
+public/sw.js.map
+public/workbox-*.js
+public/workbox-*.js.map
+
+# Security
+security/.osv-cache.json
+sbom.json
+sbom.spdx
+SHA256SUMS
+
+# Bench reports (baseline.json は管理対象、report は無視)
+bench/report.json
+
+# A11y reports
+a11y-report.json
+
+# Temp install files
+~/.artone-tmp-*

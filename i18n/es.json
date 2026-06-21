@@ -1,0 +1,444 @@
+{
+  "app": {
+    "name": "Artone",
+    "tagline": "Editor de vídeo nativo del navegador"
+  },
+  "common": {
+    "ok": "Aceptar",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "delete": "Eliminar",
+    "rename": "Renombrar",
+    "close": "Cerrar",
+    "open": "Abrir",
+    "yes": "Sí",
+    "no": "No",
+    "loading": "Cargando",
+    "error": "Error",
+    "warning": "Advertencia",
+    "info": "Información",
+    "search": "Buscar",
+    "filter": "Filtrar",
+    "settings": "Ajustes",
+    "help": "Ayuda",
+    "about": "Acerca de",
+    "exit": "Salir",
+    "skip": "Saltar",
+    "retry": "Reintentar",
+    "back": "Atrás",
+    "comingSoon": "Próximamente"
+  },
+  "menu": {
+    "file": "Archivo",
+    "edit": "Editar",
+    "view": "Ver",
+    "clip": "Clip",
+    "effects": "Efectos",
+    "color": "Color",
+    "audio": "Audio",
+    "window": "Ventana",
+    "tools": "Herramientas"
+  },
+  "file": {
+    "new": "Nuevo proyecto",
+    "open": "Abrir proyecto",
+    "save": "Guardar",
+    "saveAs": "Guardar como",
+    "import": "Importar",
+    "export": "Exportar",
+    "recent": "Proyectos recientes",
+    "untitled": "Proyecto sin título"
+  },
+  "edit": {
+    "undo": "Deshacer",
+    "redo": "Rehacer",
+    "cut": "Cortar",
+    "copy": "Copiar",
+    "paste": "Pegar",
+    "selectAll": "Seleccionar todo"
+  },
+  "timeline": {
+    "title": "Línea de tiempo",
+    "play": "Reproducir",
+    "pause": "Pausa",
+    "stop": "Detener",
+    "rewind": "Rebobinar",
+    "fastForward": "Avance rápido",
+    "frameForward": "Siguiente fotograma",
+    "frameBack": "Fotograma anterior",
+    "clip": {
+      "split": "Dividir",
+      "trim": "Recortar",
+      "delete": "Eliminar",
+      "duplicate": "Duplicar",
+      "speed": "Velocidad",
+      "reverse": "Invertir",
+      "freeze": "Congelar fotograma",
+      "ripple": "Eliminar con ripple"
+    },
+    "track": {
+      "add": "Añadir pista",
+      "delete": "Eliminar pista",
+      "lock": "Bloquear",
+      "mute": "Silenciar",
+      "solo": "Solo"
+    },
+    "marker": {
+      "add": "Añadir marcador",
+      "delete": "Eliminar marcador",
+      "next": "Siguiente",
+      "prev": "Anterior"
+    },
+    "zoom": {
+      "in": "Acercar",
+      "out": "Alejar",
+      "fit": "Ajustar a ventana"
+    },
+    "dragHint": "Arrastra medios a la línea de tiempo"
+  },
+  "color": {
+    "title": "Etalonaje",
+    "primary": "Primario",
+    "secondary": "Secundario",
+    "wheels": "Ruedas de color",
+    "curves": "Curvas",
+    "lift": "Sombras",
+    "gamma": "Medios tonos",
+    "gain": "Luces",
+    "saturation": "Saturación",
+    "contrast": "Contraste",
+    "exposure": "Exposición",
+    "lut": "LUT",
+    "lutImport": "Importar LUT",
+    "scope": {
+      "waveform": "Forma de onda",
+      "vectorscope": "Vectorscopio",
+      "histogram": "Histograma",
+      "parade": "RGB Parade"
+    }
+  },
+  "audio": {
+    "title": "Audio",
+    "volume": "Volumen",
+    "pan": "Paneo",
+    "mute": "Silenciar",
+    "eq": "EQ",
+    "compressor": "Compresor",
+    "reverb": "Reverberación",
+    "limiter": "Limitador",
+    "fade": {
+      "in": "Fundido de entrada",
+      "out": "Fundido de salida"
+    },
+    "noise": {
+      "reduction": "Reducción de ruido"
+    }
+  },
+  "export": {
+    "title": "Exportar",
+    "preset": "Preajuste",
+    "format": "Formato",
+    "resolution": "Resolución",
+    "framerate": "Velocidad de fotogramas",
+    "bitrate": "Tasa de bits",
+    "codec": "Códec",
+    "audio": "Audio",
+    "destination": "Destino",
+    "start": "Iniciar exportación",
+    "progress": "Progreso: {percent}%",
+    "complete": "Exportación completa",
+    "presets": {
+      "youtube4k": "YouTube 4K",
+      "youtube1080p": "YouTube 1080p",
+      "instagram": "Instagram",
+      "tiktok": "TikTok",
+      "broadcast": "Broadcast",
+      "proRes": "ProRes",
+      "h265": "H.265 HEVC",
+      "av1": "AV1"
+    }
+  },
+  "ai": {
+    "title": "Funciones de IA",
+    "transcribe": "Transcribir",
+    "translate": "Traducir",
+    "denoise": "Quitar ruido",
+    "upscale": "Escalar",
+    "objectRemove": "Eliminar objeto",
+    "autoEdit": "Edición automática",
+    "captionGen": "Generar subtítulos",
+    "processing": "Procesando",
+    "downloadModel": "Descargar modelo"
+  },
+  "media": {
+    "title": "Explorador multimedia",
+    "import": "Importar",
+    "video": "Vídeo",
+    "audio": "Audio",
+    "image": "Imagen",
+    "title2": "Título",
+    "search": "Buscar medios",
+    "duration": "Duración",
+    "size": "Tamaño",
+    "createdAt": "Creado",
+    "dropTitle": "Soltar medios",
+    "acceptedTypes": "Vídeo, Audio, Imágenes",
+    "dropHint": "Soltar archivos aquí",
+    "all": "Todo",
+    "empty": "Suelta o importa medios",
+    "noMatch": "Sin resultados",
+    "status": {
+      "pending": "Pendiente",
+      "proxy": "Proxy",
+      "error": "Error"
+    }
+  },
+  "error": {
+    "network": {
+      "timeout": "Tiempo de espera agotado",
+      "offline": "Sin conexión",
+      "failed": "Error de red"
+    },
+    "file": {
+      "notFound": "Archivo no encontrado",
+      "tooLarge": "Archivo demasiado grande",
+      "unsupported": "Formato no soportado",
+      "corrupt": "Archivo dañado"
+    },
+    "gpu": {
+      "notSupported": "WebGPU no disponible",
+      "outOfMemory": "GPU sin memoria"
+    },
+    "codec": {
+      "notSupported": "Códec no soportado: {codec}"
+    },
+    "generic": "Error: {message}",
+    "init": {
+      "title": "Error de inicialización"
+    },
+    "details": "Detalles del error",
+    "restart": "Reiniciar",
+    "unexpected": {
+      "title": "Error inesperado",
+      "body": "Algo salió mal. Tu proyecto actual ha sido guardado automáticamente."
+    }
+  },
+  "recovery": {
+    "title": "Recuperación",
+    "available": "Sesión anterior recuperable",
+    "restore": "Restaurar",
+    "discard": "Descartar",
+    "autoSave": "Autoguardado",
+    "restorePrompt": "Trabajo no guardado detectado desde {time}. ¿Restaurar?"
+  },
+  "performance": {
+    "fps": "FPS: {value}",
+    "memory": "Memoria: {value}MB",
+    "gpuTime": "GPU: {value}ms",
+    "warning": "Degradación de rendimiento detectada",
+    "autoQuality": "Calidad automática"
+  },
+  "shortcut": {
+    "title": "Atajos de teclado",
+    "global": "Global",
+    "timeline": "Línea de tiempo",
+    "playback": "Reproducción",
+    "trimming": "Recorte",
+    "navigation": "Navegación",
+    "category": {
+      "playback": "Reproducción",
+      "edit": "Edición",
+      "timeline": "Línea de tiempo",
+      "tools": "Herramientas",
+      "file": "Archivo",
+      "view": "Ver",
+      "multicam": "Multi-cámara"
+    },
+    "action": {
+      "play": "Reproducir / Pausar",
+      "stop": "Detener",
+      "frameForward": "1 fotograma adelante",
+      "frameBack": "1 fotograma atrás",
+      "forward10": "10 fotogramas adelante",
+      "back10": "10 fotogramas atrás",
+      "jklJ": "Reproducción inversa",
+      "jklK": "Pausar",
+      "jklL": "Reproducción hacia adelante",
+      "goToStart": "Ir al inicio",
+      "goToEnd": "Ir al final",
+      "cut": "Cortar",
+      "copy": "Copiar",
+      "paste": "Pegar",
+      "delete": "Eliminar",
+      "rippleDelete": "Eliminar con ripple",
+      "undo": "Deshacer",
+      "redo": "Rehacer",
+      "selectAll": "Seleccionar todo",
+      "deselect": "Deseleccionar todo",
+      "split": "Dividir clip",
+      "duplicate": "Duplicar",
+      "setInPoint": "Establecer punto de entrada",
+      "setOutPoint": "Establecer punto de salida",
+      "clearInOut": "Limpiar entrada / salida",
+      "zoomIn": "Acercar",
+      "zoomOut": "Alejar",
+      "zoomFit": "Ajustar a ventana",
+      "addMarker": "Añadir marcador",
+      "nextMarker": "Marcador siguiente",
+      "prevMarker": "Marcador anterior",
+      "snapToggle": "Activar/desactivar ajuste",
+      "toolSelect": "Herramienta de selección",
+      "toolRazor": "Herramienta cuchilla",
+      "toolSlip": "Herramienta slip",
+      "toolSlide": "Herramienta slide",
+      "toolRoll": "Herramienta roll",
+      "toolRipple": "Herramienta ripple",
+      "newProject": "Nuevo proyecto",
+      "open": "Abrir",
+      "save": "Guardar",
+      "saveAs": "Guardar como",
+      "import": "Importar medios",
+      "export": "Exportar",
+      "fullscreen": "Vista previa en pantalla completa",
+      "toggleTimeline": "Mostrar/ocultar línea de tiempo",
+      "toggleMedia": "Mostrar/ocultar explorador multimedia",
+      "toggleInspector": "Mostrar/ocultar inspector",
+      "toggleEffects": "Mostrar/ocultar efectos",
+      "cam1": "Cámara 1",
+      "cam2": "Cámara 2",
+      "cam3": "Cámara 3",
+      "cam4": "Cámara 4",
+      "cam5": "Cámara 5",
+      "cam6": "Cámara 6",
+      "cam7": "Cámara 7",
+      "cam8": "Cámara 8",
+      "cam9": "Cámara 9"
+    }
+  },
+  "loading": {
+    "engine": "Inicializando motor..."
+  },
+  "firstRun": {
+    "levelHint": "Ajustaremos la interfaz según tu experiencia",
+    "levelBeginner": "Principiante",
+    "levelBeginnerDesc": "Diseño simple",
+    "levelIntermediate": "Intermedio",
+    "levelIntermediateDesc": "Equilibrado",
+    "levelPro": "Profesional",
+    "levelProDesc": "Todas las funciones",
+    "step2Title": "Iniciar proyecto",
+    "step2Subtitle": "Elige una plantilla o comienza en blanco",
+    "step3Title": "Agregar material",
+    "step3Subtitle": "Arrastra y suelta, o haz clic para seleccionar",
+    "filesSelected": "{count} archivo(s) seleccionado(s)",
+    "dropHint": "Suelta video, audio o imágenes aquí",
+    "startEditing": "Comenzar edición",
+    "startDemo": "Comenzar con material de demo",
+    "skipToDemo": "Saltar → Comenzar con demo",
+    "templateYoutubeDesc": "1080p 30fps — Gaming y Vlogs",
+    "templateShortDesc": "1080×1920 30fps — Vídeo vertical",
+    "templateFilmDesc": "4K 24fps — Cinematográfico",
+    "templateBlankDesc": "Sin preset — detección automática"
+  },
+  "scopes": {
+    "title": "Scopes"
+  },
+  "inspector": {
+    "title": "Inspector",
+    "selectHint": "Selecciona un elemento",
+    "section": {
+      "basic": "Básico",
+      "transform": "Transformar",
+      "opacity": "Opacidad",
+      "project": "Proyecto"
+    },
+    "label": {
+      "name": "Nombre",
+      "start": "Inicio",
+      "scale": "Escala",
+      "rotation": "Rotación",
+      "alpha": "α",
+      "enabled": "Activado"
+    }
+  },
+  "captions": {
+    "title": "Subtítulos"
+  },
+  "text": {
+    "title": "Texto"
+  },
+  "preview": {
+    "webgpu": "Vista previa (WebGPU)"
+  },
+  "palette": {
+    "placeholder": "Buscar comandos, efectos, ajustes...",
+    "hint": "↑↓ Navegar · Enter Ejecutar · Esc Cerrar",
+    "count": "{count} resultados",
+    "cmd": {
+      "cut": "Cortar",
+      "copy": "Copiar",
+      "paste": "Pegar",
+      "undo": "Deshacer",
+      "redo": "Rehacer",
+      "save": "Guardar",
+      "export": "Exportar",
+      "import": "Importar",
+      "play": "Reproducir / Detener",
+      "colorGrade": "Corrección de color",
+      "audioMix": "Mezclador de audio",
+      "captions": "Subtítulos",
+      "textEdit": "Editar texto",
+      "multicam": "Multicámara",
+      "videoScopes": "Monitores",
+      "otioExport": "Exportar OTIO",
+      "toggleTheme": "Cambiar tema",
+      "shortcuts": "Atajos de teclado",
+      "about": "Acerca de Artone"
+    }
+  },
+  "plurals": {
+    "items": "{count, plural, one {# elemento} other {# elementos}}",
+    "clips": "{count, plural, one {# clip} other {# clips}}",
+    "tracks": "{count, plural, one {# pista} other {# pistas}}",
+    "minutes": "{count, plural, one {# minuto} other {# minutos}}",
+    "seconds": "{count, plural, one {# segundo} other {# segundos}}"
+  },
+  "interchange": {
+    "title": "Intercambio",
+    "exportOTIO": "Exportar OpenTimelineIO",
+    "exportEDL": "Exportar EDL",
+    "exportFCPXML": "Exportar FCPXML",
+    "importOTIO": "Importar OpenTimelineIO",
+    "importFCPXML": "Importar FCPXML",
+    "validation": {
+      "valid": "Válido",
+      "invalid": "No válido",
+      "schemaUnsupported": "Esquema no soportado: {schema}"
+    }
+  },
+  "bench": {
+    "running": "Ejecutando benchmarks",
+    "complete": "Benchmarks completados",
+    "baseline": "Línea base",
+    "regression": "Regresión detectada",
+    "improvement": "Mejora detectada",
+    "noBaseline": "Sin línea base disponible"
+  },
+  "accessibility": {
+    "audit": "Auditoría de accesibilidad",
+    "passed": "Aprobado",
+    "failed": "Fallido",
+    "level": "Nivel WCAG: {level}",
+    "contrastFail": "Contraste {ratio}:1 inferior a {required}:1",
+    "missingAlt": "Imagen sin atributo alt",
+    "missingLabel": "Control de formulario sin etiqueta"
+  },
+  "security": {
+    "sbom": "Lista de Materiales de Software",
+    "components": "{count} componentes",
+    "vulnerabilities": "{count} vulnerabilidades encontradas",
+    "auditPassed": "Auditoría aprobada",
+    "auditFailed": "Auditoría fallida",
+    "licenseConflict": "Conflicto de licencia: {component}"
+  }
+}

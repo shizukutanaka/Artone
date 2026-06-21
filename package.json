@@ -1,58 +1,106 @@
 {
-  "name": "artone-video-editor",
-  "version": "1.0.0",
-  "description": "Professional browser-based video editor with multi-track timeline and real-time preview",
-  "main": "index.html",
+  "name": "artone",
+  "version": "3.0.0",
+  "description": "Browser-native professional video editor — 100% local, serverless, offline-capable",
+  "type": "module",
   "scripts": {
-    "start": "npx serve . -s -l 8000",
-    "dev": "npx serve . -s -l 3000",
-    "build": "echo 'No build step required for standalone HTML'",
-    "test": "echo 'Tests will be added in future versions'",
-    "lint": "echo 'Linting will be added in future versions'",
-    "deploy": "gh-pages -d .",
-    "serve": "python -m http.server 8000"
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "analyze": "ANALYZE=true vite build",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "test:e2e": "playwright test",
+    "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "lint:design": "bash scripts/design-system-check.sh",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"**/*.{ts,tsx}\" --ignore-path .gitignore",
+    "bench": "tsx bench/runner.ts",
+    "bench:baseline": "tsx bench/runner.ts --update-baseline",
+    "sbom": "tsx security/generate.ts",
+    "sbom:online": "tsx security/generate.ts --online",
+    "build:a11y": "esbuild accessibility/bundle-entry.ts --bundle --format=iife --outfile=dist/a11y-bundle.js",
+    "test:a11y": "npm run build:a11y && playwright test tests/a11y.spec.ts",
+    "audit:full": "npm audit && npm run sbom && npm run bench && npm run test:a11y",
+    "clean": "rm -rf dist node_modules/.vite",
+    "prepare": "husky || true",
+    "bench:watch": "tsx bench/runner.ts --watch",
+    "syntax": "node scripts/syntax-check.mjs"
   },
-  "keywords": [
-    "video-editor",
-    "browser-based",
-    "html5",
-    "canvas",
-    "react",
-    "timeline",
-    "multimedia",
-    "webm",
-    "video-processing",
-    "real-time",
-    "preview",
-    "effects"
-  ],
-  "author": {
-    "name": "Artone Team",
-    "email": "team@artone.example.com",
-    "url": "https://github.com/yourusername"
-  },
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yourusername/artone-video-editor.git"
-  },
-  "bugs": {
-    "url": "https://github.com/yourusername/artone-video-editor/issues"
-  },
-  "homepage": "https://yourusername.github.io/artone-video-editor",
-  "engines": {
-    "node": ">=14.0.0"
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "lodash-es": "^4.17.21",
+    "uuid": "^10.0.0",
+    "date-fns": "^3.6.0",
+    "tone": "^15.0.4",
+    "standardized-audio-context": "^25.3.76",
+    "@xenova/transformers": "^2.17.2",
+    "idb": "^8.0.0",
+    "comlink": "^4.4.1",
+    "yjs": "^13.6.18",
+    "y-webrtc": "^10.3.0"
   },
   "devDependencies": {
-    "gh-pages": "^6.1.0",
-    "serve": "^14.2.1"
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/lodash-es": "^4.17.12",
+    "@types/uuid": "^10.0.0",
+    "@types/node": "^22.5.0",
+    "@webgpu/types": "^0.1.45",
+    "tsx": "^4.19.0",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2",
+    "@vitejs/plugin-react": "^4.3.1",
+    "rollup-plugin-visualizer": "^5.12.0",
+    "vitest": "^2.0.5",
+    "@vitest/coverage-v8": "^2.0.5",
+    "playwright": "^1.46.1",
+    "@playwright/test": "^1.46.1",
+    "eslint": "^9.9.1",
+    "@typescript-eslint/eslint-plugin": "^8.2.0",
+    "babel-plugin-transform-remove-console": "^6.9.4",
+    "@typescript-eslint/parser": "^8.2.0",
+    "eslint-plugin-react": "^7.35.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "prettier": "^3.3.3",
+    "jsdom": "^25.0.0",
+    "@types/jsdom": "^21.1.7",
+    "husky": "^9.1.5",
+    "lint-staged": "^15.2.9"
   },
-  "dependencies": {},
-  "peerDependencies": {},
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ]
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
   "browserslist": [
-    "> 1%",
-    "last 2 versions",
-    "not dead",
-    "not ie 11"
-  ]
+    "Chrome >= 113",
+    "Edge >= 113",
+    "Safari >= 17"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shizukutanaka/artone"
+  },
+  "author": {
+    "name": "Artone Contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "video-editor",
+    "webcodecs",
+    "webgpu",
+    "pwa",
+    "browser",
+    "artone"
+  ],
+  "homepage": "https://github.com/shizukutanaka/artone"
 }

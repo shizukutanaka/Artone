@@ -1,0 +1,444 @@
+{
+  "app": {
+    "name": "Artone",
+    "tagline": "محرر فيديو يعمل في المتصفح"
+  },
+  "common": {
+    "ok": "موافق",
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "delete": "حذف",
+    "rename": "إعادة تسمية",
+    "close": "إغلاق",
+    "open": "فتح",
+    "yes": "نعم",
+    "no": "لا",
+    "loading": "جارٍ التحميل",
+    "error": "خطأ",
+    "warning": "تحذير",
+    "info": "معلومات",
+    "search": "بحث",
+    "filter": "تصفية",
+    "settings": "الإعدادات",
+    "help": "مساعدة",
+    "about": "حول",
+    "exit": "خروج",
+    "skip": "تخطي",
+    "retry": "إعادة المحاولة",
+    "back": "رجوع",
+    "comingSoon": "قريبًا"
+  },
+  "menu": {
+    "file": "ملف",
+    "edit": "تحرير",
+    "view": "عرض",
+    "clip": "مقطع",
+    "effects": "تأثيرات",
+    "color": "ألوان",
+    "audio": "صوت",
+    "window": "نافذة",
+    "tools": "أدوات"
+  },
+  "file": {
+    "new": "مشروع جديد",
+    "open": "فتح مشروع",
+    "save": "حفظ",
+    "saveAs": "حفظ باسم",
+    "import": "استيراد",
+    "export": "تصدير",
+    "recent": "المشاريع الأخيرة",
+    "untitled": "مشروع بدون عنوان"
+  },
+  "edit": {
+    "undo": "تراجع",
+    "redo": "إعادة",
+    "cut": "قص",
+    "copy": "نسخ",
+    "paste": "لصق",
+    "selectAll": "تحديد الكل"
+  },
+  "timeline": {
+    "title": "الخط الزمني",
+    "play": "تشغيل",
+    "pause": "إيقاف مؤقت",
+    "stop": "إيقاف",
+    "rewind": "ترجيع",
+    "fastForward": "تقديم سريع",
+    "frameForward": "الإطار التالي",
+    "frameBack": "الإطار السابق",
+    "clip": {
+      "split": "تقسيم",
+      "trim": "تشذيب",
+      "delete": "حذف",
+      "duplicate": "تكرار",
+      "speed": "السرعة",
+      "reverse": "عكس",
+      "freeze": "تجميد إطار",
+      "ripple": "حذف متموج"
+    },
+    "track": {
+      "add": "إضافة مسار",
+      "delete": "حذف مسار",
+      "lock": "قفل",
+      "mute": "كتم",
+      "solo": "منفرد"
+    },
+    "marker": {
+      "add": "إضافة علامة",
+      "delete": "حذف علامة",
+      "next": "التالي",
+      "prev": "السابق"
+    },
+    "zoom": {
+      "in": "تكبير",
+      "out": "تصغير",
+      "fit": "ملاءمة"
+    },
+    "dragHint": "اسحب الوسائط إلى الخط الزمني"
+  },
+  "color": {
+    "title": "تدرج الألوان",
+    "primary": "أساسي",
+    "secondary": "ثانوي",
+    "wheels": "عجلات الألوان",
+    "curves": "المنحنيات",
+    "lift": "الظلال",
+    "gamma": "النصف",
+    "gain": "الإضاءات",
+    "saturation": "التشبع",
+    "contrast": "التباين",
+    "exposure": "التعريض",
+    "lut": "LUT",
+    "lutImport": "استيراد LUT",
+    "scope": {
+      "waveform": "الموجة",
+      "vectorscope": "Vectorscope",
+      "histogram": "المدرج التكراري",
+      "parade": "RGB Parade"
+    }
+  },
+  "audio": {
+    "title": "الصوت",
+    "volume": "مستوى الصوت",
+    "pan": "الاستقبال",
+    "mute": "كتم",
+    "eq": "EQ",
+    "compressor": "ضاغط",
+    "reverb": "صدى",
+    "limiter": "محدد",
+    "fade": {
+      "in": "تلاشي للداخل",
+      "out": "تلاشي للخارج"
+    },
+    "noise": {
+      "reduction": "تقليل الضوضاء"
+    }
+  },
+  "export": {
+    "title": "تصدير",
+    "preset": "إعداد مسبق",
+    "format": "التنسيق",
+    "resolution": "الدقة",
+    "framerate": "معدل الإطارات",
+    "bitrate": "معدل البت",
+    "codec": "كودك",
+    "audio": "صوت",
+    "destination": "الوجهة",
+    "start": "بدء التصدير",
+    "progress": "التقدم: {percent}%",
+    "complete": "اكتمل التصدير",
+    "presets": {
+      "youtube4k": "YouTube 4K",
+      "youtube1080p": "YouTube 1080p",
+      "instagram": "Instagram",
+      "tiktok": "TikTok",
+      "broadcast": "بث",
+      "proRes": "ProRes",
+      "h265": "H.265 HEVC",
+      "av1": "AV1"
+    }
+  },
+  "ai": {
+    "title": "ميزات الذكاء الاصطناعي",
+    "transcribe": "نسخ",
+    "translate": "ترجمة",
+    "denoise": "إزالة الضوضاء",
+    "upscale": "ترقية",
+    "objectRemove": "إزالة كائن",
+    "autoEdit": "تحرير تلقائي",
+    "captionGen": "إنشاء ترجمات",
+    "processing": "جارٍ المعالجة",
+    "downloadModel": "تنزيل النموذج"
+  },
+  "media": {
+    "title": "متصفح الوسائط",
+    "import": "استيراد",
+    "video": "فيديو",
+    "audio": "صوت",
+    "image": "صورة",
+    "title2": "عنوان",
+    "search": "بحث في الوسائط",
+    "duration": "المدة",
+    "size": "حجم الملف",
+    "createdAt": "تاريخ الإنشاء",
+    "dropTitle": "إسقاط الوسائط",
+    "acceptedTypes": "فيديو، صوت، صور",
+    "dropHint": "إسقاط الملفات هنا",
+    "all": "الكل",
+    "empty": "أفلت الوسائط أو استوردها",
+    "noMatch": "لا توجد نتائج",
+    "status": {
+      "pending": "قيد الانتظار",
+      "proxy": "بروكسي",
+      "error": "فشل"
+    }
+  },
+  "error": {
+    "network": {
+      "timeout": "انتهت مهلة الاتصال",
+      "offline": "غير متصل",
+      "failed": "خطأ في الشبكة"
+    },
+    "file": {
+      "notFound": "الملف غير موجود",
+      "tooLarge": "الملف كبير جدًا",
+      "unsupported": "تنسيق غير مدعوم",
+      "corrupt": "ملف تالف"
+    },
+    "gpu": {
+      "notSupported": "WebGPU غير متاح",
+      "outOfMemory": "ذاكرة GPU ممتلئة"
+    },
+    "codec": {
+      "notSupported": "كودك غير مدعوم: {codec}"
+    },
+    "generic": "خطأ: {message}",
+    "init": {
+      "title": "خطأ في التهيئة"
+    },
+    "details": "تفاصيل الخطأ",
+    "restart": "إعادة تشغيل",
+    "unexpected": {
+      "title": "خطأ غير متوقع",
+      "body": "حدث خطأ ما. تم حفظ مشروعك الحالي تلقائيًا."
+    }
+  },
+  "recovery": {
+    "title": "استعادة بعد التعطل",
+    "available": "يمكن استعادة الجلسة السابقة",
+    "restore": "استعادة",
+    "discard": "تجاهل",
+    "autoSave": "حفظ تلقائي",
+    "restorePrompt": "تم اكتشاف عمل غير محفوظ من {time}. هل تريد الاستعادة؟"
+  },
+  "performance": {
+    "fps": "FPS: {value}",
+    "memory": "الذاكرة: {value} ميجابايت",
+    "gpuTime": "GPU: {value} مللي ثانية",
+    "warning": "تم اكتشاف تدهور في الأداء",
+    "autoQuality": "جودة تلقائية"
+  },
+  "shortcut": {
+    "title": "اختصارات لوحة المفاتيح",
+    "global": "عام",
+    "timeline": "الخط الزمني",
+    "playback": "التشغيل",
+    "trimming": "التشذيب",
+    "navigation": "التنقل",
+    "category": {
+      "playback": "تشغيل",
+      "edit": "تحرير",
+      "timeline": "الخط الزمني",
+      "tools": "أدوات",
+      "file": "ملف",
+      "view": "عرض",
+      "multicam": "متعدد الكاميرات"
+    },
+    "action": {
+      "play": "تشغيل / إيقاف مؤقت",
+      "stop": "إيقاف",
+      "frameForward": "إطار للأمام",
+      "frameBack": "إطار للخلف",
+      "forward10": "تقديم 10 إطارات",
+      "back10": "تأخير 10 إطارات",
+      "jklJ": "تشغيل عكسي",
+      "jklK": "إيقاف مؤقت",
+      "jklL": "تشغيل للأمام",
+      "goToStart": "الانتقال إلى البداية",
+      "goToEnd": "الانتقال إلى النهاية",
+      "cut": "قص",
+      "copy": "نسخ",
+      "paste": "لصق",
+      "delete": "حذف",
+      "rippleDelete": "حذف متموج",
+      "undo": "تراجع",
+      "redo": "إعادة",
+      "selectAll": "تحديد الكل",
+      "deselect": "إلغاء تحديد الكل",
+      "split": "تقسيم المقطع",
+      "duplicate": "تكرار",
+      "setInPoint": "تعيين نقطة البداية",
+      "setOutPoint": "تعيين نقطة النهاية",
+      "clearInOut": "مسح الدخول / الخروج",
+      "zoomIn": "تكبير",
+      "zoomOut": "تصغير",
+      "zoomFit": "ملاءمة للشاشة",
+      "addMarker": "إضافة علامة",
+      "nextMarker": "العلامة التالية",
+      "prevMarker": "العلامة السابقة",
+      "snapToggle": "تبديل الالتصاق",
+      "toolSelect": "أداة التحديد",
+      "toolRazor": "أداة الشفرة",
+      "toolSlip": "أداة الانزلاق",
+      "toolSlide": "أداة التمرير",
+      "toolRoll": "أداة التدحرج",
+      "toolRipple": "أداة التموج",
+      "newProject": "مشروع جديد",
+      "open": "فتح",
+      "save": "حفظ",
+      "saveAs": "حفظ باسم",
+      "import": "استيراد الوسائط",
+      "export": "تصدير",
+      "fullscreen": "معاينة ملء الشاشة",
+      "toggleTimeline": "تبديل الخط الزمني",
+      "toggleMedia": "تبديل متصفح الوسائط",
+      "toggleInspector": "تبديل المفتش",
+      "toggleEffects": "تبديل التأثيرات",
+      "cam1": "كاميرا 1",
+      "cam2": "كاميرا 2",
+      "cam3": "كاميرا 3",
+      "cam4": "كاميرا 4",
+      "cam5": "كاميرا 5",
+      "cam6": "كاميرا 6",
+      "cam7": "كاميرا 7",
+      "cam8": "كاميرا 8",
+      "cam9": "كاميرا 9"
+    }
+  },
+  "loading": {
+    "engine": "جارٍ تهيئة المحرك..."
+  },
+  "firstRun": {
+    "levelHint": "سنقوم بتعديل واجهة المستخدم لتناسب خبرتك",
+    "levelBeginner": "مبتدئ",
+    "levelBeginnerDesc": "تخطيط بسيط",
+    "levelIntermediate": "متوسط",
+    "levelIntermediateDesc": "متوازن",
+    "levelPro": "محترف",
+    "levelProDesc": "جميع الميزات",
+    "step2Title": "بدء مشروع",
+    "step2Subtitle": "اختر نموذجًا أو ابدأ فارغًا",
+    "step3Title": "إضافة مقاطع",
+    "step3Subtitle": "اسحب وأفلت أو انقر للتحديد",
+    "filesSelected": "{count} ملف محدد",
+    "dropHint": "أفلت الفيديو أو الصوت أو الصور هنا",
+    "startEditing": "بدء التحرير",
+    "startDemo": "البدء بمقاطع تجريبية",
+    "skipToDemo": "تخطي → البدء بالعرض التجريبي",
+    "templateYoutubeDesc": "1080p 30fps — الألعاب والمدونات",
+    "templateShortDesc": "1080×1920 30fps — فيديو عمودي",
+    "templateFilmDesc": "4K 24fps — سينمائي",
+    "templateBlankDesc": "بدون ضبط مسبق — كشف تلقائي"
+  },
+  "scopes": {
+    "title": "أدوات القياس"
+  },
+  "inspector": {
+    "title": "المفتش",
+    "selectHint": "حدد عنصرًا",
+    "section": {
+      "basic": "أساسي",
+      "transform": "تحويل",
+      "opacity": "عتامة",
+      "project": "مشروع"
+    },
+    "label": {
+      "name": "الاسم",
+      "start": "البداية",
+      "scale": "مقياس",
+      "rotation": "دوران",
+      "alpha": "α",
+      "enabled": "مفعّل"
+    }
+  },
+  "captions": {
+    "title": "الترجمات"
+  },
+  "text": {
+    "title": "نص"
+  },
+  "preview": {
+    "webgpu": "معاينة (WebGPU)"
+  },
+  "palette": {
+    "placeholder": "ابحث عن الأوامر والتأثيرات والإعدادات...",
+    "hint": "↑↓ التنقل · Enter تنفيذ · Esc إغلاق",
+    "count": "{count} نتيجة",
+    "cmd": {
+      "cut": "قص",
+      "copy": "نسخ",
+      "paste": "لصق",
+      "undo": "تراجع",
+      "redo": "إعادة",
+      "save": "حفظ",
+      "export": "تصدير",
+      "import": "استيراد",
+      "play": "تشغيل / إيقاف",
+      "colorGrade": "تصحيح الألوان",
+      "audioMix": "خلاط الصوت",
+      "captions": "ترجمات",
+      "textEdit": "تحرير النص",
+      "multicam": "متعدد الكاميرات",
+      "videoScopes": "مؤشرات الفيديو",
+      "otioExport": "تصدير OTIO",
+      "toggleTheme": "تبديل السمة",
+      "shortcuts": "اختصارات لوحة المفاتيح",
+      "about": "حول Artone"
+    }
+  },
+  "plurals": {
+    "items": "{count, plural, zero {لا عناصر} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}",
+    "clips": "{count, plural, zero {لا مقاطع} one {مقطع واحد} two {مقطعان} few {# مقاطع} many {# مقطعًا} other {# مقطع}}",
+    "tracks": "{count, plural, zero {لا مسارات} one {مسار واحد} two {مساران} few {# مسارات} many {# مسارًا} other {# مسار}}",
+    "minutes": "{count, plural, zero {لا دقائق} one {دقيقة} two {دقيقتان} few {# دقائق} many {# دقيقة} other {# دقيقة}}",
+    "seconds": "{count, plural, zero {لا ثوانٍ} one {ثانية} two {ثانيتان} few {# ثوانٍ} many {# ثانية} other {# ثانية}}"
+  },
+  "interchange": {
+    "title": "التبادل",
+    "exportOTIO": "تصدير OpenTimelineIO",
+    "exportEDL": "تصدير EDL",
+    "exportFCPXML": "تصدير FCPXML",
+    "importOTIO": "استيراد OpenTimelineIO",
+    "importFCPXML": "استيراد FCPXML",
+    "validation": {
+      "valid": "صالح",
+      "invalid": "غير صالح",
+      "schemaUnsupported": "مخطط غير مدعوم: {schema}"
+    }
+  },
+  "bench": {
+    "running": "تشغيل الاختبارات المعيارية",
+    "complete": "اكتملت الاختبارات المعيارية",
+    "baseline": "خط الأساس",
+    "regression": "تم اكتشاف انحدار",
+    "improvement": "تم اكتشاف تحسن",
+    "noBaseline": "لا يوجد خط أساس متاح"
+  },
+  "accessibility": {
+    "audit": "تدقيق إمكانية الوصول",
+    "passed": "اجتاز",
+    "failed": "فشل",
+    "level": "مستوى WCAG: {level}",
+    "contrastFail": "التباين {ratio}:1 أقل من {required}:1",
+    "missingAlt": "الصورة تفتقد سمة alt",
+    "missingLabel": "عنصر تحكم النموذج يفتقد التسمية"
+  },
+  "security": {
+    "sbom": "قائمة مواد البرامج",
+    "components": "{count} مكون",
+    "vulnerabilities": "تم العثور على {count} ثغرة",
+    "auditPassed": "اجتاز التدقيق",
+    "auditFailed": "فشل التدقيق",
+    "licenseConflict": "تعارض الترخيص: {component}"
+  }
+}

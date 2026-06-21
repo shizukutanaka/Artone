@@ -1,0 +1,34 @@
+# plugins/ — セキュリティ境界ゾーン
+
+## 厳守事項
+- WASM プラグインは **必ず** サンドボックス内で実行
+- ホスト API は明示的 import のみ提供 (ambient access 禁止)
+- `eval` / `Function` コンストラクタ禁止
+- ネットワークアクセスはプラグイン manifest で宣言必須
+
+## 権限モデル
+- プラグインインストール時に権限同意取得
+- 権限スコープ: `audio` / `video` / `network` / `filesystem` / `mic` / `camera`
+- 権限剥奪は即時反映
+- audit log を全プラグイン操作で記録
+
+## ABI 安定性
+- v1 ABI は永続サポート (10年)
+- 破壊的変更は v2 ABI として並行運用
+- deprecated API は 2 年間の移行期間
+
+## VST/AU ブリッジ
+- VST3 SDK ライセンス確認 (GPL/Proprietary 二重ライセンス)
+- AU は Apple SDK 利用規約準拠
+- WASM ブリッジ経由のみ (ネイティブ DLL 直接ロード禁止)
+
+## テスト要求
+- カバレッジ 95%+
+- 悪意あるプラグインのサンドボックス脱出試験
+- メモリ枯渇攻撃テスト
+- 無限ループ検出テスト (timeout 5秒)
+
+## レビュー
+- 公式マーケットプレース掲載前に手動レビュー
+- 自動スキャン: `npm audit` / WASM static analysis
+- コードサイニング必須

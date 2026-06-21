@@ -7,6 +7,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   ExportEngine,
   EXPORT_PRESETS,
+  awaitEncoderQueueBelow,
+  DEFAULT_MAX_ENCODE_QUEUE,
   type ExportConfig,
   type ExportJob,
 } from '../export/export-engine';
@@ -438,5 +440,79 @@ describe('REGRESSION: encodeAudio planar layout', () => {
 
     // Confirm the two are different (ensures the test actually caught the distinction)
     expect(Array.from(planar)).not.toEqual(Array.from(interleaved));
+  });
+});
+
+// ============================================================
+// WebCodecs back-pressure helper (per Chrome best practices / Qiita findings)
+// ============================================================
+
+describe('awaitEncoderQueueBelow — WebCodecs back-pressure', () => {
+  /** Minimal stub matching the duck-typed encoder shape. */
+  function makeFakeEncoder(initialQueueSize: number) {
+    const target = new EventTarget() as EventTarget & { encodeQueueSize: number };
+    target.encodeQueueSize = initialQueueSize;
+    return target;
+  }
+
+  it('returns immediately when queue is below the default threshold', async () => {
+    const enc = makeFakeEncoder(0);
+    // Must not hang. Race against a microtask that would only fire if we actually awaited.
+    let resolved = false;
+    await Promise.race([
+      awaitEncoderQueueBelow(enc).then(() => { resolved = true; }),
+      Promise.resolve(),
+    ]);
+    expect(resolved).toBe(true);
+  });
+
+  it('returns immediately at exactly threshold - 1', async () => {
+    const enc = makeFakeEncoder(DEFAULT_MAX_ENCODE_QUEUE - 1);
+    await expect(awaitEncoderQueueBelow(enc)).resolves.toBeUndefined();
+  });
+
+  it('blocks at threshold and unblocks on the next "dequeue" event', async () => {
+    const enc = makeFakeEncoder(DEFAULT_MAX_ENCODE_QUEUE);
+    let unblocked = false;
+    const pending = awaitEncoderQueueBelow(enc).then(() => { unblocked = true; });
+
+    // Yield two microtasks — must still be blocked since no dequeue fired.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(unblocked).toBe(false);
+
+    // Fire dequeue → should unblock.
+    enc.dispatchEvent(new Event('dequeue'));
+    await pending;
+    expect(unblocked).toBe(true);
+  });
+
+  it('blocks well above threshold and still unblocks on dequeue (back-pressure works)', async () => {
+    const enc = makeFakeEncoder(DEFAULT_MAX_ENCODE_QUEUE * 10);
+    const pending = awaitEncoderQueueBelow(enc, DEFAULT_MAX_ENCODE_QUEUE);
+    enc.dispatchEvent(new Event('dequeue'));
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it('custom maxQueue parameter overrides the default', async () => {
+    const enc = makeFakeEncoder(3);
+    // maxQueue=2 → 3 >= 2 → must block until dequeue.
+    let unblocked = false;
+    const pending = awaitEncoderQueueBelow(enc, 2).then(() => { unblocked = true; });
+    await Promise.resolve();
+    expect(unblocked).toBe(false);
+    enc.dispatchEvent(new Event('dequeue'));
+    await pending;
+    expect(unblocked).toBe(true);
+
+    // maxQueue=10 → 3 < 10 → must return immediately.
+    await expect(awaitEncoderQueueBelow(enc, 10)).resolves.toBeUndefined();
+  });
+
+  it('DEFAULT_MAX_ENCODE_QUEUE is a sane positive integer', () => {
+    expect(Number.isInteger(DEFAULT_MAX_ENCODE_QUEUE)).toBe(true);
+    expect(DEFAULT_MAX_ENCODE_QUEUE).toBeGreaterThan(0);
+    // Sanity bounds: not so low it stalls every frame, not so high it defeats the purpose.
+    expect(DEFAULT_MAX_ENCODE_QUEUE).toBeLessThan(1000);
   });
 });

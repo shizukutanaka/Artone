@@ -67,6 +67,45 @@ export interface EncodedData {
 type ProgressCallback = (progress: number, status: string) => void;
 
 // ============================================================
+// WebCodecs Back-Pressure
+// ============================================================
+//
+// VideoEncoder/AudioEncoder.encode() は同期的にキューへ投入されるだけで、
+// 実エンコードは非同期。チェックなしにループで投入し続けると、エンコード速度
+// より供給速度が早い場合 (CPU バウンド・高解像度・低性能機) にキューが
+// 無制限に伸び、GPU/VideoFrame メモリを枯渇させてブラウザがクラッシュする。
+//
+// Chrome 公式のベストプラクティスは「encodeQueueSize を監視し、閾値超過時に
+// 'dequeue' イベントを待つ」こと:
+//   https://developer.chrome.com/docs/web-platform/best-practices/webcodecs
+// Qiita: 「フレームをエンコード速度より早く送ると memory exhaustion」
+//   https://qiita.com/alivelime/items/34cababe3105c2af8068
+//
+// 純関数として export し、エンコーダタイプを問わずテスト可能にする。
+
+/** デフォルトの最大エンコードキューサイズ。Chrome 公式推奨に基づく安全値。 */
+export const DEFAULT_MAX_ENCODE_QUEUE = 8;
+
+/**
+ * encoder.encodeQueueSize が `maxQueue` を超えていれば、`dequeue` イベントで
+ * キューが減るのを待つ。閾値以下なら即時 resolve。
+ *
+ * 純粋に EventTarget+`encodeQueueSize` の duck-typed インタフェースに依存
+ * するため、VideoEncoder/AudioEncoder のどちらにも適用可能。
+ */
+export async function awaitEncoderQueueBelow(
+  encoder: EventTarget & { encodeQueueSize: number },
+  maxQueue: number = DEFAULT_MAX_ENCODE_QUEUE,
+): Promise<void> {
+  if (encoder.encodeQueueSize < maxQueue) return;
+  // 'dequeue' は queue が減るたびに発火するため、once 待ちで十分。
+  // 1回の dequeue で必ず閾値未満になるとは限らないが、loop 側が次回必ず再チェックする。
+  await new Promise<void>((resolve) => {
+    encoder.addEventListener('dequeue', () => resolve(), { once: true });
+  });
+}
+
+// ============================================================
 // Presets
 // ============================================================
 
@@ -394,6 +433,10 @@ export class ExportEngine {
             return;
           }
 
+          // Back-pressure: wait if the encoder queue is saturated, otherwise
+          // long exports enqueue faster than encoding and exhaust GPU memory.
+          await awaitEncoderQueueBelow(this.encoder!);
+
           const frame = await renderFrame(i);
           try {
             this.encoder!.encode(frame, { keyFrame: i % keyFrameInterval === 0 });
@@ -466,38 +509,45 @@ export class ExportEngine {
       const frameSize = 1024;
       const totalFrames = Math.ceil(buffer.length / frameSize);
 
-      for (let f = 0; f < totalFrames; f++) {
-        const offset = f * frameSize;
-        const length = Math.min(frameSize, buffer.length - offset);
-        
-        // REGRESSION fix: f32-planar requires all ch-0 samples first, then ch-1.
-        // The previous write `data[i * channels + ch]` produced interleaved layout
-        // which mismatches f32-planar → garbled audio in the WebCodecs pipeline.
-        const data = new Float32Array(length * channels);
-        for (let ch = 0; ch < channels; ch++) {
-          const channelData = buffer.getChannelData(ch);
-          for (let i = 0; i < length; i++) {
-            data[ch * length + i] = channelData[offset + i];
+      const encodeAll = async () => {
+        for (let f = 0; f < totalFrames; f++) {
+          // Back-pressure (see awaitEncoderQueueBelow rationale).
+          await awaitEncoderQueueBelow(this.audioEncoder!);
+          const offset = f * frameSize;
+          const length = Math.min(frameSize, buffer.length - offset);
+
+          // REGRESSION fix: f32-planar requires all ch-0 samples first, then ch-1.
+          // The previous write `data[i * channels + ch]` produced interleaved layout
+          // which mismatches f32-planar → garbled audio in the WebCodecs pipeline.
+          const data = new Float32Array(length * channels);
+          for (let ch = 0; ch < channels; ch++) {
+            const channelData = buffer.getChannelData(ch);
+            for (let i = 0; i < length; i++) {
+              data[ch * length + i] = channelData[offset + i];
+            }
+          }
+
+          const audioData = new AudioData({
+            format: 'f32-planar',
+            sampleRate,
+            numberOfFrames: length,
+            numberOfChannels: channels,
+            timestamp: (offset / sampleRate) * 1_000_000,
+            data,
+          });
+
+          try {
+            this.audioEncoder!.encode(audioData);
+          } finally {
+            audioData.close();
           }
         }
 
-        const audioData = new AudioData({
-          format: 'f32-planar',
-          sampleRate,
-          numberOfFrames: length,
-          numberOfChannels: channels,
-          timestamp: (offset / sampleRate) * 1_000_000,
-          data
-        });
+        await this.audioEncoder!.flush();
+        resolve(chunks);
+      };
 
-        try {
-          this.audioEncoder.encode(audioData);
-        } finally {
-          audioData.close();
-        }
-      }
-
-      this.audioEncoder.flush().then(() => resolve(chunks)).catch(reject);
+      encodeAll().catch(reject);
     });
   }
 

@@ -111,9 +111,9 @@ function renderScopePlaceholder(canvas: HTMLCanvasElement, scope: ScopeType): vo
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const { width, height } = canvas;
-  ctx.fillStyle = '#0a0a0a';
+  ctx.fillStyle = color.surface1;
   ctx.fillRect(0, 0, width, height);
-  ctx.strokeStyle = scope === 'vectorscope' ? '#2a6' : '#27a';
+  ctx.strokeStyle = scope === 'vectorscope' ? color.positive : color.interactive;
   ctx.lineWidth = 1;
   ctx.beginPath();
   if (scope === 'vectorscope') {
@@ -297,7 +297,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
         return [...prev, {
           id: `clip_${mediaId}`, trackId, name: file.name,
           start: startTime, duration,
-          color: type === 'audio' ? '#1d4ed8' : type === 'video' ? '#166534' : '#7c3aed',
+          color: type === 'audio' ? color.interactive : type === 'video' ? color.positive : color.info,
         }];
       });
     }

@@ -152,7 +152,10 @@ export class AIEffectsEngine {
 
   constructor() {
     this.canvas = new OffscreenCanvas(1920, 1080);
-    this.ctx = this.canvas.getContext('2d')!;
+    // willReadFrequently: this.ctx is read back via getImageData in every
+    // segmentation / style-transfer / face-detection pass (per-frame). Set on
+    // the first getContext call, which fixes the backing for all later reads.
+    this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
     this.initModels();
   }
 
@@ -509,7 +512,8 @@ export class AIEffectsEngine {
     // Use smaller size for performance
     const size = 64;
     const canvas = new OffscreenCanvas(size, size);
-    const ctx = canvas.getContext('2d')!;
+    // willReadFrequently: read back via getImageData below.
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(frame, 0, 0, size, size);
 
     const imageData = ctx.getImageData(0, 0, size, size);
@@ -634,7 +638,8 @@ export class AIEffectsEngine {
     // Lanczos-2 separable resampling — significantly sharper than browser bilinear.
     // Separable horizontal then vertical pass: O(W×H×4) vs O(W×H×16) for 2D kernel.
     const srcCanvas = new OffscreenCanvas(width, height);
-    const srcCtx = srcCanvas.getContext('2d')!;
+    // willReadFrequently: source pixels are read back via getImageData.
+    const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true })!;
     srcCtx.drawImage(frame, 0, 0);
     const srcData = srcCtx.getImageData(0, 0, width, height);
 

@@ -724,8 +724,9 @@ export const FrameProcessors = {
   // Grayscale conversion
   grayscale: async (frame: VideoFrame): Promise<VideoFrame> => {
     const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-    const ctx = canvas.getContext('2d')!;
-    
+    // willReadFrequently: pixels are read back via getImageData below.
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+
     ctx.drawImage(frame, 0, 0);
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;

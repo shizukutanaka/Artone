@@ -509,7 +509,9 @@ export class ColorGradingEngine {
     const h = input instanceof HTMLVideoElement ? input.videoHeight : input.height;
     
     const canvas = new OffscreenCanvas(w, h);
-    const ctx = canvas.getContext('2d')!;
+    // willReadFrequently: this context exists to read pixels back via
+    // getImageData for CPU grading; avoids per-call GPU→CPU readback.
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(input, 0, 0);
 
     const imgData = ctx.getImageData(0, 0, w, h);

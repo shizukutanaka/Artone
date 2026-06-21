@@ -548,7 +548,8 @@ export class NestedSequenceManager {
 
     // Create canvas for compositing
     const canvas = new OffscreenCanvas(sequence.settings.width, sequence.settings.height);
-    const ctx = canvas.getContext('2d')!;
+    // willReadFrequently: the composited frame is read back via getImageData.
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
     // Clear
     ctx.fillStyle = '#000';

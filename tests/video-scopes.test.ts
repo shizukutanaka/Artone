@@ -42,6 +42,56 @@ function hasOffscreenCanvas(): boolean {
 const canvasAvailable = hasOffscreenCanvas();
 
 // ============================================================
+// willReadFrequently — per-frame readback optimization (Qiita research)
+// ============================================================
+
+describe('willReadFrequently on the per-frame readback context', () => {
+  it('extractImageData requests willReadFrequently:true for getImageData hot path', () => {
+    // Record every getContext(type, options) the scope makes on its temp canvas.
+    const calls: Array<[string, unknown]> = [];
+    const RealOffscreen = globalThis.OffscreenCanvas;
+    // Proxy returns a no-op function for any drawing call, and real data for
+    // getImageData so analyze() can complete without a real canvas backend.
+    const ctxStub = new Proxy({}, {
+      get(_t, prop) {
+        if (prop === 'getImageData') {
+          return (_x: number, _y: number, w: number, h: number) => ({
+            data: new Uint8ClampedArray(Math.max(1, w) * Math.max(1, h) * 4),
+            width: w, height: h,
+          });
+        }
+        return () => {};
+      },
+    }) as unknown as OffscreenCanvasRenderingContext2D;
+
+    class RecordingCanvas {
+      width: number; height: number;
+      constructor(w: number, h: number) { this.width = w; this.height = h; }
+      getContext(type: string, options?: unknown) { calls.push([type, options]); return ctxStub; }
+      transferToImageBitmap() { return { width: this.width, height: this.height, close: () => {} }; }
+    }
+    globalThis.OffscreenCanvas = RecordingCanvas as unknown as typeof OffscreenCanvas;
+
+    try {
+      // setup.ts provides a no-arg FakeVideoFrame; the DOM lib types require
+      // args, so construct via a cast.
+      const FakeVF = globalThis.VideoFrame as unknown as { new (): VideoFrame };
+      const frame = new FakeVF();
+      const scope = new WaveformScope();
+      scope.analyze(frame);
+
+      // At least one 2d context must have been requested with willReadFrequently.
+      const readContexts = calls.filter(
+        ([type, opts]) => type === '2d' && (opts as { willReadFrequently?: boolean })?.willReadFrequently === true,
+      );
+      expect(readContexts.length).toBeGreaterThan(0);
+    } finally {
+      globalThis.OffscreenCanvas = RealOffscreen;
+    }
+  });
+});
+
+// ============================================================
 // HistogramScope.getStats() — pure computation, no canvas
 // ============================================================
 

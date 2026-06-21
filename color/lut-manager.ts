@@ -363,7 +363,8 @@ export class LUTManager {
     const canvas = document.createElement('canvas');
     canvas.width = 128;
     canvas.height = 128;
-    const ctx = canvas.getContext('2d')!;
+    // willReadFrequently: the rendered image is read back via getImageData.
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
     // Create gradient test image
     for (let y = 0; y < canvas.height; y++) {

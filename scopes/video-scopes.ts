@@ -80,7 +80,10 @@ export class WaveformScope {
   private extractImageData(frame: VideoFrame | ImageData): ImageData {
     if (frame instanceof VideoFrame) {
       const tempCanvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      const tempCtx = tempCanvas.getContext('2d')!;
+      // willReadFrequently: getImageData() is called every frame; without it
+      // Chrome keeps the canvas GPU-backed and each read triggers a slow
+      // GPU→CPU readback (Qiita: canvas パフォーマンス向上).
+      const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
       tempCtx.drawImage(frame, 0, 0);
       return tempCtx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
     }
@@ -274,7 +277,10 @@ export class Vectorscope {
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
       const tempCanvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      const tempCtx = tempCanvas.getContext('2d')!;
+      // willReadFrequently: getImageData() is called every frame; without it
+      // Chrome keeps the canvas GPU-backed and each read triggers a slow
+      // GPU→CPU readback (Qiita: canvas パフォーマンス向上).
+      const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
       tempCtx.drawImage(frame, 0, 0);
       imageData = tempCtx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
     } else {
@@ -437,7 +443,10 @@ export class HistogramScope {
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
       const tempCanvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      const tempCtx = tempCanvas.getContext('2d')!;
+      // willReadFrequently: getImageData() is called every frame; without it
+      // Chrome keeps the canvas GPU-backed and each read triggers a slow
+      // GPU→CPU readback (Qiita: canvas パフォーマンス向上).
+      const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
       tempCtx.drawImage(frame, 0, 0);
       imageData = tempCtx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
     } else {
@@ -583,7 +592,10 @@ export class HistogramScope {
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
       const tempCanvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      const tempCtx = tempCanvas.getContext('2d')!;
+      // willReadFrequently: getImageData() is called every frame; without it
+      // Chrome keeps the canvas GPU-backed and each read triggers a slow
+      // GPU→CPU readback (Qiita: canvas パフォーマンス向上).
+      const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
       tempCtx.drawImage(frame, 0, 0);
       imageData = tempCtx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
     } else {

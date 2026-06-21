@@ -646,7 +646,8 @@ export class ExportEngine {
 
   private async videoFrameToImageData(frame: VideoFrame): Promise<ImageData> {
     const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-    const ctx = canvas.getContext('2d');
+    // willReadFrequently: every GIF frame is read back via getImageData.
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) throw new Error('Failed to obtain 2D context from OffscreenCanvas');
     ctx.drawImage(frame as unknown as CanvasImageSource, 0, 0);
     return ctx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);

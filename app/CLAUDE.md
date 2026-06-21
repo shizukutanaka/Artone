@@ -23,5 +23,6 @@
 - main.ts
 - shell.tsx
 - shortcut-manager.ts
+- storage-persistence.ts
 - sw-manager.ts
 - utils.ts

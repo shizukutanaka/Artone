@@ -14,6 +14,7 @@ import { color } from './design-system';
 import { createLogger } from './logger';
 import { t } from '../i18n/i18n-manager';
 import { safeStorageGet, safeStorageSet, safeStorageRemove } from './utils';
+import { requestPersistentStorage } from './storage-persistence';
 import { MagneticTimeline, type TimelineState } from '../timeline/magnetic-timeline';
 import { TextBasedEditor } from '../timeline/text-based-editing';
 import { MultiCamEditor } from '../timeline/multicam-editor';
@@ -196,6 +197,18 @@ export class ArtoneApp {
 
   async init(_container: HTMLElement): Promise<void> {
     const errors: Array<{ module: string; error: unknown }> = [];
+
+    // Request persistent storage FIRST so the upcoming IndexedDB writes
+    // (project / recovery / proxies) land in a bucket protected from
+    // eviction. Best-effort only — never blocks editor startup.
+    try {
+      const persist = await requestPersistentStorage();
+      if (persist.supported && !persist.persisted) {
+        log.warn('Persistent storage not granted — project data may be evicted under disk pressure');
+      }
+    } catch (e) {
+      errors.push({ module: 'storage-persistence', error: e });
+    }
 
     // Check for crash recovery
     try {

@@ -99,6 +99,16 @@ export class CollaborationEngine {
   /** Cap so a long offline session cannot grow the queue without bound. */
   private readonly maxQueue = 1000;
 
+  // Cursor (awareness) broadcast coalescing. mousemove can fire 60-120×/s;
+  // sending a full JSON message to every peer per move floods the channel.
+  // We store the latest position synchronously (instant local UI) and emit at
+  // most one broadcast per `cursorThrottleMs` window with the newest value
+  // (trailing-edge throttle). Pattern from the Qiita Yjs throttling article.
+  /** Throttle window for cursor awareness broadcasts (ms). 50ms ≈ 20fps. */
+  private readonly cursorThrottleMs = 50;
+  private pendingCursor: { x: number; y: number; view: string } | null = null;
+  private cursorTimer: ReturnType<typeof setTimeout> | null = null;
+
   // ============================================================
   // Connection
   // ============================================================
@@ -126,6 +136,9 @@ export class CollaborationEngine {
   }
 
   disconnect(): void {
+    // Flush any pending cursor move before tearing down channels so the final
+    // position is not lost, then clear the throttle timer to avoid a leak.
+    this.flushCursor();
     for (const pc of this.peers.values()) {
       pc.close();
     }
@@ -141,10 +154,35 @@ export class CollaborationEngine {
 
   updateCursor(x: number, y: number, view: string): void {
     if (!this.localUser) return;
-    
+
+    // Store immediately so local UI and getUsers() reflect the latest position.
     this.localUser.cursor = { x, y, view };
     this.localUser.lastActive = Date.now();
-    this.broadcast({ type: 'awareness', userId: this.localUser.id, data: { cursor: { x, y, view } }, timestamp: Date.now() });
+
+    // Coalesce the network broadcast: remember the newest position and emit at
+    // most once per throttle window (trailing edge keeps the final position).
+    this.pendingCursor = { x, y, view };
+    if (this.cursorTimer === null) {
+      this.cursorTimer = setTimeout(() => this.flushCursor(), this.cursorThrottleMs);
+    }
+  }
+
+  /**
+   * Broadcast the latest pending cursor position, if any, and clear the timer.
+   * Called on the throttle timer and on disconnect (to flush the final move).
+   */
+  private flushCursor(): void {
+    if (this.cursorTimer !== null) {
+      clearTimeout(this.cursorTimer);
+      this.cursorTimer = null;
+    }
+    if (!this.pendingCursor || !this.localUser) {
+      this.pendingCursor = null;
+      return;
+    }
+    const cursor = this.pendingCursor;
+    this.pendingCursor = null;
+    this.broadcast({ type: 'awareness', userId: this.localUser.id, data: { cursor }, timestamp: Date.now() });
   }
 
   updateSelection(clipIds: string[]): void {

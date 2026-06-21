@@ -622,3 +622,97 @@ describe('CollaborationEngine — offline operation queue', () => {
     expect(engine.getPendingOperationCount()).toBeLessThanOrEqual(1000);
   });
 });
+
+// ============================================================
+// Cursor (awareness) broadcast throttling — coalesce mousemove storms
+// (per Qiita Yjs throttling research: https://qiita.com/kanta_matsu/items/e967e6c0e1c487a853be)
+// ============================================================
+
+describe('CollaborationEngine — cursor broadcast throttling', () => {
+  it('stores the latest cursor synchronously (no throttle on local state)', async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = await connected();
+      engine.updateCursor(1, 2, 'timeline');
+      engine.updateCursor(3, 4, 'timeline');
+      // Local user reflects the newest position immediately, before any timer.
+      expect(engine.getUsers()[0].cursor).toEqual({ x: 3, y: 4, view: 'timeline' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('coalesces many rapid moves into a single broadcast (trailing edge)', async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = await connected();
+      const ch = new FakeChannel('open');
+      addChannel(engine, 'peer', ch);
+
+      // 100 mousemove-style updates in the same throttle window.
+      for (let i = 0; i < 100; i++) engine.updateCursor(i, i, 'timeline');
+      // Nothing sent yet — broadcast is deferred to the trailing edge.
+      expect(ch.sent).toHaveLength(0);
+
+      await vi.runAllTimersAsync();
+
+      // Exactly ONE awareness broadcast, carrying the LAST position.
+      expect(ch.sent).toHaveLength(1);
+      const msg = JSON.parse(ch.sent[0]);
+      expect(msg.type).toBe('awareness');
+      expect(msg.data.cursor).toEqual({ x: 99, y: 99, view: 'timeline' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('separate throttle windows each emit one broadcast', async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = await connected();
+      const ch = new FakeChannel('open');
+      addChannel(engine, 'peer', ch);
+
+      engine.updateCursor(1, 1, 'timeline');
+      await vi.runAllTimersAsync();
+      engine.updateCursor(2, 2, 'timeline');
+      await vi.runAllTimersAsync();
+
+      expect(ch.sent).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('disconnect flushes the final pending cursor (not lost)', async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = await connected();
+      const ch = new FakeChannel('open');
+      addChannel(engine, 'peer', ch);
+
+      engine.updateCursor(7, 8, 'preview');
+      expect(ch.sent).toHaveLength(0); // still pending
+
+      engine.disconnect();
+      // The final position is flushed synchronously on disconnect.
+      expect(ch.sent).toHaveLength(1);
+      expect(JSON.parse(ch.sent[0]).data.cursor).toEqual({ x: 7, y: 8, view: 'preview' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('disconnect with no pending cursor does not broadcast', async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = await connected();
+      const ch = new FakeChannel('open');
+      addChannel(engine, 'peer', ch);
+      engine.disconnect();
+      expect(ch.sent).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

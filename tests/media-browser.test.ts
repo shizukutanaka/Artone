@@ -125,6 +125,25 @@ describe('MediaBrowser — getItems sorting', () => {
     expect(names).toEqual(['Alpha', 'Bravo', 'Charlie']);
   });
 
+  it('REGRESSION: name sort is natural order ("Take 2" before "Take 10")', () => {
+    // Lexicographic localeCompare put "Take 10" before "Take 2" because '1' < '2'.
+    // Media is routinely named Take 1/2/.../10/100, shot_001, etc.
+    inject(browser, makeItem({ name: 'Take 10.mp4' }));
+    inject(browser, makeItem({ name: 'Take 2.mp4' }));
+    inject(browser, makeItem({ name: 'Take 1.mp4' }));
+    inject(browser, makeItem({ name: 'Take 100.mp4' }));
+    const names = browser.getItems({ sortBy: 'name', sortOrder: 'asc' }).map(i => i.name);
+    expect(names).toEqual(['Take 1.mp4', 'Take 2.mp4', 'Take 10.mp4', 'Take 100.mp4']);
+  });
+
+  it('name sort descending reverses natural order', () => {
+    inject(browser, makeItem({ name: 'clip2' }));
+    inject(browser, makeItem({ name: 'clip10' }));
+    inject(browser, makeItem({ name: 'clip1' }));
+    const names = browser.getItems({ sortBy: 'name', sortOrder: 'desc' }).map(i => i.name);
+    expect(names).toEqual(['clip10', 'clip2', 'clip1']);
+  });
+
   it('sorts by duration descending', () => {
     inject(browser, makeItem({ duration: 5 }));
     inject(browser, makeItem({ duration: 30 }));

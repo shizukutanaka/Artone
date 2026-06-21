@@ -95,6 +95,10 @@ export class MediaBrowser {
   private items: Map<string, MediaItem> = new Map();
   private thumbnailCache: Map<string, string> = new Map();
   private listeners: Set<() => void> = new Set();
+  // Natural-order collator: "Take 2" sorts before "Take 10" (numeric:true), and
+  // case differences don't scatter names (sensitivity:'base'). Built once —
+  // Intl.Collator construction is expensive. (Zenn: localeCompare numeric sort)
+  private readonly nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
   // ============================================================
   // Import
@@ -456,7 +460,8 @@ export class MediaBrowser {
         let cmp = 0;
         switch (sortKey) {
           case 'name':
-            cmp = a.name.localeCompare(b.name);
+            // Natural order so "Take 2" precedes "Take 10" (not lexicographic).
+            cmp = this.nameCollator.compare(a.name, b.name);
             break;
           case 'date':
             cmp = a.imported - b.imported;

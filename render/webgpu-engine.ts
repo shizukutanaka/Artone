@@ -113,6 +113,73 @@ export class WebGPURenderEngine {
   }
 
   // ============================================================
+  // Device loss / recovery
+  // ============================================================
+  //
+  // WebGPU exposes device loss via the device.lost Promise (it RESOLVES, never
+  // rejects, when the device is lost). Unlike WebGL there is no "restored" event:
+  // the app must re-request adapter+device and rebuild every GPU resource. An
+  // intentional device.destroy() also resolves device.lost with reason
+  // 'destroyed' — that must NOT be treated as a crash. (MDN: GPUDevice.lost)
+
+  private canvas: HTMLCanvasElement | OffscreenCanvas | null = null;
+  private deviceLost = false;
+  private intentionalDestroy = false;
+  private readonly contextListeners = new Set<(lost: boolean) => void>();
+
+  /** Subscribe to device lost/recovered transitions (UI can show a banner). */
+  onContextChange(listener: (lost: boolean) => void): () => void {
+    this.contextListeners.add(listener);
+    return () => this.contextListeners.delete(listener);
+  }
+
+  /** Whether the GPU device is currently lost (renderFrame is a no-op while true). */
+  isDeviceLost(): boolean {
+    return this.deviceLost;
+  }
+
+  private notifyContext(lost: boolean): void {
+    for (const l of this.contextListeners) {
+      try { l(lost); } catch (e) { log.error('context listener threw', e); }
+    }
+  }
+
+  /** Attach the device.lost watcher (guarded — mock devices may lack .lost). */
+  private watchDeviceLost(device: GPUDevice): void {
+    const lost = (device as GPUDevice).lost;
+    if (!lost || typeof lost.then !== 'function') return;
+    lost.then((info) => this.handleDeviceLost(info)).catch(() => { /* never rejects */ });
+  }
+
+  /** React to device loss: ignore intentional destroy, else pause + recover. */
+  private handleDeviceLost(info: GPUDeviceLostInfo): void {
+    if (this.intentionalDestroy || info?.reason === 'destroyed') return;
+    this.deviceLost = true;
+    log.warn(`WebGPU device lost (${info?.reason ?? 'unknown'}): ${info?.message ?? ''} — attempting recovery`);
+    this.notifyContext(true);
+    void this.attemptRecovery();
+  }
+
+  /** Best-effort recovery: drop invalid resources and re-run initialize(). */
+  private async attemptRecovery(): Promise<void> {
+    if (!this.canvas) return;
+    // All GPU objects belonged to the lost device and are now invalid; drop refs
+    // (do not call .destroy() — the device is gone). Textures re-upload next frame.
+    this.textureCache.clear();
+    this.cacheOrder = [];
+    this.pipelines.clear();
+    this.shaders.clear();
+    this.sampler = null;
+    this.device = null;
+    const ok = await this.initialize(this.canvas);
+    if (ok) {
+      this.deviceLost = false;
+      this.notifyContext(false);
+      log.info('WebGPU device recovered');
+    }
+  }
+
+  // ============================================================
   // Initialization
   // ============================================================
 
@@ -129,6 +196,9 @@ export class WebGPURenderEngine {
       if (!adapter) return false;
 
       this.device = await adapter.requestDevice();
+      this.canvas = canvas;
+      // Watch for device loss so we can pause rendering and auto-recover.
+      this.watchDeviceLost(this.device);
       this.context = canvas.getContext('webgpu') as GPUCanvasContext;
 
       const format = navigator.gpu.getPreferredCanvasFormat();
@@ -453,7 +523,8 @@ export class WebGPURenderEngine {
   // ============================================================
 
   async renderFrame(layers: RenderLayer[]): Promise<void> {
-    if (!this.device || !this.context) return;
+    // Skip while the device is lost — GPU calls would throw or be dropped.
+    if (this.deviceLost || !this.device || !this.context) return;
 
     const startTime = performance.now();
     const encoder = this.device.createCommandEncoder();
@@ -658,11 +729,16 @@ export class WebGPURenderEngine {
     this.pipelines.clear();
     this.shaders.clear();
     this.sampler = null;
+    // Mark BEFORE destroy() so the device.lost handler treats the resulting
+    // 'destroyed' resolution as intentional (no spurious recovery attempt).
+    this.intentionalDestroy = true;
     // Explicitly destroy the device to release all remaining GPU resources
     // (uniform buffers, bind group layouts, etc.) before nulling the reference.
     this.device?.destroy();
     this.device = null;
     this.context = null;
+    this.canvas = null;
+    this.contextListeners.clear();
   }
 }
 

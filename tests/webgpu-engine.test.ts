@@ -381,3 +381,55 @@ describe('WebGPURenderEngine — destroy()', () => {
     expect(() => new WebGPURenderEngine().destroy()).not.toThrow();
   });
 });
+
+// ============================================================
+// Device loss / recovery (MDN: GPUDevice.lost)
+// ============================================================
+
+describe('WebGPURenderEngine — device loss', () => {
+  type Internal = {
+    handleDeviceLost(info: { reason?: string; message?: string }): void;
+    deviceLost: boolean;
+  };
+
+  it('handleDeviceLost(reason:unknown) marks the device lost', () => {
+    const { engine } = primedEngine();
+    (engine as unknown as Internal).handleDeviceLost({ reason: 'unknown', message: 'gpu reset' });
+    expect(engine.isDeviceLost()).toBe(true);
+  });
+
+  it('intentional destroy (reason:destroyed) is NOT treated as loss', () => {
+    const { engine } = primedEngine();
+    (engine as unknown as Internal).handleDeviceLost({ reason: 'destroyed', message: '' });
+    expect(engine.isDeviceLost()).toBe(false);
+  });
+
+  it('renderFrame is a no-op while the device is lost', async () => {
+    const { engine, mock } = primedEngine();
+    (engine as unknown as Internal).handleDeviceLost({ reason: 'unknown' });
+    (mock.device.createCommandEncoder as ReturnType<typeof vi.fn>).mockClear();
+    await engine.renderFrame([]);
+    expect(mock.device.createCommandEncoder).not.toHaveBeenCalled();
+  });
+
+  it('onContextChange is notified true on loss', () => {
+    const { engine } = primedEngine();
+    const states: boolean[] = [];
+    engine.onContextChange((lost) => states.push(lost));
+    (engine as unknown as Internal).handleDeviceLost({ reason: 'unknown' });
+    expect(states).toEqual([true]);
+  });
+
+  it('after destroy(), a later device.lost resolution is ignored (intentional)', () => {
+    const { engine } = primedEngine();
+    engine.destroy();
+    // Simulate the device.lost promise resolving with 'destroyed' post-destroy.
+    (engine as unknown as Internal).handleDeviceLost({ reason: 'destroyed' });
+    expect(engine.isDeviceLost()).toBe(false);
+  });
+
+  it('isDeviceLost() is false on a freshly primed engine', () => {
+    const { engine } = primedEngine();
+    expect(engine.isDeviceLost()).toBe(false);
+  });
+});

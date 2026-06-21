@@ -12,12 +12,68 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ProxyManager } from '../media/proxy-manager';
+import { ProxyManager, estimateProxySize, PROXY_FPS } from '../media/proxy-manager';
 
 let mgr: ProxyManager;
 
 beforeEach(() => {
   mgr = new ProxyManager();
+});
+
+// ─── estimateProxySize (pure bitrate model) ────────────────────────────────────
+
+describe('estimateProxySize', () => {
+  it('returns 0 for any non-positive input (invalid)', () => {
+    expect(estimateProxySize(0, 1080, 60, 'medium', 'h264')).toBe(0);
+    expect(estimateProxySize(1920, 0, 60, 'medium', 'h264')).toBe(0);
+    expect(estimateProxySize(1920, 1080, 0, 'medium', 'h264')).toBe(0);
+    expect(estimateProxySize(1920, 1080, -5, 'medium', 'h264')).toBe(0);
+  });
+
+  it('follows the bitrate model: size = w*h*fps*bpp*mult*dur/8', () => {
+    // 480x270, medium (bpp=0.07), h264 (mult=1.0), 60s
+    const expected = Math.round((480 * 270 * PROXY_FPS * 0.07 * 1.0 * 60) / 8);
+    expect(estimateProxySize(480, 270, 60, 'medium', 'h264')).toBe(expected);
+  });
+
+  it('scales linearly with duration', () => {
+    const a = estimateProxySize(960, 540, 30, 'medium', 'h264');
+    const b = estimateProxySize(960, 540, 60, 'medium', 'h264');
+    expect(b).toBeCloseTo(a * 2, 0);
+  });
+
+  it('scales with pixel count (4x area → 4x size)', () => {
+    const small = estimateProxySize(480, 270, 60, 'medium', 'h264');
+    const big = estimateProxySize(960, 540, 60, 'medium', 'h264'); // 2x each dim = 4x area
+    expect(big).toBeCloseTo(small * 4, 0);
+  });
+
+  it('higher quality tier yields a larger file', () => {
+    const low = estimateProxySize(960, 540, 60, 'low', 'h264');
+    const med = estimateProxySize(960, 540, 60, 'medium', 'h264');
+    const high = estimateProxySize(960, 540, 60, 'high', 'h264');
+    expect(med).toBeGreaterThan(low);
+    expect(high).toBeGreaterThan(med);
+  });
+
+  it('codec ordering: vp9 < h264 < prores_proxy at equal settings', () => {
+    const vp9 = estimateProxySize(960, 540, 60, 'medium', 'vp9');
+    const h264 = estimateProxySize(960, 540, 60, 'medium', 'h264');
+    const prores = estimateProxySize(960, 540, 60, 'medium', 'prores_proxy');
+    expect(vp9).toBeLessThan(h264);
+    expect(h264).toBeLessThan(prores);
+  });
+
+  it('returns an integer byte count', () => {
+    const s = estimateProxySize(1280, 720, 12.5, 'high', 'prores_proxy');
+    expect(Number.isInteger(s)).toBe(true);
+  });
+
+  it('produces a realistic size (1-min 480x270 medium h264 ≈ 1-3 MB)', () => {
+    const bytes = estimateProxySize(480, 270, 60, 'medium', 'h264');
+    expect(bytes).toBeGreaterThan(1_000_000);
+    expect(bytes).toBeLessThan(3_000_000);
+  });
 });
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
@@ -225,6 +281,38 @@ describe('generateProxy', () => {
     expect(stats.readyCount).toBe(1);
     expect(stats.totalSize).toBeGreaterThan(0);
     expect(stats.pendingCount).toBe(0);
+  });
+
+  it('REGRESSION: ready proxy size is a real estimate, not the old fixed 10MB dummy', async () => {
+    // Before: proxy.size was hardcoded to 1024*1024*10. Now it is derived from
+    // the (default 1080p/60s) source via the bitrate model. The 1/4-scale 60s
+    // medium h264 proxy must NOT equal exactly 10 MB.
+    const p = mgr.generateProxy('media-1', undefined!);
+    await vi.runAllTimersAsync();
+    const proxy = await p;
+    expect(proxy!.size).toBeGreaterThan(0);
+    expect(proxy!.size).not.toBe(1024 * 1024 * 10);
+  });
+
+  it('REGRESSION: proxy hash is deterministic for the same media+settings (was random UUID)', async () => {
+    // First generation
+    const p1 = await (async () => {
+      const pr = mgr.generateProxy('media-x', undefined!);
+      await vi.runAllTimersAsync();
+      return pr;
+    })();
+    const hash1 = p1!.hash;
+
+    // Remove it and regenerate with identical settings → identical hash
+    mgr.deleteProxy(p1!.id);
+    const p2 = await (async () => {
+      const pr = mgr.generateProxy('media-x', undefined!);
+      await vi.runAllTimersAsync();
+      return pr;
+    })();
+    expect(p2!.hash).toBe(hash1);
+    // Hash is a non-empty hex string, not a UUID with dashes
+    expect(hash1).toMatch(/^[0-9a-f]+$/);
   });
 
   it('multiple different media each get a proxy', async () => {

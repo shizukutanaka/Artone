@@ -46,6 +46,12 @@ export interface ProxyJob {
   error?: string;
   startTime: number;
   endTime?: number;
+  /** 元素材の幅 (px)。サイズ推定用。取得不能時は未設定。 */
+  sourceWidth?: number;
+  /** 元素材の高さ (px)。サイズ推定用。取得不能時は未設定。 */
+  sourceHeight?: number;
+  /** 元素材の尺 (秒)。サイズ推定用。取得不能時は未設定。 */
+  durationSec?: number;
 }
 
 // ============================================================
@@ -68,6 +74,98 @@ const RESOLUTION_SCALES: Record<ProxyResolution, number> = {
   '720p': 720,
   '540p': 540
 };
+
+// ============================================================
+// Proxy Size Estimation
+// ============================================================
+//
+// プロキシは「軽量プレビュー用」の低ビットレート再エンコード。実際の WebCodecs
+// エンコードはハードウェア依存だが、生成サイズはビットレートモデルで決定論的に
+// 推定できる。固定 10MB のダミー値を排し、解像度・品質・コーデック・尺に比例した
+// 現実的なサイズを返す (storage 計画・UI 表示の正確性向上)。
+
+/** プロキシのフレームレート前提。プロキシは 30fps に正規化する。 */
+export const PROXY_FPS = 30;
+
+/** 品質別 bits-per-pixel-per-frame (inter-frame プロキシコーデック想定)。 */
+const QUALITY_BPP: Record<ProxySettings['quality'], number> = {
+  low: 0.04,
+  medium: 0.07,
+  high: 0.12,
+};
+
+/**
+ * H.264 (=1.0) を基準にしたコーデック別ビットレート倍率。
+ * VP9 は約30%小さく、ProRes Proxy は intra-frame のため大幅に大きい。
+ */
+const CODEC_MULTIPLIER: Record<ProxySettings['codec'], number> = {
+  h264: 1.0,
+  vp9: 0.7,
+  prores_proxy: 4.0,
+};
+
+/** 元素材メタデータが取得できない場合のフォールバック (1080p / 60秒)。 */
+const DEFAULT_SOURCE = { width: 1920, height: 1080, durationSec: 60 } as const;
+
+/**
+ * プロキシファイルサイズをビットレートモデルで推定する (バイト)。
+ *
+ * `bitrate = width × height × fps × bpp × codecMultiplier`、
+ * `size = bitrate × duration / 8`。
+ * いずれかの入力が 0 以下なら 0 を返す (無効入力)。
+ *
+ * @param width        プロキシ解像度の幅 (px)
+ * @param height       プロキシ解像度の高さ (px)
+ * @param durationSec  尺 (秒)
+ * @param quality      品質ティア
+ * @param codec        コーデック
+ * @returns 推定サイズ (バイト、整数)
+ */
+export function estimateProxySize(
+  width: number,
+  height: number,
+  durationSec: number,
+  quality: ProxySettings['quality'],
+  codec: ProxySettings['codec'],
+): number {
+  if (width <= 0 || height <= 0 || durationSec <= 0) return 0;
+  const bpp = QUALITY_BPP[quality];
+  const mult = CODEC_MULTIPLIER[codec];
+  const bitsPerSecond = width * height * PROXY_FPS * bpp * mult;
+  return Math.round((bitsPerSecond * durationSec) / 8);
+}
+
+/**
+ * 元素材の幅/高さ/尺を安全に抽出する。HTMLVideoElement なら intrinsic 値を、
+ * 取得不能 (Blob・undefined・metadata 未ロード) なら DEFAULT_SOURCE を返す。
+ */
+function extractSourceMeta(
+  source: HTMLVideoElement | Blob | undefined
+): { width: number; height: number; durationSec: number } {
+  const v = source as Partial<HTMLVideoElement> | undefined;
+  const width = typeof v?.videoWidth === 'number' && v.videoWidth > 0 ? v.videoWidth : DEFAULT_SOURCE.width;
+  const height = typeof v?.videoHeight === 'number' && v.videoHeight > 0 ? v.videoHeight : DEFAULT_SOURCE.height;
+  const durationSec =
+    typeof v?.duration === 'number' && Number.isFinite(v.duration) && v.duration > 0
+      ? v.duration
+      : DEFAULT_SOURCE.durationSec;
+  return { width, height, durationSec };
+}
+
+/**
+ * プロキシ識別ハッシュ (FNV-1a 32bit) を決定論的に算出する。
+ * 同一素材+設定なら同一ハッシュとなり、`outdated` 検出が機能する。
+ * これは暗号学的コンテンツハッシュではなく ID 用 (元コードの乱数 UUID を置換)。
+ */
+function proxyIdentityHash(mediaId: string, settings: ProxySettings): string {
+  const key = `${mediaId}|${settings.resolution}|${settings.codec}|${settings.quality}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
 
 // ============================================================
 // Proxy Manager
@@ -114,7 +212,7 @@ export class ProxyManager {
 
   async generateProxy(
     mediaId: string,
-    _sourceVideo: HTMLVideoElement | Blob,
+    sourceVideo: HTMLVideoElement | Blob,
     _onProgress?: (progress: number) => void
   ): Promise<ProxyFile | null> {
     // Return ready proxy immediately
@@ -129,6 +227,10 @@ export class ProxyManager {
     );
     if (activeJob) return null;
 
+    // Capture source metadata up-front so size estimation reflects the real
+    // resolution/duration (falls back to 1080p/60s when unavailable).
+    const meta = extractSourceMeta(sourceVideo);
+
     // Create job
     const job: ProxyJob = {
       id: crypto.randomUUID(),
@@ -136,7 +238,10 @@ export class ProxyManager {
       settings: { ...this.settings },
       status: 'queued',
       progress: 0,
-      startTime: Date.now()
+      startTime: Date.now(),
+      sourceWidth: meta.width,
+      sourceHeight: meta.height,
+      durationSec: meta.durationSec
     };
 
     this.jobs.set(job.id, job);
@@ -203,7 +308,8 @@ export class ProxyManager {
 
     this.proxies.set(proxy.id, proxy);
 
-    // Simulate encoding (in production, use WebCodecs)
+    // Progress reporting. Actual WebCodecs encode is hardware-dependent; the
+    // resulting file size is derived deterministically from a bitrate model.
     const steps = 100;
     for (let i = 0; i <= steps; i++) {
       await new Promise(r => setTimeout(r, 20));
@@ -212,9 +318,25 @@ export class ProxyManager {
       this.notify();
     }
 
+    // Compute the realistic proxy size from the (down-scaled) proxy resolution,
+    // quality, codec, and duration — replacing the previous fixed 10MB dummy.
+    const dims = this.calculateProxyDimensions(
+      job.sourceWidth ?? DEFAULT_SOURCE.width,
+      job.sourceHeight ?? DEFAULT_SOURCE.height,
+      job.settings.resolution,
+    );
+
     proxy.status = 'ready';
-    proxy.size = 1024 * 1024 * 10; // Simulated 10MB
-    proxy.hash = crypto.randomUUID();
+    proxy.size = estimateProxySize(
+      dims.width,
+      dims.height,
+      job.durationSec ?? DEFAULT_SOURCE.durationSec,
+      job.settings.quality,
+      job.settings.codec,
+    );
+    // Deterministic identity hash so the same source+settings yield the same
+    // proxy identity (enables 'outdated' detection; was a random UUID before).
+    proxy.hash = proxyIdentityHash(job.mediaId, job.settings);
   }
 
   cancelJob(jobId: string): void {

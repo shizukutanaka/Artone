@@ -35,9 +35,52 @@ export class RenderBackend {
   private cache: FrameCache;
   private bundleCache = new RenderBundleCache();
   private active: ActiveBackend = 'none';
+  // When the active engine's GPU context is lost, `active` drops to 'none' so
+  // renderLayers() pauses; on recovery it is restored. The backend type chosen
+  // at initialize() is remembered here so recovery can restore it.
+  private resolvedBackend: ActiveBackend = 'none';
+  private gpuLost = false;
+  private readonly contextListeners = new Set<(lost: boolean) => void>();
 
   constructor(cacheConfig?: Partial<FrameCacheConfig>) {
     this.cache = new FrameCache(cacheConfig);
+  }
+
+  /**
+   * Subscribe to GPU context lost/recovered transitions of the active backend.
+   * The UI can use this to show a "GPU recovering…" banner. Returns unsubscribe.
+   */
+  onContextChange(listener: (lost: boolean) => void): () => void {
+    this.contextListeners.add(listener);
+    return () => this.contextListeners.delete(listener);
+  }
+
+  /** Whether the active GPU backend is currently in a lost state. */
+  isContextLost(): boolean {
+    return this.gpuLost;
+  }
+
+  private notifyContext(lost: boolean): void {
+    for (const l of this.contextListeners) {
+      try { l(lost); } catch (e) { log.error('context listener threw', e); }
+    }
+  }
+
+  /**
+   * Wire an engine's context-loss callback to backend state: drop `active` to
+   * 'none' while lost (renderLayers no-ops), restore it on recovery, and forward
+   * the transition to backend-level subscribers.
+   */
+  private bindContextLoss(
+    engine: { onContextChange(cb: (lost: boolean) => void): () => void },
+  ): void {
+    engine.onContextChange((lost) => {
+      this.gpuLost = lost;
+      this.active = lost ? 'none' : this.resolvedBackend;
+      if (lost) log.warn('Render backend: GPU context lost — rendering paused');
+      else log.info('Render backend: GPU context recovered');
+      this.notifyContext(lost);
+    });
   }
 
   /**
@@ -71,6 +114,9 @@ export class RenderBackend {
       this.webgl = null;
       this.active = 'none';
     }
+    // Reset loss state for the fresh backend (initialize is also the recovery
+    // entry point, so a prior lost flag must not leak into the new engine).
+    this.gpuLost = false;
 
     // 1. WebGPU を試す
     if (typeof navigator !== 'undefined' && navigator.gpu) {
@@ -79,6 +125,8 @@ export class RenderBackend {
       if (ok) {
         this.webgpu = engine;
         this.active = 'webgpu';
+        this.resolvedBackend = 'webgpu';
+        this.bindContextLoss(engine);
         log.info('Render backend: WebGPU (hardware accelerated)');
         return 'webgpu';
       }
@@ -90,12 +138,15 @@ export class RenderBackend {
     if (fallback.initialize(canvas)) {
       this.webgl = fallback;
       this.active = 'webgl2';
+      this.resolvedBackend = 'webgl2';
+      this.bindContextLoss(fallback);
       log.info('Render backend: WebGL 2.0 (fallback)');
       return 'webgl2';
     }
 
     // 3. どちらも不可
     this.active = 'none';
+    this.resolvedBackend = 'none';
     log.error('No rendering backend available (no WebGPU, no WebGL 2.0)');
     return 'none';
   }
@@ -170,5 +221,8 @@ export class RenderBackend {
     this.webgpu = null;
     this.webgl = null;
     this.active = 'none';
+    this.resolvedBackend = 'none';
+    this.gpuLost = false;
+    this.contextListeners.clear();
   }
 }

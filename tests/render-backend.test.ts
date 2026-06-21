@@ -330,3 +330,82 @@ describe('RenderBackend — initialize is idempotent (no orphaned GPU backend)',
     expect(result).toBe('none');
   });
 });
+
+// ============================================================
+// RenderBackend — GPU context-loss coordination (Q15/Q16 integration)
+// ============================================================
+
+describe('RenderBackend — context loss coordination', () => {
+  type RBLoss = {
+    resolvedBackend: ActiveBackend;
+    active: ActiveBackend;
+    bindContextLoss(engine: { onContextChange(cb: (lost: boolean) => void): () => void }): void;
+  };
+
+  /** Fake engine that captures the bound context-change callback. */
+  function fakeEngine() {
+    let cb: ((lost: boolean) => void) | null = null;
+    return {
+      onContextChange: (fn: (lost: boolean) => void) => { cb = fn; return () => { cb = null; }; },
+      emit: (lost: boolean) => cb?.(lost),
+    };
+  }
+
+  function primed(backend: ActiveBackend) {
+    const rb = new RenderBackend();
+    const priv = rb as unknown as RBLoss;
+    priv.resolvedBackend = backend;
+    priv.active = backend;
+    const eng = fakeEngine();
+    priv.bindContextLoss(eng);
+    return { rb, priv, eng };
+  }
+
+  it('on loss: active drops to none and isContextLost() is true', () => {
+    const { rb, priv, eng } = primed('webgpu');
+    eng.emit(true);
+    expect(priv.active).toBe('none');
+    expect(rb.isContextLost()).toBe(true);
+    expect(rb.getActiveBackend()).toBe('none');
+  });
+
+  it('on recovery: active is restored to the resolved backend', () => {
+    const { rb, priv, eng } = primed('webgpu');
+    eng.emit(true);
+    eng.emit(false);
+    expect(priv.active).toBe('webgpu');
+    expect(rb.isContextLost()).toBe(false);
+  });
+
+  it('restores webgl2 (not webgpu) when that was the resolved backend', () => {
+    const { priv, eng } = primed('webgl2');
+    eng.emit(true);
+    eng.emit(false);
+    expect(priv.active).toBe('webgl2');
+  });
+
+  it('forwards lost/recovered transitions to backend-level subscribers', () => {
+    const { rb, eng } = primed('webgpu');
+    const states: boolean[] = [];
+    rb.onContextChange((lost) => states.push(lost));
+    eng.emit(true);
+    eng.emit(false);
+    expect(states).toEqual([true, false]);
+  });
+
+  it('renderLayers is a no-op while the context is lost', async () => {
+    const { rb, eng } = primed('webgpu');
+    eng.emit(true);
+    // active is 'none' → renderLayers must not throw and must do nothing.
+    await expect(rb.renderLayers([])).resolves.toBeUndefined();
+  });
+
+  it('unsubscribe stops backend-level notifications', () => {
+    const { rb, eng } = primed('webgpu');
+    const states: boolean[] = [];
+    const unsub = rb.onContextChange((lost) => states.push(lost));
+    unsub();
+    eng.emit(true);
+    expect(states).toEqual([]);
+  });
+});

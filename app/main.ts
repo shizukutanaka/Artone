@@ -15,7 +15,7 @@ import { createLogger } from './logger';
 import { t } from '../i18n/i18n-manager';
 import { safeStorageGet, safeStorageSet, safeStorageRemove } from './utils';
 import { requestPersistentStorage } from './storage-persistence';
-import { MagneticTimeline, type TimelineState } from '../timeline/magnetic-timeline';
+import { MagneticTimeline, serializeTimelineState, type SerializedTimelineState } from '../timeline/magnetic-timeline';
 import { TextBasedEditor } from '../timeline/text-based-editing';
 import { MultiCamEditor } from '../timeline/multicam-editor';
 import { ColorGradingEngine } from '../color/grading-engine';
@@ -101,7 +101,9 @@ interface RecoveryData {
   timestamp: number;
   data: { tracks: unknown[]; settings: unknown };
   version: string;
-  timelineState?: TimelineState;
+  // Serialized (JSON-safe) form — the live TimelineState holds Maps/Set that
+  // JSON.stringify would silently flatten to "{}".
+  timelineState?: SerializedTimelineState;
   playhead?: number;
 }
 
@@ -453,7 +455,9 @@ export class ArtoneApp {
       const recoveryData = {
         timestamp: Date.now(),
         projectId: this.project.getCurrentProject()?.id,
-        timelineState: this.timeline.getState(),
+        // Serialize so the Maps (tracks, clips) and Set (selection) survive the
+        // JSON round-trip — otherwise the entire timeline is lost from the snapshot.
+        timelineState: serializeTimelineState(this.timeline.getState()),
         playhead: this.playbackFrame,
         historyPosition: this.history.getPosition()
       };

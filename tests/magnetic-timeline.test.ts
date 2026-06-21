@@ -3,7 +3,12 @@
  * # AI generated (reviewed)
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { MagneticTimeline, type Clip } from '../timeline/magnetic-timeline';
+import {
+  MagneticTimeline,
+  serializeTimelineState,
+  deserializeTimelineState,
+  type Clip,
+} from '../timeline/magnetic-timeline';
 
 // ─── helpers ───────────────────────────────────────────────────
 
@@ -546,5 +551,81 @@ describe('MagneticTimeline — play / pause', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ─── serialize / deserialize (recovery JSON round-trip) ─────────
+
+describe('serializeTimelineState / deserializeTimelineState', () => {
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find(t => t.name === 'V1')!.id;
+  });
+
+  it('REGRESSION: JSON.stringify(getState()) alone loses Maps/Set (the bug being fixed)', () => {
+    tl.addClip(clipSpec({ trackId: vId, startTime: 0, duration: 5 }));
+    // Demonstrate the data loss: a raw round-trip flattens Maps/Set to "{}".
+    const naive = JSON.parse(JSON.stringify(tl.getState()));
+    expect(Object.keys(naive.clips)).toHaveLength(0);  // Map → {} → no keys
+    expect(Object.keys(naive.tracks)).toHaveLength(0);
+    expect(naive.selection).toEqual({});               // Set → {}
+  });
+
+  it('serialize → JSON → deserialize preserves clips, tracks, and selection', () => {
+    const clip = tl.addClip(clipSpec({ trackId: vId, startTime: 2, duration: 5 }));
+    tl.selectClip(clip.id);
+    const before = tl.getState();
+
+    // Full recovery round-trip through a JSON string.
+    const json = JSON.stringify(serializeTimelineState(before));
+    const after = deserializeTimelineState(JSON.parse(json));
+
+    expect(after.clips).toBeInstanceOf(Map);
+    expect(after.tracks).toBeInstanceOf(Map);
+    expect(after.selection).toBeInstanceOf(Set);
+    expect(after.clips.size).toBe(before.clips.size);
+    expect(after.tracks.size).toBe(before.tracks.size);
+    expect(after.clips.get(clip.id)?.startTime).toBe(2);
+    expect(after.selection.has(clip.id)).toBe(true);
+  });
+
+  it('preserves scalar state fields (playhead, zoom, in/out points)', () => {
+    tl.setPlayhead(12);
+    const before = tl.getState();
+    const after = deserializeTimelineState(JSON.parse(JSON.stringify(serializeTimelineState(before))));
+    expect(after.playhead).toBe(before.playhead);
+    expect(after.zoom).toBe(before.zoom);
+    expect(after.inPoint).toBe(before.inPoint);
+    expect(after.outPoint).toBe(before.outPoint);
+    expect(after.scrollX).toBe(before.scrollX);
+  });
+
+  it('deserialize is defensive against null / partial / corrupt input', () => {
+    const empty = deserializeTimelineState(null);
+    expect(empty.clips.size).toBe(0);
+    expect(empty.tracks.size).toBe(0);
+    expect(empty.selection.size).toBe(0);
+    expect(empty.playhead).toBe(0);
+    expect(empty.zoom).toBe(1);
+
+    // Partial object with wrong-typed fields falls back to defaults.
+    const partial = deserializeTimelineState({ playhead: 5 } as never);
+    expect(partial.playhead).toBe(5);
+    expect(partial.clips.size).toBe(0);
+    expect(partial.inPoint).toBeNull();
+  });
+
+  it('serialized form is JSON-safe (no Map/Set survive)', () => {
+    tl.addClip(clipSpec({ trackId: vId }));
+    const s = serializeTimelineState(tl.getState());
+    expect(Array.isArray(s.clips)).toBe(true);
+    expect(Array.isArray(s.tracks)).toBe(true);
+    expect(Array.isArray(s.selection)).toBe(true);
+    // Survives a round-trip with all data intact.
+    const reparsed = JSON.parse(JSON.stringify(s));
+    expect(reparsed.clips).toHaveLength(s.clips.length);
   });
 });

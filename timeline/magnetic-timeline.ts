@@ -77,6 +77,61 @@ export interface TimelineState {
 }
 
 // ============================================================
+// Serialization (JSON-safe round-trip for recovery / persistence)
+// ============================================================
+//
+// TimelineState holds Maps (tracks, clips) and a Set (selection). JSON.stringify
+// turns a Map/Set into "{}", so naively persisting getState() SILENTLY DROPS all
+// tracks, clips and selection. These helpers convert to/from a JSON-safe shape.
+
+/** JSON-safe representation of {@link TimelineState} (Map→entries, Set→array). */
+export interface SerializedTimelineState {
+  tracks: Array<[string, Track]>;
+  clips: Array<[string, Clip]>;
+  playhead: number;
+  inPoint: number | null;
+  outPoint: number | null;
+  zoom: number;
+  scrollX: number;
+  selection: string[];
+}
+
+/** Convert a {@link TimelineState} into a JSON-serializable object. */
+export function serializeTimelineState(state: TimelineState): SerializedTimelineState {
+  return {
+    tracks: Array.from(state.tracks.entries()),
+    clips: Array.from(state.clips.entries()),
+    playhead: state.playhead,
+    inPoint: state.inPoint,
+    outPoint: state.outPoint,
+    zoom: state.zoom,
+    scrollX: state.scrollX,
+    selection: Array.from(state.selection),
+  };
+}
+
+/**
+ * Rebuild a {@link TimelineState} from its serialized form. Defensive against
+ * missing / partial fields (old or corrupt snapshots are a trust boundary):
+ * absent maps/sets become empty, scalars fall back to sane defaults.
+ */
+export function deserializeTimelineState(
+  data: Partial<SerializedTimelineState> | null | undefined,
+): TimelineState {
+  const d = data ?? {};
+  return {
+    tracks: new Map(Array.isArray(d.tracks) ? d.tracks : []),
+    clips: new Map(Array.isArray(d.clips) ? d.clips : []),
+    playhead: typeof d.playhead === 'number' ? d.playhead : 0,
+    inPoint: typeof d.inPoint === 'number' ? d.inPoint : null,
+    outPoint: typeof d.outPoint === 'number' ? d.outPoint : null,
+    zoom: typeof d.zoom === 'number' ? d.zoom : 1,
+    scrollX: typeof d.scrollX === 'number' ? d.scrollX : 0,
+    selection: new Set(Array.isArray(d.selection) ? d.selection : []),
+  };
+}
+
+// ============================================================
 // Magnetic Timeline Engine
 // ============================================================
 

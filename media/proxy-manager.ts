@@ -310,8 +310,17 @@ export class ProxyManager {
 
     // Progress reporting. Actual WebCodecs encode is hardware-dependent; the
     // resulting file size is derived deterministically from a bitrate model.
+    // Check job.status each iteration so cancelJob() short-circuits this loop
+    // instead of running the full 2-second simulated encode after the user
+    // already asked to cancel (Qiita: AbortController / setTimeout クリーンアップ).
     const steps = 100;
     for (let i = 0; i <= steps; i++) {
+      if ((job.status as ProxyJob['status']) === 'cancelled') {
+        // Drop the half-built proxy: a cancelled job must not leave a 'ready'-
+        // looking proxy in the registry that getProxyForMedia would return.
+        this.proxies.delete(proxy.id);
+        return;
+      }
       await new Promise(r => setTimeout(r, 20));
       proxy.progress = i / steps;
       job.progress = proxy.progress;

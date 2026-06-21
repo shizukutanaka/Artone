@@ -370,6 +370,23 @@ describe('cancelJob', () => {
 
     expect(mgr.getJob(job1!.id)?.status).toBe('cancelled');
   });
+
+  it('REGRESSION: cancel during processJob removes the half-built proxy from the registry', async () => {
+    // Before fix: processJob ran the full simulated encode loop after cancel,
+    // ending with `proxy.status = 'ready'` and leaving a phantom ready-looking
+    // proxy in the registry. getProxyForMedia would return it as if generation
+    // had succeeded, defeating the cancellation.
+    const p1 = mgr.generateProxy('media-1', undefined!);
+    const job1 = mgr.getAllJobs().find(j => j.mediaId === 'media-1')!;
+    mgr.cancelJob(job1.id);
+
+    await vi.runAllTimersAsync();
+    await p1;
+
+    // No proxy must remain in the registry for the cancelled media id.
+    expect(mgr.getProxyForMedia('media-1')).toBeNull();
+    expect(mgr.getAllProxies()).toHaveLength(0);
+  });
 });
 
 // ─── proxy lifecycle ──────────────────────────────────────────────────────────

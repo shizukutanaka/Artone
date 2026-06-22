@@ -12,6 +12,7 @@
  */
 
 import { IntervalIndex } from './interval-index';
+import { liftRange, extractRange } from './range-edit';
 
 // ============================================================
 // Types
@@ -359,7 +360,7 @@ export class MagneticTimeline {
 
   closeGaps(trackId: string): void {
     const clips = this.getTrackClips(trackId).sort((a, b) => a.startTime - b.startTime);
-    
+
     let currentTime = 0;
     for (const clip of clips) {
       if (clip.startTime > currentTime) {
@@ -369,6 +370,50 @@ export class MagneticTimeline {
     }
 
     this.notify();
+  }
+
+  // ============================================================
+  // Three-point editing (Lift / Extract over the in→out range)
+  // ============================================================
+
+  /**
+   * Lift: remove the marked in→out range, leaving a gap. Subsequent clips do
+   * not move. Pass `trackId` to limit the edit to one track (default: all).
+   *
+   * @returns true if an edit was applied (valid in/out range), false otherwise.
+   */
+  lift(trackId?: string): boolean {
+    return this.applyRangeEdit(liftRange, trackId);
+  }
+
+  /**
+   * Extract: remove the marked in→out range and ripple subsequent clips left to
+   * close the gap (sequence shortens). Pass `trackId` to limit to one track.
+   *
+   * @returns true if an edit was applied (valid in/out range), false otherwise.
+   */
+  extract(trackId?: string): boolean {
+    return this.applyRangeEdit(extractRange, trackId);
+  }
+
+  /** Shared apply path for lift/extract. Requires both in and out points set. */
+  private applyRangeEdit(
+    op: typeof liftRange,
+    trackId: string | undefined,
+  ): boolean {
+    const { inPoint, outPoint } = this.state;
+    if (inPoint === null || outPoint === null) return false;
+    const start = Math.min(inPoint, outPoint);
+    const end = Math.max(inPoint, outPoint);
+    if (!(end > start)) return false;
+
+    const result = op([...this.state.clips.values()], { start, end }, { trackId });
+    if (result.clips.length === 0 && result.removedIds.length === 0) return false;
+
+    for (const id of result.removedIds) this.state.clips.delete(id);
+    for (const clip of result.clips) this.state.clips.set(clip.id, clip);
+    this.notify();
+    return true;
   }
 
   // ============================================================

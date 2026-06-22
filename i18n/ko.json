@@ -280,6 +280,8 @@
       "setInPoint": "인 포인트 설정",
       "setOutPoint": "아웃 포인트 설정",
       "clearInOut": "인 / 아웃 지우기",
+      "lift": "리프트",
+      "extract": "추출",
       "zoomIn": "확대",
       "zoomOut": "축소",
       "zoomFit": "화면에 맞추기",

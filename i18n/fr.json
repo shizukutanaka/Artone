@@ -280,6 +280,8 @@
       "setInPoint": "Définir le point d'entrée",
       "setOutPoint": "Définir le point de sortie",
       "clearInOut": "Effacer entrée / sortie",
+      "lift": "Soulever",
+      "extract": "Extraire",
       "zoomIn": "Agrandir",
       "zoomOut": "Réduire",
       "zoomFit": "Ajuster à l'écran",

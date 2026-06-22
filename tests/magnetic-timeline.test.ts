@@ -629,3 +629,91 @@ describe('serializeTimelineState / deserializeTimelineState', () => {
     expect(reparsed.clips).toHaveLength(s.clips.length);
   });
 });
+
+// ─── Lift / Extract (three-point editing) ──────────────────────
+
+describe('MagneticTimeline — lift / extract', () => {
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find((t) => t.name === 'V1')!.id;
+  });
+
+  /** Helper: add a clip at [start, start+duration). */
+  function add(start: number, duration: number) {
+    return tl.addClip(clipSpec({ trackId: vId, startTime: start, duration }));
+  }
+
+  it('lift returns false when no in/out range is set', () => {
+    add(0, 5);
+    expect(tl.lift()).toBe(false);
+  });
+
+  it('lift removes the in→out range and leaves a gap (later clip unmoved)', () => {
+    const a = add(0, 10);
+    const b = add(10, 10); // [10,20)
+    tl.setInPoint(2);
+    tl.setOutPoint(6); // cut [2,6) from clip a
+    expect(tl.lift()).toBe(true);
+
+    const clips = tl.getState().clips;
+    // Clip a split into head [0,2) + tail [6,10); clip b unchanged at 10.
+    expect(clips.get(b.id)!.startTime).toBe(10);
+    const aClips = [...clips.values()].filter((c) => c.id === a.id || c.name.includes('(2)'));
+    expect(aClips.some((c) => c.startTime === 0 && c.duration === 2)).toBe(true);
+    expect(aClips.some((c) => c.startTime === 6)).toBe(true);
+  });
+
+  it('extract removes the range and ripples later clips left to close the gap', () => {
+    add(0, 10);
+    const b = add(10, 10); // [10,20)
+    tl.setInPoint(2);
+    tl.setOutPoint(6); // remove 4s
+    expect(tl.extract()).toBe(true);
+    // Clip b ripples left by 4s → starts at 6.
+    expect(tl.getState().clips.get(b.id)!.startTime).toBe(6);
+  });
+
+  it('extract over a whole clip deletes it and closes the gap', () => {
+    add(0, 5);          // [0,5)
+    const mid = add(5, 5);  // [5,10) — fully covered
+    const last = add(10, 5); // [10,15)
+    tl.setInPoint(5);
+    tl.setOutPoint(10);
+    expect(tl.extract()).toBe(true);
+    expect(tl.getState().clips.has(mid.id)).toBe(false); // removed
+    expect(tl.getState().clips.get(last.id)!.startTime).toBe(5); // rippled left by 5
+  });
+
+  it('in/out given in reverse order is normalised', () => {
+    const b = add(10, 10);
+    tl.setInPoint(6); // out < in on purpose
+    tl.setOutPoint(2);
+    expect(tl.extract()).toBe(true);
+    expect(tl.getState().clips.get(b.id)!.startTime).toBe(6); // same as ordered
+  });
+
+  it('trackId restricts the edit to a single track', () => {
+    const aId = [...tl.getState().tracks.values()].find((t) => t.name === 'A1')!.id;
+    const onV = add(0, 10);
+    const onA = tl.addClip(clipSpec({ trackId: aId, startTime: 0, duration: 10 }));
+    tl.setInPoint(2);
+    tl.setOutPoint(6);
+    tl.lift(vId); // only V1
+    // A1 clip is untouched (still a single clip at 0,10).
+    expect(tl.getState().clips.get(onA.id)!.duration).toBe(10);
+    void onV;
+  });
+
+  it('notifies subscribers when an edit is applied', () => {
+    add(0, 10);
+    tl.setInPoint(2);
+    tl.setOutPoint(6);
+    const spy = vi.fn();
+    tl.subscribe(spy);
+    tl.lift();
+    expect(spy).toHaveBeenCalled();
+  });
+});

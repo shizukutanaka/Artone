@@ -95,6 +95,8 @@ const DEFAULT_SHORTCUTS: Omit<Shortcut, 'id' | 'customized'>[] = [
   { action: 'selectAll',    key: 'KeyA',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.selectAll',    category: C.edit },
   { action: 'deselect',     key: 'Escape', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.deselect',     category: C.edit },
   { action: 'split',        key: 'KeyB',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.split',        category: C.edit },
+  { action: 'lift',         key: 'Semicolon', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.lift',      category: C.edit },
+  { action: 'extract',      key: 'Quote',  modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.extract',      category: C.edit },
   { action: 'duplicate',    key: 'KeyD',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.duplicate',    category: C.edit },
 
   // Timeline

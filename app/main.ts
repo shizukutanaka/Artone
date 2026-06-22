@@ -286,6 +286,8 @@ export class ArtoneApp {
     sm.registerCallback('undo',         () => this.history.undo());
     sm.registerCallback('redo',         () => this.history.redo());
     sm.registerCallback('split',        () => this.splitAtPlayhead());
+    sm.registerCallback('lift',         () => { tl.lift(); });
+    sm.registerCallback('extract',      () => { tl.extract(); });
     sm.registerCallback('selectAll',    () => tl.selectRange(0, Infinity));
     sm.registerCallback('deselect',     () => tl.deselectAll());
     sm.registerCallback('setInPoint',   () => tl.setInPoint());

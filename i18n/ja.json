@@ -280,6 +280,8 @@
       "setInPoint": "インポイント設定",
       "setOutPoint": "アウトポイント設定",
       "clearInOut": "イン/アウトクリア",
+      "lift": "リフト",
+      "extract": "抽出",
       "zoomIn": "拡大",
       "zoomOut": "縮小",
       "zoomFit": "全体表示",

@@ -43,8 +43,8 @@ describe('ShortcutManager — defaults', () => {
   let sm: ShortcutManager;
   beforeEach(() => { sm = makeManager(); });
 
-  it('loads 58 default shortcuts', () => {
-    expect(sm.getAllShortcuts()).toHaveLength(58);
+  it('loads 60 default shortcuts', () => {
+    expect(sm.getAllShortcuts()).toHaveLength(60);
   });
 
   it('all shortcuts have i18n description keys starting with shortcut.action.', () => {
@@ -319,7 +319,7 @@ describe('ShortcutManager — import/export', () => {
   it('importShortcuts silently skips unknown actions', () => {
     const payload = JSON.stringify([{ action: 'ghost', key: 'KeyG', modifiers: { ctrl: false, shift: false, alt: false, meta: false } }]);
     expect(sm.importShortcuts(payload)).toBe(true);
-    expect(sm.getAllShortcuts()).toHaveLength(58);
+    expect(sm.getAllShortcuts()).toHaveLength(60);
   });
 
   it('round-trips customizations through export/import', () => {

@@ -280,6 +280,8 @@
       "setInPoint": "Set In Point",
       "setOutPoint": "Set Out Point",
       "clearInOut": "Clear In / Out",
+      "lift": "Lift",
+      "extract": "Extract",
       "zoomIn": "Zoom In",
       "zoomOut": "Zoom Out",
       "zoomFit": "Zoom to Fit",

@@ -280,6 +280,8 @@
       "setInPoint": "设置入点",
       "setOutPoint": "设置出点",
       "clearInOut": "清除入点 / 出点",
+      "lift": "提升",
+      "extract": "提取",
       "zoomIn": "放大",
       "zoomOut": "缩小",
       "zoomFit": "适应屏幕",

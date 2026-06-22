@@ -280,6 +280,8 @@
       "setInPoint": "In-Punkt setzen",
       "setOutPoint": "Out-Punkt setzen",
       "clearInOut": "In / Out löschen",
+      "lift": "Anheben",
+      "extract": "Extrahieren",
       "zoomIn": "Vergrößern",
       "zoomOut": "Verkleinern",
       "zoomFit": "Einpassen",

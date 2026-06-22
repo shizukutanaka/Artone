@@ -8,7 +8,7 @@
  */
 
 import { color } from './design-system';
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 
 
 // ============================================================
@@ -34,6 +34,68 @@ export interface TimelineTrack {
   height: number;
   muted?: boolean;
   locked?: boolean;
+}
+
+// ============================================================
+// Drag math (pure — unit tested independent of the DOM)
+// ============================================================
+
+export type ClipDragMode = 'move' | 'resize-l' | 'resize-r';
+
+export interface ClipDragState {
+  clipId: string;
+  mode: ClipDragMode;
+  /** Pointer X at drag start (px). */
+  startX: number;
+  initialStart: number;
+  initialDuration: number;
+}
+
+export interface ClipDragResult {
+  clipId: string;
+  start: number;
+  duration: number;
+}
+
+/** Minimum clip duration (seconds) — a clip cannot be trimmed below this. */
+export const MIN_CLIP_DURATION = 0.05;
+
+/**
+ * Compute the new clip start/duration for an in-progress drag.
+ *
+ * Returns `null` when the gesture would shrink a left-trim below the minimum
+ * duration (the caller should ignore it), matching the original behaviour.
+ * Guards pxPerSecond ≤ 0 (would make the delta Infinity/NaN).
+ */
+export function computeClipDrag(
+  drag: ClipDragState,
+  clientX: number,
+  pxPerSecond: number,
+): ClipDragResult | null {
+  if (!(pxPerSecond > 0)) return null;
+  const dx = (clientX - drag.startX) / pxPerSecond;
+
+  if (drag.mode === 'move') {
+    return {
+      clipId: drag.clipId,
+      start: Math.max(0, drag.initialStart + dx),
+      duration: drag.initialDuration,
+    };
+  }
+  if (drag.mode === 'resize-l') {
+    const newStart = Math.max(0, drag.initialStart + dx);
+    const newDuration = drag.initialDuration - (newStart - drag.initialStart);
+    if (newDuration > MIN_CLIP_DURATION) {
+      return { clipId: drag.clipId, start: newStart, duration: newDuration };
+    }
+    return null;
+  }
+  // resize-r
+  return {
+    clipId: drag.clipId,
+    start: drag.initialStart,
+    duration: Math.max(MIN_CLIP_DURATION, drag.initialDuration + dx),
+  };
 }
 
 export interface TimelineViewProps {
@@ -125,7 +187,9 @@ interface ClipViewProps {
   pxPerSecond: number;
   offset: number;
   trackType: TrackType;
-  onMouseDown: (e: React.MouseEvent, mode: 'move' | 'resize-l' | 'resize-r') => void;
+  onPointerDown: (e: React.PointerEvent, mode: ClipDragMode) => void;
+  onPointerDrag: (e: React.PointerEvent) => void;
+  onPointerEnd: (e: React.PointerEvent) => void;
 }
 
 const ClipView: React.FC<ClipViewProps> = ({
@@ -135,7 +199,9 @@ const ClipView: React.FC<ClipViewProps> = ({
   pxPerSecond,
   offset,
   trackType,
-  onMouseDown
+  onPointerDown,
+  onPointerDrag,
+  onPointerEnd
 }) => {
   const left = offset + clip.start * pxPerSecond;
   const width = clip.duration * pxPerSecond;
@@ -156,15 +222,24 @@ const ClipView: React.FC<ClipViewProps> = ({
         borderRadius: 4,
         cursor: 'grab',
         overflow: 'hidden',
-        userSelect: 'none'
+        userSelect: 'none',
+        // Prevent the browser from scrolling/zooming the page on touch-drag so
+        // the pointer gesture is delivered to us (required for touch support).
+        touchAction: 'none'
       }}
-      onMouseDown={(e) => {
+      onPointerDown={(e) => {
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
         const x = e.clientX - rect.left;
-        if (x < 6) onMouseDown(e, 'resize-l');
-        else if (x > rect.width - 6) onMouseDown(e, 'resize-r');
-        else onMouseDown(e, 'move');
+        // Capture the pointer so move/up events keep flowing to this element even
+        // when the pointer leaves it — unifies mouse, touch and pen.
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        if (x < 6) onPointerDown(e, 'resize-l');
+        else if (x > rect.width - 6) onPointerDown(e, 'resize-r');
+        else onPointerDown(e, 'move');
       }}
+      onPointerMove={onPointerDrag}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
     >
       <div
         style={{
@@ -241,17 +316,12 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
   const totalHeight = tracks.reduce((sum, t) => sum + t.height, 0);
 
-  const dragRef = useRef<{
-    clipId: string;
-    mode: 'move' | 'resize-l' | 'resize-r';
-    startX: number;
-    initialStart: number;
-    initialDuration: number;
-  } | null>(null);
+  const dragRef = useRef<ClipDragState | null>(null);
 
-  // Drag handler
-  const handleMouseDown = useCallback(
-    (clip: TimelineClip, e: React.MouseEvent, mode: 'move' | 'resize-l' | 'resize-r') => {
+  // Pointer-based drag (mouse + touch + pen). setPointerCapture on the clip
+  // element routes move/up here without document-level listeners.
+  const handlePointerDown = useCallback(
+    (clip: TimelineClip, e: React.PointerEvent, mode: ClipDragMode) => {
       e.stopPropagation();
       onClipSelect(clip.id, e.shiftKey);
       dragRef.current = {
@@ -265,32 +335,24 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     [onClipSelect]
   );
 
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
+  const handlePointerDrag = useCallback(
+    (e: React.PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
-      const dx = (e.clientX - drag.startX) / pxPerSecond;
+      const result = computeClipDrag(drag, e.clientX, pxPerSecond);
+      if (!result) return;
       if (drag.mode === 'move') {
-        onClipMove(drag.clipId, Math.max(0, drag.initialStart + dx));
-      } else if (drag.mode === 'resize-l') {
-        const newStart = Math.max(0, drag.initialStart + dx);
-        const newDur = drag.initialDuration - (newStart - drag.initialStart);
-        if (newDur > 0.05) onClipResize(drag.clipId, newStart, newDur);
-      } else if (drag.mode === 'resize-r') {
-        const newDur = Math.max(0.05, drag.initialDuration + dx);
-        onClipResize(drag.clipId, drag.initialStart, newDur);
+        onClipMove(result.clipId, result.start);
+      } else {
+        onClipResize(result.clipId, result.start, result.duration);
       }
-    };
-    const onUp = () => {
-      dragRef.current = null;
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [pxPerSecond, onClipMove, onClipResize]);
+    },
+    [pxPerSecond, onClipMove, onClipResize]
+  );
+
+  const handlePointerEnd = useCallback(() => {
+    dragRef.current = null;
+  }, []);
 
   // Wheel zoom
   const handleWheel = useCallback(
@@ -381,7 +443,9 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               pxPerSecond={pxPerSecond}
               offset={0}
               trackType={pos.track.type}
-              onMouseDown={(e, mode) => handleMouseDown(clip, e, mode)}
+              onPointerDown={(e, mode) => handlePointerDown(clip, e, mode)}
+              onPointerDrag={handlePointerDrag}
+              onPointerEnd={handlePointerEnd}
             />
           );
         })}

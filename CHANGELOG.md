@@ -7,6 +7,12 @@ Artone v3 の全変更を記録。
 
 ## [Unreleased]
 
+### Performance
+- **`goToPosition()` を O(n²) → O(n) に改善、通知を N → 1 回に削減** (SPEC §3.10 広域監査)。`goToPosition(target)` は `HistoryManager.undo()`/`redo()` をループ呼び出ししており、各呼び出しで `notifyListeners()` (全 Command の snapshot 構築 O(k)) が発火していた。N 位置ジャンプのトータルコストは O(N·k)。command の `undo()`/`redo()` を直接呼び、ループ外の末尾で `notifyListeners()` を 1 回だけ発火するように変更。maxCommands=1000 の全ステップ戻しで O(1000²) → O(1000)。副次効果としてリスナへ渡される中間 HistoryState が N → 1 に減り、UI の不要な中間再レンダーが消える。`goToPosition 10 steps emits exactly 1 notification` (regression) ・同一位置への no-op を検証する 2 テスト追加。
+
+### Fixed
+- **`computeClipDrag` resize-r と resize-l の契約を統一 — 最小幅以下は null を返す** (SPEC §3.10 広域監査)。左端トリム (`resize-l`) は `newDuration ≤ MIN_CLIP_DURATION` で null を返しジェスチャを棄却するが、右端トリム (`resize-r`) は同条件でも `Math.max(MIN_CLIP_DURATION, …)` の非 null 値を返し `onClipResize` をフレームごとに呼び続けていた。右端も null を返すよう変更し、両辺の契約を統一 (null = ジェスチャを無視 / 非 null = クリップを更新)。視覚的変化なし。既存テスト更新 + trim-symmetry INVARIANT 2 ケース追加。
+
 ### Changed
 - **Command ファクトリの snapshot/restore ボイラープレートを `structuralCommand` ヘルパに集約** (SPEC §3.9 自己監査、リファクタ・挙動不変)。§3.5〜§3.8 で追加した 8 個の構造編集 Command (split/add/delete/deleteSelected/closeGaps/move/trimStart/trimEnd) が `before = snapshotClips(); let after; const apply = () => { if (after) restore(after); else { mutate(); after = snapshot(); } }; return CommandFactory.structural(...)` という同一パターンを各 ~15 行で重複していた (CLAUDE.md「重複は統合」違反)。private ヘルパ `structuralCommand(type, description, mutate)` に集約し、各メソッドをガード節 + 1 行の委譲に短縮。`deleteSelectedCommand` の batch 通知も mutate クロージャ内に収まり同一ヘルパを再利用。lift/extract は逆操作を `captureRangeEditUndo` で解析的に算出する別経路のため対象外。正味 -68 行。挙動完全不変 (timeline 107 テスト全 pass、総数 4365 維持)。
 

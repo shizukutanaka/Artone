@@ -472,6 +472,155 @@ export class MagneticTimeline {
   }
 
   // ============================================================
+  // Structural Commands — split / add / delete / closeGaps
+  // ============================================================
+
+  /** Shallow-clone all clips for snapshot-based undo. */
+  private snapshotClips(): Clip[] {
+    return [...this.state.clips.values()].map((c) => ({ ...c, transform: { ...c.transform } }));
+  }
+
+  /** Restore clip store from a snapshot; triggers notify(). */
+  private restoreClips(snapshot: Clip[]): void {
+    this.state.clips.clear();
+    for (const c of snapshot) this.state.clips.set(c.id, { ...c, transform: { ...c.transform } });
+    this.notify();
+  }
+
+  /**
+   * Build an **undoable** command that splits `clipId` at `splitTime`.
+   * Returns null when splitTime is outside the clip bounds (no-op).
+   *
+   * Pass the returned command to `HistoryManager.execute()` so undo/redo work.
+   */
+  splitClipCommand(clipId: string, splitTime: number): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip) return null;
+    if (splitTime <= clip.startTime || splitTime >= clip.startTime + clip.duration) return null;
+
+    const before = this.snapshotClips();
+    let after: Clip[] | null = null;
+
+    const apply = (): void => {
+      if (after) {
+        this.restoreClips(after);
+      } else {
+        this.splitClip(clipId, splitTime);
+        after = this.snapshotClips();
+      }
+    };
+    return CommandFactory.structural('clip.split', 'Split clip', apply, () => this.restoreClips(before));
+  }
+
+  /**
+   * Build an **undoable** command that adds `clip` to the timeline (with
+   * magnetic ripple). The returned command is always non-null; pass it to
+   * `HistoryManager.execute()`.
+   */
+  addClipCommand(clip: Omit<Clip, 'id' | 'selected'>): Command {
+    const before = this.snapshotClips();
+    let after: Clip[] | null = null;
+
+    const apply = (): void => {
+      if (after) {
+        this.restoreClips(after);
+      } else {
+        this.addClip(clip);
+        after = this.snapshotClips();
+      }
+    };
+    return CommandFactory.structural('clip.add', 'Add clip', apply, () => this.restoreClips(before));
+  }
+
+  /**
+   * Build an **undoable** command that deletes the clip with `clipId`
+   * (magnetic ripple closes the gap). Returns null if the clip doesn't exist
+   * or is locked.
+   */
+  deleteClipCommand(clipId: string): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+
+    const before = this.snapshotClips();
+    let after: Clip[] | null = null;
+
+    const apply = (): void => {
+      if (after) {
+        this.restoreClips(after);
+      } else {
+        this.deleteClip(clipId);
+        after = this.snapshotClips();
+      }
+    };
+    return CommandFactory.structural('clip.delete', 'Delete clip', apply, () => this.restoreClips(before));
+  }
+
+  /**
+   * Build an **undoable** command that deletes all currently-selected
+   * non-locked clips (magnetic ripple per clip, leftmost last so positions
+   * remain consistent during the forward pass). Returns null if nothing
+   * actionable is selected.
+   */
+  deleteSelectedCommand(): Command | null {
+    const selected = [...this.state.selection]
+      .map((id) => this.state.clips.get(id))
+      .filter((c): c is Clip => c !== undefined && !c.locked);
+    if (selected.length === 0) return null;
+
+    // Sort right-to-left so earlier deletions don't shift the startTimes we
+    // rely on when checking subsequent clips during the same batch.
+    selected.sort((a, b) => b.startTime - a.startTime);
+    const ids = selected.map((c) => c.id);
+
+    const before = this.snapshotClips();
+    let after: Clip[] | null = null;
+
+    const apply = (): void => {
+      if (after) {
+        this.restoreClips(after);
+      } else {
+        for (const id of ids) this.deleteClip(id);
+        after = this.snapshotClips();
+      }
+    };
+    return CommandFactory.structural(
+      'clip.deleteSelected',
+      'Delete selected clips',
+      apply,
+      () => this.restoreClips(before),
+    );
+  }
+
+  /**
+   * Build an **undoable** command that closes gaps on `trackId`. Returns null
+   * when the track has no clips or they are already contiguous (no-op).
+   */
+  closeGapsCommand(trackId: string): Command | null {
+    const clips = this.getTrackClips(trackId).sort((a, b) => a.startTime - b.startTime);
+    // Quick no-op check: already gap-free?
+    let cursor = 0;
+    let hasGap = false;
+    for (const c of clips) {
+      if (c.startTime > cursor + 0.001) { hasGap = true; break; }
+      cursor = c.startTime + c.duration;
+    }
+    if (!hasGap) return null;
+
+    const before = this.snapshotClips();
+    let after: Clip[] | null = null;
+
+    const apply = (): void => {
+      if (after) {
+        this.restoreClips(after);
+      } else {
+        this.closeGaps(trackId);
+        after = this.snapshotClips();
+      }
+    };
+    return CommandFactory.structural('clip.closeGaps', 'Close gaps', apply, () => this.restoreClips(before));
+  }
+
+  // ============================================================
   // Snap Points
   // ============================================================
 

@@ -127,8 +127,17 @@ extract/addClip 等) は一つも Command 化されておらず**、`undo`/`redo
 | 観点 | 内容 |
 |---|---|
 | **長所** | execute→undo→redo で元の clip 集合へ厳密復元 (split-tail id も安定)。`captureRangeEditUndo` は純関数で入力非破壊。`structural` は全構造編集で再利用可能な基盤。実 `HistoryManager` 経由の round-trip テスト込み |
-| **短所** | 既存の split/addClip/deleteClip/closeGaps は依然未 Command 化 (本 PR は lift/extract のみ)。merge 非対応 (連続 extract は個別履歴) |
-| **改善点** | (1) split/add/delete/closeGaps も `structural` でラップ、(2) UI の undo ボタン状態を `canUndo/canRedo` に同期、(3) range-edit を IntervalIndex で高速化 |
+| **短所** | merge 非対応 (連続 extract / split は個別履歴エントリ)。`moveClip`/`trimClip*` は Command 化未着手 |
+| **改善点 (残)** | (1) ~~split/add/delete/closeGaps も `structural` でラップ~~ **→ 完了 (2026-06-23)**。(2) UI の undo ボタン状態を `canUndo/canRedo` に同期、(3) range-edit を IntervalIndex で高速化、(4) moveClip/trimClip も Command 化 |
+
+**改善 (1) 完了詳細 (2026-06-23)**:
+`MagneticTimeline` に `splitClipCommand()` / `addClipCommand()` / `deleteClipCommand()` /
+`deleteSelectedCommand()` / `closeGapsCommand()` を追加。全メソッドはスナップショット方式
+(execute 前の全 clip を保存 → revert で完全復元) を採用し、`CommandFactory.structural`
+でラップして `HistoryManager` に渡せる形で返す。`main.ts` の `split` ショートカットは
+`splitClipCommand` 経由 → `history.execute()` に変更。`delete` / `rippleDelete` ショートカット
+に `deleteSelectedCommand` のコールバックを登録 (これまで未登録で無効だった)。
+テスト: 16 本追加 (split/delete/deleteSelected/closeGaps 各 Command の execute/undo/redo round-trip)。
 
 ## 3.5 新機能: 3点編集 Lift / Extract (ソクラテス式問答で導出)
 

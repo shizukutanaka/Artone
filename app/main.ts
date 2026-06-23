@@ -285,9 +285,10 @@ export class ArtoneApp {
     });
     sm.registerCallback('undo',         () => this.history.undo());
     sm.registerCallback('redo',         () => this.history.redo());
+    // All structural edits go through history (CLAUDE.md: クリップ操作は全て Command Pattern 経由).
     sm.registerCallback('split',        () => this.splitAtPlayhead());
-    // Lift/Extract go through the history so they are undoable (CLAUDE.md:
-    // クリップ操作は全て Command Pattern 経由).
+    sm.registerCallback('delete',       () => { const c = tl.deleteSelectedCommand(); if (c) this.history.execute(c); });
+    sm.registerCallback('rippleDelete', () => { const c = tl.deleteSelectedCommand(); if (c) this.history.execute(c); });
     sm.registerCallback('lift',         () => { const c = tl.liftCommand();    if (c) this.history.execute(c); });
     sm.registerCallback('extract',      () => { const c = tl.extractCommand(); if (c) this.history.execute(c); });
     sm.registerCallback('selectAll',    () => tl.selectRange(0, Infinity));
@@ -403,12 +404,11 @@ export class ArtoneApp {
   // ============================================================
 
   splitAtPlayhead(): void {
-    const state = this.timeline.getState();
-    const clipsAtPlayhead = this.timeline.getClipsAtTime(state.playhead);
-
-    for (const clip of clipsAtPlayhead) {
+    const { playhead } = this.timeline.getState();
+    for (const clip of this.timeline.getClipsAtTime(playhead)) {
       if (!clip.locked) {
-        this.timeline.splitClip(clip.id, state.playhead);
+        const cmd = this.timeline.splitClipCommand(clip.id, playhead);
+        if (cmd) this.history.execute(cmd);
       }
     }
   }

@@ -1037,3 +1037,230 @@ describe('MagneticTimeline — closeGapsCommand (undoable)', () => {
     expect(snap()).toEqual(before);
   });
 });
+
+// ─── Selection invariant after undo (ghost-selection bug fix) ──────
+
+describe('MagneticTimeline — selection invariant after undo', () => {
+  // Invariant: ∀id: state.selection.has(id) ↔ state.clips.get(id)?.selected
+  // restoreClips() must rebuild state.selection from the snapshot's selected
+  // flags — otherwise clips are "ghost selected" (visible as selected but
+  // invisible to commands that query state.selection).
+
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find((t) => t.name === 'V1')!.id;
+  });
+
+  function add(start: number, dur: number) {
+    return tl.addClip(clipSpec({ trackId: vId, startTime: start, duration: dur }));
+  }
+
+  function selectionConsistent(): boolean {
+    // Both directions of the invariant.
+    for (const [id, clip] of tl.getState().clips) {
+      if (clip.selected !== tl.getState().selection.has(id)) return false;
+    }
+    for (const id of tl.getState().selection) {
+      if (!tl.getState().clips.has(id)) return false;
+    }
+    return true;
+  }
+
+  it('invariant holds initially (no clips selected)', () => {
+    add(0, 10);
+    expect(selectionConsistent()).toBe(true);
+  });
+
+  it('invariant holds after selectClip', () => {
+    const a = add(0, 5);
+    tl.selectClip(a.id);
+    expect(selectionConsistent()).toBe(true);
+    expect(tl.getState().selection.has(a.id)).toBe(true);
+    expect(tl.getState().clips.get(a.id)!.selected).toBe(true);
+  });
+
+  it('REGRESSION: invariant holds after deleteSelectedCommand undo (ghost-selection fix)', () => {
+    // Before fix: restoreClips() restored clip.selected=true but NOT
+    // state.selection — leaving clips ghost-selected (rendered as selected but
+    // invisible to deleteSelectedCommand which queries state.selection).
+    const a = add(0, 5);
+    const b = add(5, 5);
+    tl.selectClip(a.id);
+    tl.selectClip(b.id, true);
+
+    const cmd = tl.deleteSelectedCommand()!;
+    cmd.execute();
+    expect(selectionConsistent()).toBe(true); // no clips → trivially consistent
+
+    cmd.undo();
+    // Both clip.selected and state.selection must be restored.
+    expect(selectionConsistent()).toBe(true);
+    expect(tl.getState().selection.has(a.id)).toBe(true);
+    expect(tl.getState().selection.has(b.id)).toBe(true);
+    expect(tl.getState().clips.get(a.id)!.selected).toBe(true);
+    expect(tl.getState().clips.get(b.id)!.selected).toBe(true);
+  });
+
+  it('invariant holds after splitClipCommand undo', () => {
+    const c = add(0, 10);
+    tl.selectClip(c.id);
+    const cmd = tl.splitClipCommand(c.id, 5)!;
+    cmd.execute();
+    cmd.undo();
+    expect(selectionConsistent()).toBe(true);
+    // Original clip should be selected again after undo.
+    expect(tl.getState().selection.has(c.id)).toBe(true);
+  });
+
+  it('deleteSelectedCommand after undo sees restored clips (not ghost)', () => {
+    // After ghost-selection bug: deleteSelectedCommand() returned null because
+    // state.selection was empty even though clip.selected was true.
+    const a = add(0, 5);
+    tl.selectClip(a.id);
+    const del = tl.deleteSelectedCommand()!;
+    del.execute();
+    del.undo(); // clip A restored as selected
+
+    // Should be able to delete again (selection truly restored).
+    const del2 = tl.deleteSelectedCommand();
+    expect(del2).not.toBeNull();
+  });
+
+  it('invariant holds after moveClipCommand undo', () => {
+    const a = add(0, 5);
+    tl.selectClip(a.id);
+    const cmd = tl.moveClipCommand(a.id, 20)!;
+    cmd.execute();
+    cmd.undo();
+    expect(selectionConsistent()).toBe(true);
+    expect(tl.getState().selection.has(a.id)).toBe(true);
+  });
+});
+
+// ─── moveClipCommand / trimClipStart|EndCommand (undoable) ─────────
+
+describe('MagneticTimeline — moveClipCommand (undoable)', () => {
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find((t) => t.name === 'V1')!.id;
+  });
+
+  function add(start: number, dur: number) {
+    return tl.addClip(clipSpec({ trackId: vId, startTime: start, duration: dur }));
+  }
+
+  it('returns null for unknown or locked clips', () => {
+    expect(tl.moveClipCommand('ghost', 10)).toBeNull();
+    const locked = tl.addClip(clipSpec({ trackId: vId, locked: true }));
+    expect(tl.moveClipCommand(locked.id, 10)).toBeNull();
+  });
+
+  it('execute() moves the clip to the new position', () => {
+    const c = add(0, 5);
+    tl.moveClipCommand(c.id, 20)!.execute();
+    expect(tl.getState().clips.get(c.id)!.startTime).toBeCloseTo(20);
+  });
+
+  it('undo() restores original position', () => {
+    const c = add(0, 5);
+    const cmd = tl.moveClipCommand(c.id, 20)!;
+    cmd.execute();
+    cmd.undo();
+    expect(tl.getState().clips.get(c.id)!.startTime).toBe(0);
+  });
+
+  it('redo() re-applies the move', () => {
+    const c = add(0, 5);
+    const cmd = tl.moveClipCommand(c.id, 20)!;
+    cmd.execute();
+    cmd.undo();
+    cmd.redo();
+    expect(tl.getState().clips.get(c.id)!.startTime).toBeCloseTo(20);
+  });
+
+  it('ripple is reversed on undo (following clips restored)', () => {
+    const a = add(0, 5);
+    const b = add(5, 5);
+    const originalBStart = tl.getState().clips.get(b.id)!.startTime;
+    const cmd = tl.moveClipCommand(a.id, 30)!;
+    cmd.execute();
+    cmd.undo();
+    expect(tl.getState().clips.get(a.id)!.startTime).toBe(0);
+    expect(tl.getState().clips.get(b.id)!.startTime).toBe(originalBStart);
+  });
+});
+
+describe('MagneticTimeline — trimClipStartCommand / trimClipEndCommand (undoable)', () => {
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find((t) => t.name === 'V1')!.id;
+  });
+
+  function add(start: number, dur: number, mediaIn = 0) {
+    return tl.addClip(clipSpec({ trackId: vId, startTime: start, duration: dur, mediaIn, mediaOut: mediaIn + dur }));
+  }
+
+  it('trimClipStartCommand returns null for unknown / locked / zero-size trim', () => {
+    expect(tl.trimClipStartCommand('ghost', 5)).toBeNull();
+    const locked = tl.addClip(clipSpec({ trackId: vId, locked: true, startTime: 0, duration: 10 }));
+    expect(tl.trimClipStartCommand(locked.id, 5)).toBeNull();
+    const c = add(0, 10);
+    expect(tl.trimClipStartCommand(c.id, 10)).toBeNull(); // would zero duration
+  });
+
+  it('trimClipStartCommand execute/undo/redo round-trip', () => {
+    const c = add(0, 10, 100);
+    const cmd = tl.trimClipStartCommand(c.id, 3)!;
+    cmd.execute();
+    expect(tl.getState().clips.get(c.id)!.startTime).toBe(3);
+    expect(tl.getState().clips.get(c.id)!.duration).toBe(7);
+    expect(tl.getState().clips.get(c.id)!.mediaIn).toBe(103);
+    cmd.undo();
+    expect(tl.getState().clips.get(c.id)!.startTime).toBe(0);
+    expect(tl.getState().clips.get(c.id)!.duration).toBe(10);
+    expect(tl.getState().clips.get(c.id)!.mediaIn).toBe(100);
+    cmd.redo();
+    expect(tl.getState().clips.get(c.id)!.duration).toBe(7);
+  });
+
+  it('trimClipEndCommand returns null for unknown / locked / zero-size trim', () => {
+    expect(tl.trimClipEndCommand('ghost', 5)).toBeNull();
+    const locked = tl.addClip(clipSpec({ trackId: vId, locked: true, startTime: 0, duration: 10 }));
+    expect(tl.trimClipEndCommand(locked.id, 5)).toBeNull();
+    const c = add(0, 10);
+    expect(tl.trimClipEndCommand(c.id, 0)).toBeNull(); // would zero duration
+  });
+
+  it('trimClipEndCommand execute/undo/redo round-trip', () => {
+    const c = add(0, 10, 0);
+    const cmd = tl.trimClipEndCommand(c.id, 7)!;
+    cmd.execute();
+    expect(tl.getState().clips.get(c.id)!.duration).toBe(7);
+    expect(tl.getState().clips.get(c.id)!.mediaOut).toBe(7);
+    cmd.undo();
+    expect(tl.getState().clips.get(c.id)!.duration).toBe(10);
+    expect(tl.getState().clips.get(c.id)!.mediaOut).toBe(10);
+    cmd.redo();
+    expect(tl.getState().clips.get(c.id)!.duration).toBe(7);
+  });
+
+  it('trimClipEnd ripple is reversed on undo', () => {
+    const a = add(0, 10);
+    const b = add(10, 5);
+    const bOrigStart = tl.getState().clips.get(b.id)!.startTime;
+    const cmd = tl.trimClipEndCommand(a.id, 15)!; // extend a, ripple b right
+    cmd.execute();
+    expect(tl.getState().clips.get(b.id)!.startTime).toBe(bOrigStart + 5);
+    cmd.undo();
+    expect(tl.getState().clips.get(b.id)!.startTime).toBe(bOrigStart);
+  });
+});

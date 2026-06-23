@@ -480,10 +480,23 @@ export class MagneticTimeline {
     return [...this.state.clips.values()].map((c) => ({ ...c, transform: { ...c.transform } }));
   }
 
-  /** Restore clip store from a snapshot; triggers notify(). */
+  /**
+   * Restore clip store from a snapshot; triggers notify().
+   *
+   * Both representations of selection state are rebuilt atomically:
+   * `state.clips[id].selected` (rendering flag) AND `state.selection`
+   * (the O(1) Set index). Restoring only clips without rebuilding the
+   * Set breaks the invariant `∀id: state.selection.has(id) ↔ clip.selected`,
+   * producing "ghost selected" clips that render as selected but are invisible
+   * to every command that queries `state.selection`.
+   */
   private restoreClips(snapshot: Clip[]): void {
     this.state.clips.clear();
-    for (const c of snapshot) this.state.clips.set(c.id, { ...c, transform: { ...c.transform } });
+    this.state.selection.clear();
+    for (const c of snapshot) {
+      this.state.clips.set(c.id, { ...c, transform: { ...c.transform } });
+      if (c.selected) this.state.selection.add(c.id);
+    }
     this.notify();
   }
 
@@ -618,6 +631,77 @@ export class MagneticTimeline {
       }
     };
     return CommandFactory.structural('clip.closeGaps', 'Close gaps', apply, () => this.restoreClips(before));
+  }
+
+  /**
+   * Build an **undoable** command that moves `clipId` to `newStart`
+   * (optionally changing track via `newTrackId`). Returns null if the
+   * clip doesn't exist or is locked.
+   */
+  moveClipCommand(clipId: string, newStart: number, newTrackId?: string): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+
+    const before = this.snapshotClips();
+    let after: Clip[] | null = null;
+
+    const apply = (): void => {
+      if (after) {
+        this.restoreClips(after);
+      } else {
+        this.moveClip(clipId, newStart, newTrackId);
+        after = this.snapshotClips();
+      }
+    };
+    return CommandFactory.structural('clip.move', 'Move clip', apply, () => this.restoreClips(before));
+  }
+
+  /**
+   * Build an **undoable** command that trims the **start** of `clipId`
+   * to `newStart` (head trim). Returns null if the clip doesn't exist,
+   * is locked, or the trim would make duration ≤ 0.
+   */
+  trimClipStartCommand(clipId: string, newStart: number): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+    if (newStart - clip.startTime >= clip.duration) return null; // would zero-out
+
+    const before = this.snapshotClips();
+    let after: Clip[] | null = null;
+
+    const apply = (): void => {
+      if (after) {
+        this.restoreClips(after);
+      } else {
+        this.trimClipStart(clipId, newStart);
+        after = this.snapshotClips();
+      }
+    };
+    return CommandFactory.structural('clip.trimStart', 'Trim clip start', apply, () => this.restoreClips(before));
+  }
+
+  /**
+   * Build an **undoable** command that trims the **end** of `clipId`
+   * to `newEnd` (tail trim). Returns null if the clip doesn't exist,
+   * is locked, or the trim would make duration ≤ 0.
+   */
+  trimClipEndCommand(clipId: string, newEnd: number): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+    if (newEnd <= clip.startTime) return null; // would zero-out
+
+    const before = this.snapshotClips();
+    let after: Clip[] | null = null;
+
+    const apply = (): void => {
+      if (after) {
+        this.restoreClips(after);
+      } else {
+        this.trimClipEnd(clipId, newEnd);
+        after = this.snapshotClips();
+      }
+    };
+    return CommandFactory.structural('clip.trimEnd', 'Trim clip end', apply, () => this.restoreClips(before));
   }
 
   // ============================================================

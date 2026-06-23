@@ -53,10 +53,16 @@ describe('computeClipDrag — resize-r', () => {
     expect(r).toEqual({ clipId: 'c1', start: 2, duration: 8 });
   });
 
-  it('clamps duration to the minimum when shrunk too far', () => {
-    const r = computeClipDrag(drag({ mode: 'resize-r' }), 0, PPS); // huge negative delta
-    expect(r!.duration).toBe(MIN_CLIP_DURATION);
-    expect(r!.start).toBe(2); // start unchanged on right-resize
+  it('returns null when shrunk below the minimum (consistent with resize-l)', () => {
+    // clientX=0 → dx = (0−500)/100 = −5 → newDuration = 5−5 = 0 ≤ MIN → null
+    const r = computeClipDrag(drag({ mode: 'resize-r' }), 0, PPS);
+    expect(r).toBeNull();
+  });
+
+  it('returns a valid result when duration stays above the minimum', () => {
+    // clientX=550 → dx=+0.5s → duration 5.5 — well above MIN
+    const r = computeClipDrag(drag({ mode: 'resize-r' }), 550, PPS);
+    expect(r).toEqual({ clipId: 'c1', start: 2, duration: 5.5 });
   });
 });
 
@@ -98,5 +104,43 @@ describe('computeClipDrag — guards', () => {
   it('preserves the clipId', () => {
     const r = computeClipDrag(drag({ clipId: 'xyz' }), 600, PPS);
     expect(r!.clipId).toBe('xyz');
+  });
+});
+
+describe('computeClipDrag — trim symmetry', () => {
+  it('INVARIANT: resize-l and resize-r both return null when result is at or below minimum', () => {
+    // resize-l: drag right until newDuration ≤ MIN
+    const left = computeClipDrag(
+      drag({ mode: 'resize-l', initialStart: 0, initialDuration: 5 }),
+      500 + 5 * PPS,  // dx = +5s → newDuration = 0
+      PPS,
+    );
+    // resize-r: drag left until newDuration ≤ MIN
+    const right = computeClipDrag(
+      drag({ mode: 'resize-r', initialStart: 0, initialDuration: 5 }),
+      500 - 5 * PPS,  // dx = −5s → newDuration = 0
+      PPS,
+    );
+    expect(left).toBeNull();
+    expect(right).toBeNull();
+  });
+
+  it('INVARIANT: both trim modes accept a result exactly one frame above minimum', () => {
+    const aboveMin = MIN_CLIP_DURATION + 1 / 60; // one frame above minimum
+    const leftDx = 5 - aboveMin;  // shrink from 5s to aboveMin
+    const left = computeClipDrag(
+      drag({ mode: 'resize-l', initialStart: 0, initialDuration: 5 }),
+      500 + leftDx * PPS,
+      PPS,
+    );
+    const right = computeClipDrag(
+      drag({ mode: 'resize-r', initialStart: 0, initialDuration: 5 }),
+      500 - leftDx * PPS,
+      PPS,
+    );
+    expect(left).not.toBeNull();
+    expect(right).not.toBeNull();
+    expect(left!.duration).toBeCloseTo(aboveMin);
+    expect(right!.duration).toBeCloseTo(aboveMin);
   });
 });

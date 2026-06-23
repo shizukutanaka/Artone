@@ -63,9 +63,10 @@ export const MIN_CLIP_DURATION = 0.05;
 /**
  * Compute the new clip start/duration for an in-progress drag.
  *
- * Returns `null` when the gesture would shrink a left-trim below the minimum
- * duration (the caller should ignore it), matching the original behaviour.
- * Guards pxPerSecond ≤ 0 (would make the delta Infinity/NaN).
+ * Returns `null` when the gesture would shrink either end below `MIN_CLIP_DURATION`
+ * (the caller should leave the clip unchanged) or when `pxPerSecond ≤ 0`.
+ * Both `resize-l` and `resize-r` use the same null-return contract for
+ * consistency — there is no silent clamping on the right side.
  */
 export function computeClipDrag(
   drag: ClipDragState,
@@ -90,12 +91,10 @@ export function computeClipDrag(
     }
     return null;
   }
-  // resize-r
-  return {
-    clipId: drag.clipId,
-    start: drag.initialStart,
-    duration: Math.max(MIN_CLIP_DURATION, drag.initialDuration + dx),
-  };
+  // resize-r: mirror resize-l — refuse the gesture rather than silently clamping
+  const newDuration = drag.initialDuration + dx;
+  if (newDuration <= MIN_CLIP_DURATION) return null;
+  return { clipId: drag.clipId, start: drag.initialStart, duration: newDuration };
 }
 
 export interface TimelineViewProps {

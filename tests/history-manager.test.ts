@@ -292,6 +292,40 @@ describe('HistoryManager — goToPosition', () => {
     hm.goToPosition(99);
     expect(cell.value).toBe(before);
   });
+
+  it('PERF: emits exactly one notification regardless of how many steps are jumped', () => {
+    const hm = makeManager();
+    const cell = { value: 0 };
+    // Build a 10-entry history
+    for (let i = 0; i < 10; i++) hm.execute(counterCmd(cell));
+    expect(cell.value).toBe(10);
+
+    const cb = vi.fn();
+    hm.subscribe(cb);
+
+    // Jump 10 positions back — must fire exactly one listener call, not 10
+    hm.goToPosition(-1);
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cell.value).toBe(0);
+
+    cb.mockClear();
+
+    // Jump 10 positions forward — again exactly one call
+    hm.goToPosition(9);
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cell.value).toBe(10);
+  });
+
+  it('no notification when already at target position', () => {
+    const hm = makeManager();
+    const cell = { value: 0 };
+    hm.execute(counterCmd(cell));
+
+    const cb = vi.fn();
+    hm.subscribe(cb);
+    hm.goToPosition(0); // already there
+    expect(cb).not.toHaveBeenCalled();
+  });
 });
 
 // ============================================================

@@ -871,15 +871,28 @@ export class HistoryManager {
   }
 
   // ----- 特定位置へジャンプ -----
+  /**
+   * Jump to an arbitrary history position in O(n) time.
+   *
+   * Prior implementation delegated to `undo()`/`redo()` in a loop, each of
+   * which called `notifyListeners()` (O(k) work) → O(n·k) total for an n-step
+   * jump with k listeners.  We now call the command callbacks directly and
+   * emit a single notification after all mutations are done.
+   */
   goToPosition(targetPosition: number): void {
     if (targetPosition < -1 || targetPosition >= this.commands.length) return;
-    
+    if (targetPosition === this.position) return;
+
     while (this.position > targetPosition) {
-      this.undo();
+      this.commands[this.position].undo();
+      this.position--;
     }
     while (this.position < targetPosition) {
-      this.redo();
+      this.position++;
+      this.commands[this.position].redo();
     }
+
+    this.notifyListeners();
   }
 
   // ----- クリア -----

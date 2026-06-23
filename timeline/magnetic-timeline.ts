@@ -142,6 +142,24 @@ export class MagneticTimeline {
   private snapThreshold = 10; // pixels
   private listeners: Set<(state: TimelineState) => void> = new Set();
 
+  /**
+   * Batch depth counter. When > 0, `notify()` is deferred until the
+   * outermost `endBatch()` fires it once. This ensures multi-step
+   * commands deliver exactly ONE state-change event to subscribers
+   * rather than one per sub-operation, maintaining the "atomic command"
+   * abstraction.
+   */
+  private batchDepth = 0;
+  private batchPending = false;
+
+  /**
+   * Lazy interval-index cache. Rebuilt from scratch on first access after
+   * any mutation; invalidated by `_fireListeners()`. Subsequent
+   * `getClipsAtTime()` calls between mutations cost O(log n + k) instead
+   * of O(n) per call.
+   */
+  private clipIndexCache: IntervalIndex<{ id: string; start: number; end: number }> | null = null;
+
   constructor() {
     this.state = {
       tracks: new Map(),
@@ -592,7 +610,13 @@ export class MagneticTimeline {
       if (after) {
         this.restoreClips(after);
       } else {
+        // Batch the per-clip deletions so subscribers receive exactly ONE
+        // state-change notification for the whole operation (atomic command
+        // contract). Without this, each deleteClip() fires notify() and
+        // subscribers see N intermediate partially-deleted states.
+        this.beginBatch();
         for (const id of ids) this.deleteClip(id);
+        this.endBatch();
         after = this.snapshotClips();
       }
     };
@@ -926,20 +950,27 @@ export class MagneticTimeline {
   }
 
   getClipsAtTime(time: number): Clip[] {
-    // IntervalIndex で O(log n + k) 検索 (大量クリップ時の最適化)
-    const index = this.buildIntervalIndex();
-    const hits = index.queryPoint(time);
-    const byId = this.state.clips;
-    return hits.map((h) => byId.get(h.id)!).filter(Boolean);
+    const hits = this.getClipIndex().queryPoint(time);
+    return hits.map((h) => this.state.clips.get(h.id)!).filter(Boolean);
   }
 
-  /** クリップ群から区間インデックスを構築 (時間範囲クエリ用) */
-  private buildIntervalIndex(): IntervalIndex<{ id: string; start: number; end: number }> {
-    const index = new IntervalIndex<{ id: string; start: number; end: number }>();
-    for (const c of this.state.clips.values()) {
-      index.insert({ id: c.id, start: c.startTime, end: c.startTime + c.duration });
+  /**
+   * Return the lazily-built, mutation-invalidated IntervalIndex.
+   *
+   * Before this cache, `getClipsAtTime` rebuilt the entire index O(n) on
+   * every call — negating the O(log n + k) query benefit. Now the first
+   * call after a mutation pays O(n) to build; subsequent calls between
+   * mutations cost O(log n + k). The cache is invalidated by
+   * `_fireListeners()`, which runs on every `notify()`.
+   */
+  private getClipIndex(): IntervalIndex<{ id: string; start: number; end: number }> {
+    if (!this.clipIndexCache) {
+      this.clipIndexCache = new IntervalIndex<{ id: string; start: number; end: number }>();
+      for (const c of this.state.clips.values()) {
+        this.clipIndexCache.insert({ id: c.id, start: c.startTime, end: c.startTime + c.duration });
+      }
     }
-    return index;
+    return this.clipIndexCache;
   }
 
   getTimelineDuration(): number {
@@ -964,7 +995,38 @@ export class MagneticTimeline {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * Fire listeners immediately, or defer when inside a batch.
+   * Callers throughout the class use this unchanged — batching is
+   * transparent to every individual operation.
+   */
   private notify(): void {
+    if (this.batchDepth > 0) {
+      this.batchPending = true;
+      return;
+    }
+    this._fireListeners();
+  }
+
+  /** Suppress notifications for the duration of a logical batch. */
+  private beginBatch(): void {
+    this.batchDepth++;
+  }
+
+  /**
+   * End a batch. If this is the outermost `endBatch()` and at least one
+   * `notify()` was suppressed, fire listeners exactly once.
+   */
+  private endBatch(): void {
+    if (--this.batchDepth === 0 && this.batchPending) {
+      this.batchPending = false;
+      this._fireListeners();
+    }
+  }
+
+  /** Invalidate the clip-index cache and fire all listeners. */
+  private _fireListeners(): void {
+    this.clipIndexCache = null; // invalidate O(n) build cache
     for (const listener of this.listeners) {
       listener(this.state);
     }

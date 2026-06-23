@@ -1264,3 +1264,166 @@ describe('MagneticTimeline — trimClipStartCommand / trimClipEndCommand (undoab
     expect(tl.getState().clips.get(b.id)!.startTime).toBe(bOrigStart);
   });
 });
+
+// ─── §3.8: Atomic command / batch-notify (notification-storm fix) ──
+
+describe('MagneticTimeline — atomic notify: one Command → one notification', () => {
+  // Socratic question: "Does deleteSelectedCommand of N clips emit ONE
+  // state-change notification (atomic) or N notifications (one per clip)?"
+  //
+  // Before the batch fix: each deleteClip() called notify() internally,
+  // so deleting 5 clips emitted 5 intermediate states to subscribers.
+  // The "atomic command" abstraction was violated: subscribers could
+  // observe partially-deleted intermediate states.
+  //
+  // After: beginBatch()/endBatch() wraps the loop; notify() is deferred
+  // and fires exactly once after all sub-operations complete.
+
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find((t) => t.name === 'V1')!.id;
+  });
+
+  function add(start: number, dur: number) {
+    return tl.addClip(clipSpec({ trackId: vId, startTime: start, duration: dur }));
+  }
+
+  it('REGRESSION: deleteSelectedCommand of 5 clips emits exactly ONE notification (atomic)', () => {
+    const clips = [add(0, 5), add(5, 5), add(10, 5), add(15, 5), add(20, 5)];
+    for (const c of clips) tl.selectClip(c.id, true);
+
+    const spy = vi.fn();
+    tl.subscribe(spy);
+    spy.mockClear(); // clear any notifies from selectClip calls
+
+    const cmd = tl.deleteSelectedCommand()!;
+    cmd.execute();
+
+    // Before fix: spy called 5 times (once per deleteClip). After fix: exactly 1.
+    expect(spy).toHaveBeenCalledOnce();
+    expect(tl.getState().clips.size).toBe(0);
+  });
+
+  it('single-clip deleteClipCommand still emits exactly one notification', () => {
+    const c = add(0, 10);
+    const spy = vi.fn();
+    tl.subscribe(spy);
+    spy.mockClear();
+
+    tl.deleteClipCommand(c.id)!.execute();
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('undo of deleteSelectedCommand emits exactly one notification', () => {
+    const clips = [add(0, 5), add(5, 5), add(10, 5)];
+    for (const c of clips) tl.selectClip(c.id, true);
+
+    const cmd = tl.deleteSelectedCommand()!;
+    cmd.execute();
+
+    const spy = vi.fn();
+    tl.subscribe(spy);
+
+    cmd.undo();
+    expect(spy).toHaveBeenCalledOnce();
+    expect(tl.getState().clips.size).toBe(3);
+  });
+
+  it('subscriber never sees intermediate partially-deleted state', () => {
+    // Key invariant: when the command is "atomic", the subscriber should see
+    // either ALL clips present (before) or NONE of the selected ones present
+    // (after). Never a state where some-but-not-all are deleted.
+    const a = add(0, 5);
+    const b = add(5, 5);
+    const c = add(10, 5);
+    tl.selectClip(a.id);
+    tl.selectClip(b.id, true);
+    tl.selectClip(c.id, true);
+
+    const seenSizes: number[] = [];
+    tl.subscribe((s) => seenSizes.push(s.clips.size));
+    // Clear any notifications from selectClip calls
+    seenSizes.length = 0;
+
+    tl.deleteSelectedCommand()!.execute();
+
+    // Must see exactly one intermediate state: 0 clips (all deleted at once).
+    // Before fix: would see [2, 1, 0] (three intermediate states).
+    expect(seenSizes).toEqual([0]);
+  });
+
+  it('non-batch mutations still notify per operation (unchanged behaviour)', () => {
+    // deleteClip directly (not through a command) still notifies immediately.
+    const c = add(0, 5);
+    const spy = vi.fn();
+    tl.subscribe(spy);
+    spy.mockClear();
+
+    tl.deleteClip(c.id); // direct call — NOT inside a batch
+    expect(spy).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── §3.8: IntervalIndex lazy cache ────────────────────────────────
+
+describe('MagneticTimeline — getClipsAtTime uses lazy O(log n+k) cache', () => {
+  // Before: buildIntervalIndex() rebuilt O(n) on every getClipsAtTime().
+  // After:  clipIndexCache is built once and reused; _fireListeners()
+  //         (called by every notify()) invalidates it so mutations are
+  //         always reflected correctly.
+
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find((t) => t.name === 'V1')!.id;
+  });
+
+  it('returns correct results for multiple consecutive queries (cache valid)', () => {
+    tl.addClip(clipSpec({ trackId: vId, startTime: 0, duration: 10 }));
+    tl.addClip(clipSpec({ trackId: vId, startTime: 20, duration: 10 }));
+
+    expect(tl.getClipsAtTime(5)).toHaveLength(1);   // first query — builds cache
+    expect(tl.getClipsAtTime(5)).toHaveLength(1);   // second query — reads cache
+    expect(tl.getClipsAtTime(25)).toHaveLength(1);  // different time — reads cache
+    expect(tl.getClipsAtTime(15)).toHaveLength(0);  // gap — reads cache
+  });
+
+  it('cache is invalidated after a clip mutation (addClip)', () => {
+    tl.addClip(clipSpec({ trackId: vId, startTime: 0, duration: 10 }));
+    expect(tl.getClipsAtTime(5)).toHaveLength(1);  // primes cache
+
+    tl.addClip(clipSpec({ trackId: vId, startTime: 5, duration: 10, type: 'audio' as const }));
+    // Cache was invalidated by addClip's notify() → getClipsAtTime reflects the new clip.
+    expect(tl.getClipsAtTime(5)).toHaveLength(2);
+  });
+
+  it('cache is invalidated after deleteClip', () => {
+    const c = tl.addClip(clipSpec({ trackId: vId, startTime: 0, duration: 10 }));
+    expect(tl.getClipsAtTime(5)).toHaveLength(1);  // primes cache
+
+    tl.deleteClip(c.id);
+    expect(tl.getClipsAtTime(5)).toHaveLength(0);  // cache invalidated
+  });
+
+  it('cache is invalidated after moveClip', () => {
+    const c = tl.addClip(clipSpec({ trackId: vId, startTime: 0, duration: 5 }));
+    expect(tl.getClipsAtTime(2)).toHaveLength(1);  // primes cache
+
+    tl.moveClip(c.id, 20);
+    expect(tl.getClipsAtTime(2)).toHaveLength(0);  // moved away — cache invalidated
+    expect(tl.getClipsAtTime(22)).toHaveLength(1); // now here
+  });
+
+  it('cache returns empty for time outside all clips', () => {
+    tl.addClip(clipSpec({ trackId: vId, startTime: 10, duration: 5 }));
+    expect(tl.getClipsAtTime(0)).toHaveLength(0);
+    expect(tl.getClipsAtTime(5)).toHaveLength(0);
+    expect(tl.getClipsAtTime(15)).toHaveLength(0);
+    expect(tl.getClipsAtTime(10)).toHaveLength(1);  // boundary: start inclusive
+  });
+});

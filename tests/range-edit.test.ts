@@ -8,7 +8,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { liftRange, extractRange, type TimeRange } from '../timeline/range-edit';
+import {
+  liftRange,
+  extractRange,
+  captureRangeEditUndo,
+  type TimeRange,
+} from '../timeline/range-edit';
 import type { Clip } from '../timeline/magnetic-timeline';
 
 let idCounter = 0;
@@ -164,5 +169,42 @@ describe('range-edit — options & guards', () => {
     const extracted = extractRange([c], range(5, 10), opts());
     expect(lifted.clips).toHaveLength(0);               // gap kept
     expect(byId(extracted.clips, 'after')!.startTime).toBe(15); // gap closed
+  });
+});
+
+describe('captureRangeEditUndo — inverse data', () => {
+  it('captures removed clips for restoration', () => {
+    const mid = clip({ id: 'mid', startTime: 5, duration: 3 });
+    const result = liftRange([mid], range(4, 9), opts());
+    const undo = captureRangeEditUndo([mid], result);
+    expect(undo.removed.map((c) => c.id)).toEqual(['mid']);
+    expect(undo.modifiedBefore).toHaveLength(0);
+    expect(undo.addedIds).toHaveLength(0);
+  });
+
+  it('captures prior state of modified clips (same id)', () => {
+    const c = clip({ id: 'L', startTime: 0, duration: 10, mediaIn: 100, mediaOut: 110 });
+    const result = liftRange([c], range(6, 12), opts()); // trims tail → L modified
+    const undo = captureRangeEditUndo([c], result);
+    expect(undo.modifiedBefore).toHaveLength(1);
+    expect(undo.modifiedBefore[0].duration).toBe(10); // original duration preserved
+    expect(undo.addedIds).toHaveLength(0);
+  });
+
+  it('captures added split-tail ids for deletion on undo', () => {
+    const c = clip({ id: 'span', startTime: 0, duration: 20 });
+    const result = liftRange([c], range(8, 12), opts()); // split → head(span) + new tail
+    const undo = captureRangeEditUndo([c], result);
+    expect(undo.modifiedBefore.map((x) => x.id)).toEqual(['span']);
+    expect(undo.addedIds).toHaveLength(1); // the new tail
+  });
+
+  it('does not mutate its inputs', () => {
+    const c = clip({ id: 'span', startTime: 0, duration: 20 });
+    const before = [c];
+    const snapshotDur = c.duration;
+    const result = liftRange(before, range(8, 12), opts());
+    captureRangeEditUndo(before, result);
+    expect(c.duration).toBe(snapshotDur); // unchanged
   });
 });

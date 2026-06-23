@@ -286,8 +286,10 @@ export class ArtoneApp {
     sm.registerCallback('undo',         () => this.history.undo());
     sm.registerCallback('redo',         () => this.history.redo());
     sm.registerCallback('split',        () => this.splitAtPlayhead());
-    sm.registerCallback('lift',         () => { tl.lift(); });
-    sm.registerCallback('extract',      () => { tl.extract(); });
+    // Lift/Extract go through the history so they are undoable (CLAUDE.md:
+    // クリップ操作は全て Command Pattern 経由).
+    sm.registerCallback('lift',         () => { const c = tl.liftCommand();    if (c) this.history.execute(c); });
+    sm.registerCallback('extract',      () => { const c = tl.extractCommand(); if (c) this.history.execute(c); });
     sm.registerCallback('selectAll',    () => tl.selectRange(0, Infinity));
     sm.registerCallback('deselect',     () => tl.deselectAll());
     sm.registerCallback('setInPoint',   () => tl.setInPoint());

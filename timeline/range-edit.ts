@@ -158,3 +158,50 @@ export function extractRange(
 ): RangeEditResult {
   return cutRange(clips, range, true, opts);
 }
+
+/** Data needed to reverse a lift/extract (for undo). */
+export interface RangeEditUndo {
+  /** Clips removed by the edit — restored on undo. */
+  removed: Clip[];
+  /** Prior state of clips the edit modified (same ids) — restored on undo. */
+  modifiedBefore: Clip[];
+  /** Ids of clips the edit added (split tails) — deleted on undo. */
+  addedIds: string[];
+}
+
+/**
+ * Compute the inverse of a range edit from the pre-edit clip list and the
+ * edit `result`, so the operation can be undone exactly.
+ *
+ * - `removed`        = pre-edit clips whose id is in `result.removedIds`
+ * - `modifiedBefore` = pre-edit clips whose id also appears in `result.clips`
+ * - `addedIds`       = `result.clips` ids that did not exist before (split tails)
+ *
+ * Pure: does not mutate its inputs.
+ */
+export function captureRangeEditUndo(
+  before: readonly Clip[],
+  result: RangeEditResult,
+): RangeEditUndo {
+  const beforeById = new Map(before.map((c) => [c.id, c]));
+  const removedSet = new Set(result.removedIds);
+
+  const removed: Clip[] = [];
+  for (const id of result.removedIds) {
+    const c = beforeById.get(id);
+    if (c) removed.push({ ...c, transform: { ...c.transform } });
+  }
+
+  const modifiedBefore: Clip[] = [];
+  const addedIds: string[] = [];
+  for (const c of result.clips) {
+    const prior = beforeById.get(c.id);
+    if (prior && !removedSet.has(c.id)) {
+      modifiedBefore.push({ ...prior, transform: { ...prior.transform } });
+    } else if (!prior) {
+      addedIds.push(c.id);
+    }
+  }
+
+  return { removed, modifiedBefore, addedIds };
+}

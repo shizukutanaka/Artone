@@ -12,7 +12,8 @@
  */
 
 import { IntervalIndex } from './interval-index';
-import { liftRange, extractRange } from './range-edit';
+import { liftRange, extractRange, captureRangeEditUndo, type RangeEditResult } from './range-edit';
+import { CommandFactory, type Command } from '../undo/history-manager';
 
 // ============================================================
 // Types
@@ -396,24 +397,78 @@ export class MagneticTimeline {
     return this.applyRangeEdit(extractRange, trackId);
   }
 
+  /**
+   * Build an **undoable** Lift command over the current in→out range, or null if
+   * no range is set or the edit is a no-op. Run it via `HistoryManager.execute`.
+   */
+  liftCommand(trackId?: string): Command | null {
+    return this.rangeEditCommand(liftRange, 'clip.lift', 'Lift range', trackId);
+  }
+
+  /** Build an **undoable** Extract command over the current in→out range, or null. */
+  extractCommand(trackId?: string): Command | null {
+    return this.rangeEditCommand(extractRange, 'clip.extract', 'Extract range', trackId);
+  }
+
   /** Shared apply path for lift/extract. Requires both in and out points set. */
   private applyRangeEdit(
     op: typeof liftRange,
     trackId: string | undefined,
   ): boolean {
-    const { inPoint, outPoint } = this.state;
-    if (inPoint === null || outPoint === null) return false;
-    const start = Math.min(inPoint, outPoint);
-    const end = Math.max(inPoint, outPoint);
-    if (!(end > start)) return false;
-
-    const result = op([...this.state.clips.values()], { start, end }, { trackId });
-    if (result.clips.length === 0 && result.removedIds.length === 0) return false;
-
-    for (const id of result.removedIds) this.state.clips.delete(id);
-    for (const clip of result.clips) this.state.clips.set(clip.id, clip);
+    const result = this.computeRangeEdit(op, trackId);
+    if (!result) return false;
+    this.applyRangeEditResult(result);
     this.notify();
     return true;
+  }
+
+  /** Validate the in→out range and compute the (non-applied) edit result. */
+  private computeRangeEdit(
+    op: typeof liftRange,
+    trackId: string | undefined,
+  ): RangeEditResult | null {
+    const { inPoint, outPoint } = this.state;
+    if (inPoint === null || outPoint === null) return null;
+    const start = Math.min(inPoint, outPoint);
+    const end = Math.max(inPoint, outPoint);
+    if (!(end > start)) return null;
+
+    const result = op([...this.state.clips.values()], { start, end }, { trackId });
+    if (result.clips.length === 0 && result.removedIds.length === 0) return null;
+    return result;
+  }
+
+  /** Apply a computed range-edit result to the clip store (no notify). */
+  private applyRangeEditResult(result: RangeEditResult): void {
+    for (const id of result.removedIds) this.state.clips.delete(id);
+    for (const clip of result.clips) {
+      this.state.clips.set(clip.id, { ...clip, transform: { ...clip.transform } });
+    }
+  }
+
+  /** Build a reversible structural command for a lift/extract edit. */
+  private rangeEditCommand(
+    op: typeof liftRange,
+    type: string,
+    description: string,
+    trackId: string | undefined,
+  ): Command | null {
+    const before = [...this.state.clips.values()].map((c) => ({ ...c, transform: { ...c.transform } }));
+    const result = this.computeRangeEdit(op, trackId);
+    if (!result) return null;
+    const undo = captureRangeEditUndo(before, result);
+
+    const apply = (): void => {
+      this.applyRangeEditResult(result);
+      this.notify();
+    };
+    const revert = (): void => {
+      for (const id of undo.addedIds) this.state.clips.delete(id);
+      for (const c of undo.removed) this.state.clips.set(c.id, { ...c, transform: { ...c.transform } });
+      for (const c of undo.modifiedBefore) this.state.clips.set(c.id, { ...c, transform: { ...c.transform } });
+      this.notify();
+    };
+    return CommandFactory.structural(type, description, apply, revert);
   }
 
   // ============================================================

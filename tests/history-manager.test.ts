@@ -448,3 +448,51 @@ describe('HistoryPanelUI — XSS prevention', () => {
     expect(html).toContain('&quot;');
   });
 });
+
+// ============================================================
+// CommandFactory.structural — generic reversible command
+// ============================================================
+
+describe('CommandFactory.structural', () => {
+  it('execute runs apply, undo runs revert, redo runs apply again', () => {
+    const log: string[] = [];
+    const cmd = CommandFactory.structural(
+      'clip.lift',
+      'Lift range',
+      () => log.push('apply'),
+      () => log.push('revert'),
+    );
+    cmd.execute();
+    cmd.undo();
+    cmd.redo();
+    expect(log).toEqual(['apply', 'revert', 'apply']);
+  });
+
+  it('carries its type and description', () => {
+    const cmd = CommandFactory.structural('clip.extract', 'Extract range', () => {}, () => {});
+    expect(cmd.type).toBe('clip.extract');
+    expect(cmd.description).toBe('Extract range');
+  });
+
+  it('is undoable through HistoryManager (state restored)', () => {
+    const store = new Map<string, number>([['a', 1]]);
+    const h = new HistoryManager({ autoPersist: false });
+    const cmd = CommandFactory.structural(
+      'clip.lift',
+      'Lift',
+      () => store.set('a', 2),
+      () => store.set('a', 1),
+    );
+    h.execute(cmd);
+    expect(store.get('a')).toBe(2);
+    h.undo();
+    expect(store.get('a')).toBe(1);
+    h.redo();
+    expect(store.get('a')).toBe(2);
+  });
+
+  it('exposes a default opaque delta keyed by type', () => {
+    const cmd = CommandFactory.structural('clip.lift', 'Lift', () => {}, () => {});
+    expect(cmd.getDelta().path).toEqual(['clip.lift']);
+  });
+});

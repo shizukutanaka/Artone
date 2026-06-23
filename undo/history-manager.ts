@@ -542,19 +542,19 @@ export class CommandFactory {
       type: 'composite',
       timestamp: Date.now(),
       description: `${commands.length} operations`,
-      
+
       execute() {
         commands.forEach(cmd => cmd.execute());
       },
-      
+
       undo() {
         [...commands].reverse().forEach(cmd => cmd.undo());
       },
-      
+
       redo() {
         commands.forEach(cmd => cmd.redo());
       },
-      
+
       getDelta() {
         return {
           before: commands.map(c => c.getDelta().before),
@@ -562,6 +562,34 @@ export class CommandFactory {
           path: ['composite']
         };
       }
+    };
+  }
+
+  /**
+   * Generic reversible command for structural edits (e.g. Lift / Extract) that
+   * add, remove and split multiple clips at once and cannot be expressed as a
+   * single-field delta. The caller supplies idempotent `apply` and `revert`
+   * closures; `execute`/`redo` run `apply`, `undo` runs `revert`.
+   *
+   * `delta` is an opaque description for inspection/persistence (the edit is not
+   * a simple before/after field change).
+   */
+  static structural(
+    type: string,
+    description: string,
+    apply: () => void,
+    revert: () => void,
+    delta: CommandDelta = { before: null, after: null, path: [type] }
+  ): Command {
+    return {
+      id: `${type}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type,
+      timestamp: Date.now(),
+      description,
+      execute() { apply(); },
+      undo() { revert(); },
+      redo() { apply(); },
+      getDelta() { return delta; },
     };
   }
 }

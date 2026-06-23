@@ -9,6 +9,7 @@ import {
   deserializeTimelineState,
   type Clip,
 } from '../timeline/magnetic-timeline';
+import { HistoryManager } from '../undo/history-manager';
 
 // ─── helpers ───────────────────────────────────────────────────
 
@@ -715,5 +716,96 @@ describe('MagneticTimeline — lift / extract', () => {
     tl.subscribe(spy);
     tl.lift();
     expect(spy).toHaveBeenCalled();
+  });
+});
+
+// ─── Lift / Extract reversibility (Command pattern, undo/redo) ──
+
+describe('MagneticTimeline — liftCommand / extractCommand (undoable)', () => {
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find((t) => t.name === 'V1')!.id;
+  });
+
+  function add(start: number, duration: number) {
+    return tl.addClip(clipSpec({ trackId: vId, startTime: start, duration }));
+  }
+
+  /** Stable, comparable snapshot of all clips (id → start/duration/mediaIn). */
+  function snapshot() {
+    return [...tl.getState().clips.values()]
+      .map((c) => ({ id: c.id, startTime: c.startTime, duration: c.duration, mediaIn: c.mediaIn }))
+      .sort((a, b) => (a.id < b.id ? -1 : 1));
+  }
+
+  it('liftCommand returns null when no in/out range is set', () => {
+    add(0, 5);
+    expect(tl.liftCommand()).toBeNull();
+  });
+
+  it('execute then undo restores the timeline exactly (split case)', () => {
+    add(0, 20); // single clip; range inside → split into head + tail
+    tl.setInPoint(8);
+    tl.setOutPoint(12);
+    const before = snapshot();
+
+    const cmd = tl.liftCommand()!;
+    expect(cmd).not.toBeNull();
+    cmd.execute();
+    // After lift: head [0,8) + tail [12,20) → 2 clips.
+    expect(tl.getState().clips.size).toBe(2);
+
+    cmd.undo();
+    expect(snapshot()).toEqual(before); // back to the single original clip
+    expect(tl.getState().clips.size).toBe(1);
+  });
+
+  it('redo re-applies the same edit (ids stable across undo/redo)', () => {
+    add(0, 20);
+    tl.setInPoint(8);
+    tl.setOutPoint(12);
+    const cmd = tl.liftCommand()!;
+    cmd.execute();
+    const afterFirst = snapshot();
+    cmd.undo();
+    cmd.redo();
+    expect(snapshot()).toEqual(afterFirst); // identical, same split-tail id
+  });
+
+  it('extract undo restores rippled clips to their original positions', () => {
+    add(0, 5);
+    add(5, 5);   // fully covered by [5,10)
+    add(10, 5);  // ripples left on extract
+    tl.setInPoint(5);
+    tl.setOutPoint(10);
+    const before = snapshot();
+
+    const cmd = tl.extractCommand()!;
+    cmd.execute();
+    expect(tl.getState().clips.size).toBe(2); // middle removed
+
+    cmd.undo();
+    expect(snapshot()).toEqual(before); // removed clip restored, ripple reverted
+    expect(tl.getState().clips.size).toBe(3);
+  });
+
+  it('is undoable end-to-end through HistoryManager', () => {
+    add(0, 20);
+    tl.setInPoint(8);
+    tl.setOutPoint(12);
+    const before = snapshot();
+    const history = new HistoryManager({ autoPersist: false });
+
+    history.execute(tl.liftCommand()!);
+    expect(tl.getState().clips.size).toBe(2);
+
+    history.undo();
+    expect(snapshot()).toEqual(before);
+
+    history.redo();
+    expect(tl.getState().clips.size).toBe(2);
   });
 });

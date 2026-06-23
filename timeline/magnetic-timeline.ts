@@ -519,6 +519,35 @@ export class MagneticTimeline {
   }
 
   /**
+   * Build a snapshot-based reversible structural command.
+   *
+   * Captures the full clip set before the edit, lazily runs `mutate` on the
+   * first execute (capturing the resulting state for stable redo), and
+   * restores the captured before/after state on undo/redo. This is the shared
+   * machinery behind every single-shot structural command (split/add/delete/
+   * move/trim/closeGaps), eliminating the per-method snapshot/restore
+   * boilerplate. Lift/Extract use a separate delta-based path
+   * (`rangeEditCommand`) because their inverse is computed analytically by
+   * `captureRangeEditUndo` rather than from a full snapshot.
+   *
+   * @param mutate the in-place edit to perform (calls the plain mutator).
+   */
+  private structuralCommand(type: string, description: string, mutate: () => void): Command {
+    const before = this.snapshotClips();
+    let after: Clip[] | null = null;
+
+    const apply = (): void => {
+      if (after) {
+        this.restoreClips(after);
+      } else {
+        mutate();
+        after = this.snapshotClips();
+      }
+    };
+    return CommandFactory.structural(type, description, apply, () => this.restoreClips(before));
+  }
+
+  /**
    * Build an **undoable** command that splits `clipId` at `splitTime`.
    * Returns null when splitTime is outside the clip bounds (no-op).
    *
@@ -528,19 +557,7 @@ export class MagneticTimeline {
     const clip = this.state.clips.get(clipId);
     if (!clip) return null;
     if (splitTime <= clip.startTime || splitTime >= clip.startTime + clip.duration) return null;
-
-    const before = this.snapshotClips();
-    let after: Clip[] | null = null;
-
-    const apply = (): void => {
-      if (after) {
-        this.restoreClips(after);
-      } else {
-        this.splitClip(clipId, splitTime);
-        after = this.snapshotClips();
-      }
-    };
-    return CommandFactory.structural('clip.split', 'Split clip', apply, () => this.restoreClips(before));
+    return this.structuralCommand('clip.split', 'Split clip', () => this.splitClip(clipId, splitTime));
   }
 
   /**
@@ -549,18 +566,7 @@ export class MagneticTimeline {
    * `HistoryManager.execute()`.
    */
   addClipCommand(clip: Omit<Clip, 'id' | 'selected'>): Command {
-    const before = this.snapshotClips();
-    let after: Clip[] | null = null;
-
-    const apply = (): void => {
-      if (after) {
-        this.restoreClips(after);
-      } else {
-        this.addClip(clip);
-        after = this.snapshotClips();
-      }
-    };
-    return CommandFactory.structural('clip.add', 'Add clip', apply, () => this.restoreClips(before));
+    return this.structuralCommand('clip.add', 'Add clip', () => this.addClip(clip));
   }
 
   /**
@@ -571,19 +577,7 @@ export class MagneticTimeline {
   deleteClipCommand(clipId: string): Command | null {
     const clip = this.state.clips.get(clipId);
     if (!clip || clip.locked) return null;
-
-    const before = this.snapshotClips();
-    let after: Clip[] | null = null;
-
-    const apply = (): void => {
-      if (after) {
-        this.restoreClips(after);
-      } else {
-        this.deleteClip(clipId);
-        after = this.snapshotClips();
-      }
-    };
-    return CommandFactory.structural('clip.delete', 'Delete clip', apply, () => this.restoreClips(before));
+    return this.structuralCommand('clip.delete', 'Delete clip', () => this.deleteClip(clipId));
   }
 
   /**
@@ -603,29 +597,15 @@ export class MagneticTimeline {
     selected.sort((a, b) => b.startTime - a.startTime);
     const ids = selected.map((c) => c.id);
 
-    const before = this.snapshotClips();
-    let after: Clip[] | null = null;
-
-    const apply = (): void => {
-      if (after) {
-        this.restoreClips(after);
-      } else {
-        // Batch the per-clip deletions so subscribers receive exactly ONE
-        // state-change notification for the whole operation (atomic command
-        // contract). Without this, each deleteClip() fires notify() and
-        // subscribers see N intermediate partially-deleted states.
-        this.beginBatch();
-        for (const id of ids) this.deleteClip(id);
-        this.endBatch();
-        after = this.snapshotClips();
-      }
-    };
-    return CommandFactory.structural(
-      'clip.deleteSelected',
-      'Delete selected clips',
-      apply,
-      () => this.restoreClips(before),
-    );
+    return this.structuralCommand('clip.deleteSelected', 'Delete selected clips', () => {
+      // Batch the per-clip deletions so subscribers receive exactly ONE
+      // state-change notification for the whole operation (atomic command
+      // contract). Without this, each deleteClip() fires notify() and
+      // subscribers see N intermediate partially-deleted states.
+      this.beginBatch();
+      for (const id of ids) this.deleteClip(id);
+      this.endBatch();
+    });
   }
 
   /**
@@ -642,19 +622,7 @@ export class MagneticTimeline {
       cursor = c.startTime + c.duration;
     }
     if (!hasGap) return null;
-
-    const before = this.snapshotClips();
-    let after: Clip[] | null = null;
-
-    const apply = (): void => {
-      if (after) {
-        this.restoreClips(after);
-      } else {
-        this.closeGaps(trackId);
-        after = this.snapshotClips();
-      }
-    };
-    return CommandFactory.structural('clip.closeGaps', 'Close gaps', apply, () => this.restoreClips(before));
+    return this.structuralCommand('clip.closeGaps', 'Close gaps', () => this.closeGaps(trackId));
   }
 
   /**
@@ -665,19 +633,7 @@ export class MagneticTimeline {
   moveClipCommand(clipId: string, newStart: number, newTrackId?: string): Command | null {
     const clip = this.state.clips.get(clipId);
     if (!clip || clip.locked) return null;
-
-    const before = this.snapshotClips();
-    let after: Clip[] | null = null;
-
-    const apply = (): void => {
-      if (after) {
-        this.restoreClips(after);
-      } else {
-        this.moveClip(clipId, newStart, newTrackId);
-        after = this.snapshotClips();
-      }
-    };
-    return CommandFactory.structural('clip.move', 'Move clip', apply, () => this.restoreClips(before));
+    return this.structuralCommand('clip.move', 'Move clip', () => this.moveClip(clipId, newStart, newTrackId));
   }
 
   /**
@@ -689,19 +645,7 @@ export class MagneticTimeline {
     const clip = this.state.clips.get(clipId);
     if (!clip || clip.locked) return null;
     if (newStart - clip.startTime >= clip.duration) return null; // would zero-out
-
-    const before = this.snapshotClips();
-    let after: Clip[] | null = null;
-
-    const apply = (): void => {
-      if (after) {
-        this.restoreClips(after);
-      } else {
-        this.trimClipStart(clipId, newStart);
-        after = this.snapshotClips();
-      }
-    };
-    return CommandFactory.structural('clip.trimStart', 'Trim clip start', apply, () => this.restoreClips(before));
+    return this.structuralCommand('clip.trimStart', 'Trim clip start', () => this.trimClipStart(clipId, newStart));
   }
 
   /**
@@ -713,19 +657,7 @@ export class MagneticTimeline {
     const clip = this.state.clips.get(clipId);
     if (!clip || clip.locked) return null;
     if (newEnd <= clip.startTime) return null; // would zero-out
-
-    const before = this.snapshotClips();
-    let after: Clip[] | null = null;
-
-    const apply = (): void => {
-      if (after) {
-        this.restoreClips(after);
-      } else {
-        this.trimClipEnd(clipId, newEnd);
-        after = this.snapshotClips();
-      }
-    };
-    return CommandFactory.structural('clip.trimEnd', 'Trim clip end', apply, () => this.restoreClips(before));
+    return this.structuralCommand('clip.trimEnd', 'Trim clip end', () => this.trimClipEnd(clipId, newEnd));
   }
 
   // ============================================================

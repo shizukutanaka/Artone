@@ -209,7 +209,7 @@ const ItemView: React.FC<{
 // Main Browser
 // ============================================================
 
-export const MediaBrowser: React.FC<MediaBrowserProps> = ({
+export const MediaBrowser: React.FC<MediaBrowserProps> = React.memo(({
   items,
   onImport,
   onSelect,
@@ -365,6 +365,7 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = ({
       </div>
     </div>
   );
-};
+});
+MediaBrowser.displayName = 'MediaBrowser';
 
 export default MediaBrowser;

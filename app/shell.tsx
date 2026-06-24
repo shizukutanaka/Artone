@@ -303,6 +303,29 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     }
   }, [actions, probeFileDuration]);
 
+  // Stable MediaBrowser callbacks so the (memoized) browser does not re-render on
+  // every engine tick (e.g. the playhead advancing during playback). Functional
+  // setState keeps these dependency-free and referentially stable.
+  const handleMediaImport = useCallback((files: File[]) => {
+    handleImport(files).catch(() => undefined);
+  }, [handleImport]);
+
+  const handleMediaSelect = useCallback((item: MediaItem) => {
+    setSelectedMediaId(item.id);
+  }, []);
+
+  const handleMediaDelete = useCallback((id: string) => {
+    setMediaItems((prev) => {
+      // Release the blob URL created at import time; otherwise it leaks until
+      // document unload (revoke is a no-op if already released, so StrictMode
+      // double-invoke is safe).
+      const removed = prev.find((m) => m.id === id);
+      if (removed) URL.revokeObjectURL(removed.url);
+      return prev.filter((m) => m.id !== id);
+    });
+    setSelectedMediaId((cur) => (cur === id ? undefined : cur));
+  }, []);
+
   // First-Run で選択されたファイルをインポート
   useEffect(() => {
     if (engine.isReady && pendingFiles.length > 0) {
@@ -459,19 +482,9 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               <MediaBrowser
                 items={mediaItems}
                 selectedId={selectedMediaId}
-                onImport={(files) => { handleImport(files).catch(() => undefined); }}
-                onSelect={(item) => setSelectedMediaId(item.id)}
-                onDelete={(id) => {
-                  setMediaItems((prev) => {
-                    // Release the blob URL created at import time; otherwise it
-                    // leaks until document unload (revoke is a no-op if already
-                    // released, so StrictMode double-invoke is safe).
-                    const removed = prev.find((m) => m.id === id);
-                    if (removed) URL.revokeObjectURL(removed.url);
-                    return prev.filter((m) => m.id !== id);
-                  });
-                  if (selectedMediaId === id) setSelectedMediaId(undefined);
-                }}
+                onImport={handleMediaImport}
+                onSelect={handleMediaSelect}
+                onDelete={handleMediaDelete}
               />
             </div>
           </>}

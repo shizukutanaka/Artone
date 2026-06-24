@@ -437,7 +437,7 @@ interface InspectorProps {
   onChange: (s: Selection) => void;
 }
 
-export const Inspector: React.FC<InspectorProps> = ({ selection, onChange }) => {
+export const Inspector: React.FC<InspectorProps> = React.memo(({ selection, onChange }) => {
   if (selection.type === 'none') {
     return (
       <div
@@ -466,6 +466,7 @@ export const Inspector: React.FC<InspectorProps> = ({ selection, onChange }) => 
     return <ProjectInspector sel={selection} onChange={(s) => onChange(s)} />;
   }
   return null;
-};
+});
+Inspector.displayName = 'Inspector';
 
 export default Inspector;

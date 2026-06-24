@@ -4,7 +4,11 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import CaptionManager, { CAPTION_PRESETS } from '../captions/caption-manager';
+import CaptionManager, {
+  CAPTION_PRESETS,
+  wrapCaptionLines,
+  segmentForWrap,
+} from '../captions/caption-manager';
 
 // ============================================================
 // Helpers
@@ -521,6 +525,54 @@ describe('CaptionManager — wrapText (private)', () => {
   it('handles empty string', () => {
     const result = makePrivate().wrapText(mockCtx(5), '', 100);
     expect(result).toEqual([]);
+  });
+
+  it('REGRESSION: wraps Japanese (no spaces) instead of overflowing one line', () => {
+    // Each char = 10px, maxWidth = 50 → ~5 chars/line. Old space-split logic left
+    // the whole 9-char string on ONE 90px line (overflow); CJK segmentation wraps it.
+    const result = makePrivate().wrapText(mockCtx(10), 'こんにちは世界です', 50);
+    expect(result.length).toBeGreaterThan(1);
+    // No line exceeds the width budget (5 chars).
+    for (const line of result) expect(line.length).toBeLessThanOrEqual(5);
+    // Content is preserved (concatenation equals the input, no spaces inserted).
+    expect(result.join('')).toBe('こんにちは世界です');
+  });
+});
+
+// ─── CJK-aware line wrapping (pure) ───────────────────────────────────────────
+
+describe('segmentForWrap', () => {
+  it('splits Japanese into multiple break tokens', () => {
+    const tokens = segmentForWrap('こんにちは世界です');
+    expect(tokens.length).toBeGreaterThan(1);
+    expect(tokens.join('')).toBe('こんにちは世界です');
+  });
+
+  it('keeps Latin words intact', () => {
+    expect(segmentForWrap('one two').filter((t) => t.trim() !== '')).toEqual(['one', 'two']);
+  });
+});
+
+describe('wrapCaptionLines (pure)', () => {
+  const measure = (charWidth: number) => (s: string) => s.length * charWidth;
+
+  it('matches greedy word wrap for Latin', () => {
+    expect(wrapCaptionLines('one two three', 50, measure(10))).toEqual(['one', 'two', 'three']);
+  });
+
+  it('respects hard newlines', () => {
+    expect(wrapCaptionLines('a\nb', 500, measure(5))).toEqual(['a', 'b']);
+  });
+
+  it('keeps an over-wide unbreakable token on its own line (not dropped)', () => {
+    // Single Latin word wider than maxWidth: emitted as one overflowing line.
+    expect(wrapCaptionLines('supercalifragilistic', 50, measure(10))).toEqual(['supercalifragilistic']);
+  });
+
+  it('wraps CJK with the default segmenter', () => {
+    const lines = wrapCaptionLines('今日はいい天気ですね', 40, measure(10));
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.join('')).toBe('今日はいい天気ですね');
   });
 });
 

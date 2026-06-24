@@ -14,6 +14,75 @@
 import { normalizeCues, type ReadabilityOptions } from './readability';
 
 // ============================================================
+// Line-break segmentation (CJK-aware)
+// ============================================================
+
+/**
+ * Cached word segmenter giving line-break opportunities. `undefined` until first
+ * use, then an `Intl.Segmenter` or `null` if the runtime lacks it.
+ */
+let _wordSegmenter: Intl.Segmenter | null | undefined;
+
+function getWordSegmenter(): Intl.Segmenter | null {
+  if (_wordSegmenter === undefined) {
+    try {
+      // No locale → host default; ICU still applies CJK dictionary rules.
+      _wordSegmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+    } catch {
+      _wordSegmenter = null;
+    }
+  }
+  return _wordSegmenter;
+}
+
+/**
+ * Split a paragraph into line-break tokens. Uses `Intl.Segmenter` so Japanese /
+ * Chinese / Thai (which have no inter-word spaces) gain break opportunities;
+ * falls back to keeping each trailing space attached for space-delimited text
+ * when `Intl.Segmenter` is unavailable.
+ */
+export function segmentForWrap(text: string): string[] {
+  const seg = getWordSegmenter();
+  if (seg) return Array.from(seg.segment(text), (s) => s.segment);
+  // Fallback: split after each run of whitespace, keeping it attached.
+  return text.split(/(?<=\s)(?=\S)/);
+}
+
+/**
+ * Greedily wrap `text` into lines no wider than `maxWidth`.
+ *
+ * Pure and DOM-free: `measure` returns a string's rendered width (the caller
+ * passes `s => ctx.measureText(s).width`) and `segment` yields break tokens
+ * (defaults to the CJK-aware {@link segmentForWrap}). Newlines in `text` are
+ * hard breaks. A single token wider than `maxWidth` is left on its own line
+ * rather than dropped (it cannot be broken without character-level splitting).
+ *
+ * # AI generated (reviewed)
+ */
+export function wrapCaptionLines(
+  text: string,
+  maxWidth: number,
+  measure: (s: string) => number,
+  segment: (s: string) => string[] = segmentForWrap,
+): string[] {
+  const lines: string[] = [];
+  for (const para of text.split('\n')) {
+    let current = '';
+    for (const tok of segment(para)) {
+      const test = current + tok;
+      if (measure(test) > maxWidth && current.trim() !== '') {
+        lines.push(current.trimEnd());
+        current = tok.replace(/^\s+/, ''); // don't start a wrapped line with the break space
+      } else {
+        current = test;
+      }
+    }
+    if (current.trim() !== '') lines.push(current.trimEnd());
+  }
+  return lines;
+}
+
+// ============================================================
 // Types
 // ============================================================
 
@@ -624,31 +693,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   }
 
   private wrapText(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-    const paragraphs = text.split('\n');
-    const lines: string[] = [];
-
-    for (const para of paragraphs) {
-      const words = para.split(' ');
-      let currentLine = '';
-
-      for (const word of words) {
-        const testLine = currentLine ? `${currentLine} ${word}` : word;
-        const metrics = ctx.measureText(testLine);
-
-        if (metrics.width > maxWidth && currentLine) {
-          lines.push(currentLine);
-          currentLine = word;
-        } else {
-          currentLine = testLine;
-        }
-      }
-
-      if (currentLine) {
-        lines.push(currentLine);
-      }
-    }
-
-    return lines;
+    return wrapCaptionLines(text, maxWidth, (s) => ctx.measureText(s).width);
   }
 
   // ============================================================

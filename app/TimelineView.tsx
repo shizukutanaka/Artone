@@ -97,6 +97,25 @@ export function computeClipDrag(
   return { clipId: drag.clipId, start: drag.initialStart, duration: newDuration };
 }
 
+/** Edge hit-zone width (px) for resize vs move on a clip. */
+export const CLIP_EDGE_PX = 6;
+
+/**
+ * Classify a pointer-down on a clip into a drag mode from its X offset within
+ * the clip: within {@link CLIP_EDGE_PX} of the left edge → `resize-l`, within
+ * that of the right edge → `resize-r`, otherwise `move`. The left edge wins when
+ * a clip is so narrow the two hit-zones overlap (matches the original inline
+ * `if/else if` order).
+ *
+ * @param offsetX Pointer X relative to the clip's left edge (px).
+ * @param width   Clip width (px).
+ */
+export function clipDragModeForX(offsetX: number, width: number): ClipDragMode {
+  if (offsetX < CLIP_EDGE_PX) return 'resize-l';
+  if (offsetX > width - CLIP_EDGE_PX) return 'resize-r';
+  return 'move';
+}
+
 export interface TimelineViewProps {
   tracks: TimelineTrack[];
   clips: TimelineClip[];
@@ -114,7 +133,7 @@ export interface TimelineViewProps {
 // Ruler
 // ============================================================
 
-const Ruler: React.FC<{ duration: number; pxPerSecond: number; offset: number }> = ({
+const Ruler: React.FC<{ duration: number; pxPerSecond: number; offset: number }> = React.memo(({
   duration,
   pxPerSecond,
   offset
@@ -166,7 +185,8 @@ const Ruler: React.FC<{ duration: number; pxPerSecond: number; offset: number }>
       })}
     </div>
   );
-};
+});
+Ruler.displayName = 'Ruler';
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -186,12 +206,13 @@ interface ClipViewProps {
   pxPerSecond: number;
   offset: number;
   trackType: TrackType;
-  onPointerDown: (e: React.PointerEvent, mode: ClipDragMode) => void;
+  /** Receives the clip so the parent can pass one stable callback for all clips. */
+  onPointerDown: (clip: TimelineClip, e: React.PointerEvent, mode: ClipDragMode) => void;
   onPointerDrag: (e: React.PointerEvent) => void;
   onPointerEnd: (e: React.PointerEvent) => void;
 }
 
-const ClipView: React.FC<ClipViewProps> = ({
+const ClipView: React.FC<ClipViewProps> = React.memo(({
   clip,
   trackTop,
   trackHeight,
@@ -232,9 +253,7 @@ const ClipView: React.FC<ClipViewProps> = ({
         // Capture the pointer so move/up events keep flowing to this element even
         // when the pointer leaves it — unifies mouse, touch and pen.
         e.currentTarget.setPointerCapture?.(e.pointerId);
-        if (x < 6) onPointerDown(e, 'resize-l');
-        else if (x > rect.width - 6) onPointerDown(e, 'resize-r');
-        else onPointerDown(e, 'move');
+        onPointerDown(clip, e, clipDragModeForX(x, rect.width));
       }}
       onPointerMove={onPointerDrag}
       onPointerUp={onPointerEnd}
@@ -255,13 +274,14 @@ const ClipView: React.FC<ClipViewProps> = ({
       </div>
     </div>
   );
-};
+});
+ClipView.displayName = 'ClipView';
 
 // ============================================================
 // Track Header
 // ============================================================
 
-const TrackHeader: React.FC<{ track: TimelineTrack; top: number }> = ({ track, top }) => (
+const TrackHeader: React.FC<{ track: TimelineTrack; top: number }> = React.memo(({ track, top }) => (
   <div
     style={{
       position: 'absolute',
@@ -291,7 +311,8 @@ const TrackHeader: React.FC<{ track: TimelineTrack; top: number }> = ({ track, t
     />
     {track.name}
   </div>
-);
+));
+TrackHeader.displayName = 'TrackHeader';
 
 // ============================================================
 // Main TimelineView
@@ -442,7 +463,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
               pxPerSecond={pxPerSecond}
               offset={0}
               trackType={pos.track.type}
-              onPointerDown={(e, mode) => handlePointerDown(clip, e, mode)}
+              onPointerDown={handlePointerDown}
               onPointerDrag={handlePointerDrag}
               onPointerEnd={handlePointerEnd}
             />

@@ -11,6 +11,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeClipDrag,
+  clipDragModeForX,
+  CLIP_EDGE_PX,
   MIN_CLIP_DURATION,
   type ClipDragState,
 } from '../app/TimelineView';
@@ -142,5 +144,34 @@ describe('computeClipDrag — trim symmetry', () => {
     expect(right).not.toBeNull();
     expect(left!.duration).toBeCloseTo(aboveMin);
     expect(right!.duration).toBeCloseTo(aboveMin);
+  });
+});
+
+// ─── clipDragModeForX (edge hit-test) ──────────────────────────────────────────
+
+describe('clipDragModeForX', () => {
+  const W = 100;
+
+  it('left edge zone → resize-l', () => {
+    expect(clipDragModeForX(0, W)).toBe('resize-l');
+    expect(clipDragModeForX(CLIP_EDGE_PX - 0.1, W)).toBe('resize-l');
+  });
+
+  it('right edge zone → resize-r', () => {
+    expect(clipDragModeForX(W, W)).toBe('resize-r');
+    expect(clipDragModeForX(W - CLIP_EDGE_PX + 0.1, W)).toBe('resize-r');
+  });
+
+  it('interior → move', () => {
+    expect(clipDragModeForX(W / 2, W)).toBe('move');
+    expect(clipDragModeForX(CLIP_EDGE_PX, W)).toBe('move');          // boundary is exclusive
+    expect(clipDragModeForX(W - CLIP_EDGE_PX, W)).toBe('move');
+  });
+
+  it('left edge wins when both zones overlap on a narrow clip', () => {
+    // width < 2*edge: every x < edge is resize-l (checked first), matching the
+    // original inline if/else-if order.
+    expect(clipDragModeForX(0, 4)).toBe('resize-l');
+    expect(clipDragModeForX(3, 4)).toBe('resize-l'); // 3 < 6 → resize-l before resize-r
   });
 });

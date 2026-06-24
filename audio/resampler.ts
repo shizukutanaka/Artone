@@ -65,6 +65,26 @@ const HALF_WIDTH: Record<ResampleQuality, number> = {
   sinc16: 8,
 };
 
+/**
+ * Effective kernel half-width for a given quality and cutoff.
+ *
+ * The windowed-sinc kernel is scaled in frequency by `cutoff` when downsampling
+ * (cutoff < 1) for anti-aliasing, which stretches the sinc in *time*: its first
+ * zero moves from ±1 to ±1/cutoff source samples. A fixed half-width would then
+ * truncate the kernel before its lobes complete, crippling the anti-aliasing
+ * filter (passband droop + alias leakage). Widen the half-width by 1/cutoff so
+ * the window always spans the same number of sinc lobes regardless of the
+ * downsampling factor (Smith J.O., "Digital Audio Resampling").
+ *
+ * Upsampling (cutoff === 1) and the 'linear' tier are unaffected — output there
+ * is bit-identical to the fixed-width version.
+ */
+export function effectiveHalfWidth(quality: ResampleQuality, cutoff: number): number {
+  const halfW = HALF_WIDTH[quality];
+  if (quality === 'linear' || cutoff >= 1) return halfW;
+  return Math.ceil(halfW / cutoff);
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 /** Hann window value at fractional position t ∈ [−1, 1]. */
@@ -126,7 +146,7 @@ export function resample(input: Float32Array, options: ResampleOptions): Float32
 
   const ratio  = srcSR / dstSR;   // source samples per output sample
   const cutoff = Math.min(1, dstSR / srcSR);
-  const halfW  = HALF_WIDTH[quality];
+  const halfW  = effectiveHalfWidth(quality, cutoff);
   const out    = new Float32Array(outLen);
 
   if (quality === 'linear') {
@@ -175,7 +195,7 @@ export function createResampler(options: ResampleOptions): Resampler {
   const { sourceSampleRate: srcSR, targetSampleRate: dstSR, quality = 'sinc4' } = options;
   const ratio  = srcSR / dstSR;
   const cutoff = Math.min(1, dstSR / srcSR);
-  const halfW  = HALF_WIDTH[quality];
+  const halfW  = effectiveHalfWidth(quality, cutoff);
 
   // Global counters (in source-sample domain and output-sample domain).
   let totalIn  = 0;  // total source samples received so far

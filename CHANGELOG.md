@@ -8,6 +8,7 @@ Artone v3 の全変更を記録。
 ## [Unreleased]
 
 ### Performance
+- **WASM プラグイン AudioWorklet の `process()` をゼロアロケーション化** (リスクゾーン plugins + audio リアルタイム、Qiita/Zenn 調査)。`plugins/plugin-bridge.ts` の `WasmPluginProcessor.process()` はリアルタイム音声レンダースレッドで毎ブロック (44.1kHz / 128フレームで約2.9ms ごと) 呼ばれるが、コールバックごとに (1) WASM メモリ上の `Float32Array` ビュー 2 本、(2) 出力コピーの `subarray()` がチャネルごとに生成するビュー、(3) バイパス時に入力チャネル欠落で `new Float32Array(this.blockSize)` を確保しており、`audio/CLAUDE.md`「AudioWorklet 内で GC を発生させない」「起動時のみアロケート」に違反していた。RT スレッドでの GC ポーズは 1 ブロック落とし可聴グリッチを生む (Chrome「Audio Worklet design patterns」/ Zenn「ブラウザ上でリアルタイムに音声を処理するためのノウハウ」)。修正: 入出力ビューを初回 process() 時に一度だけ生成してキャッシュし、`wasmMemory.buffer` が detach した場合 (WASM メモリ grow) のみ再構築。バイパスのサイレンスは確保せず `fill(0)` で in-place 充填。出力コピーは `subarray()` をやめインデックスループに変更。定常状態のアロケーションを 0 に削減。テスト不能だった worklet 文字列を `buildWasmProcessorCode()` として export し (plugin-manager の sandbox eval テストと同パターン)、`new Function` ハーネスでビュー恒等性 (50 ブロックで再確保なし)・メモリ grow 時の再構築・バイパス充填・入出力ルーティング正当性を検証する 6 テスト追加。テスト総数 4374 → 4380。
 - **`goToPosition()` を O(n²) → O(n) に改善、通知を N → 1 回に削減** (SPEC §3.10 広域監査)。`goToPosition(target)` は `HistoryManager.undo()`/`redo()` をループ呼び出ししており、各呼び出しで `notifyListeners()` (全 Command の snapshot 構築 O(k)) が発火していた。N 位置ジャンプのトータルコストは O(N·k)。command の `undo()`/`redo()` を直接呼び、ループ外の末尾で `notifyListeners()` を 1 回だけ発火するように変更。maxCommands=1000 の全ステップ戻しで O(1000²) → O(1000)。副次効果としてリスナへ渡される中間 HistoryState が N → 1 に減り、UI の不要な中間再レンダーが消える。`goToPosition 10 steps emits exactly 1 notification` (regression) ・同一位置への no-op を検証する 2 テスト追加。
 
 ### Fixed

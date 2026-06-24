@@ -120,112 +120,7 @@ export class PluginBridge {
   }
   
   private createWorkletProcessor(): string {
-    const processorCode = `
-      class WasmPluginProcessor extends AudioWorkletProcessor {
-        constructor(options) {
-          super();
-          this.wasmMemory = null;
-          this.processFunc = null;
-          // Exported WASM functions stored individually (wasmInstance is never set)
-          this.wasmSetParameter = null;
-          this.wasmAllocString = null;
-          this.inputPtr = 0;
-          this.outputPtr = 0;
-          this.blockSize = 128;
-          this.bypassed = false;
-          
-          this.port.onmessage = (e) => {
-            const { type, data } = e.data;
-            switch (type) {
-              case 'init':
-                this.initWasm(data.wasmBytes, data.blockSize);
-                break;
-              case 'setParameter':
-                this.setParameter(data.id, data.value);
-                break;
-              case 'bypass':
-                this.bypassed = data.bypassed;
-                break;
-            }
-          };
-        }
-        
-        async initWasm(wasmBytes, blockSize) {
-          this.blockSize = blockSize;
-          
-          const memory = new WebAssembly.Memory({ initial: 256, maximum: 512 });
-          this.wasmMemory = memory;
-          
-          const importObject = {
-            env: {
-              memory,
-              log: (ptr, len) => {
-                const bytes = new Uint8Array(memory.buffer, ptr, len);
-                const str = new TextDecoder().decode(bytes);
-                // Plugin stdout — forwarded to plugin sandbox log only
-              }
-            }
-          };
-          
-          const module = await WebAssembly.compile(wasmBytes);
-          const instance = await WebAssembly.instantiate(module, importObject);
-          
-          this.processFunc = instance.exports.process;
-          this.wasmSetParameter = instance.exports.setParameter || null;
-          this.wasmAllocString = instance.exports.allocString || null;
-          this.inputPtr = instance.exports.getInputBuffer();
-          this.outputPtr = instance.exports.getOutputBuffer();
-          
-          if (instance.exports.init) {
-            instance.exports.init(sampleRate, blockSize);
-          }
-          
-          this.port.postMessage({ type: 'ready' });
-        }
-        
-        setParameter(id, value) {
-          // Use the stored export references; wasmInstance is never set in this processor.
-          if (this.wasmSetParameter && this.wasmAllocString) {
-            const idBytes = new TextEncoder().encode(id);
-            const idPtr = this.wasmAllocString(idBytes.length);
-            new Uint8Array(this.wasmMemory.buffer, idPtr, idBytes.length).set(idBytes);
-            this.wasmSetParameter(idPtr, idBytes.length, value);
-          }
-        }
-        
-        process(inputs, outputs, parameters) {
-          if (this.bypassed || !this.processFunc) {
-            // Pass through
-            for (let ch = 0; ch < outputs[0].length; ch++) {
-              outputs[0][ch].set(inputs[0]?.[ch] || new Float32Array(this.blockSize));
-            }
-            return true;
-          }
-          
-          const inputView = new Float32Array(this.wasmMemory.buffer, this.inputPtr, this.blockSize * 2);
-          const outputView = new Float32Array(this.wasmMemory.buffer, this.outputPtr, this.blockSize * 2);
-          
-          // Copy input
-          for (let ch = 0; ch < Math.min(inputs[0]?.length || 0, 2); ch++) {
-            inputView.set(inputs[0][ch], ch * this.blockSize);
-          }
-          
-          // Process
-          this.processFunc(this.blockSize);
-          
-          // Copy output
-          for (let ch = 0; ch < Math.min(outputs[0].length, 2); ch++) {
-            outputs[0][ch].set(outputView.subarray(ch * this.blockSize, (ch + 1) * this.blockSize));
-          }
-          
-          return true;
-        }
-      }
-      
-      registerProcessor('wasm-plugin-processor', WasmPluginProcessor);
-    `;
-    
-    const blob = new Blob([processorCode], { type: 'application/javascript' });
+    const blob = new Blob([buildWasmProcessorCode()], { type: 'application/javascript' });
     return URL.createObjectURL(blob);
   }
   
@@ -895,6 +790,163 @@ export const BUILTIN_PLUGINS: PluginDescriptor[] = [
     ]
   }
 ];
+
+// ==================== AudioWorklet Processor Source ====================
+
+/**
+ * Build the source for the `wasm-plugin-processor` AudioWorklet, loaded as a
+ * Blob module by {@link PluginBridge}.
+ *
+ * The `process()` callback runs on the real-time audio render thread (~every
+ * 2.9 ms at 44.1 kHz / 128-frame blocks). Per audio/CLAUDE.md and plugins/
+ * CLAUDE.md, this path must not allocate — any heap churn risks a GC pause that
+ * drops a block and produces an audible glitch (Chrome "Audio Worklet design
+ * patterns"; Zenn「ブラウザ上でリアルタイムに音声を処理するためのノウハウ」).
+ *
+ * Steady-state allocations are therefore eliminated:
+ * - The two `Float32Array` views over WASM memory are created once and reused;
+ *   they are rebuilt only when `wasmMemory.buffer` is detached (i.e. the WASM
+ *   instance grew its memory), which invalidates existing views.
+ * - The bypass path zero-fills the output in place instead of allocating a
+ *   silent `Float32Array` each call when an input channel is absent.
+ * - Output is copied with an index loop rather than `subarray()`, which would
+ *   allocate a fresh view per channel per block.
+ *
+ * Exported (rather than inlined) so the otherwise-untestable worklet source can
+ * be evaluated and exercised in unit tests — see tests/plugin-bridge.test.ts.
+ *
+ * # AI generated (reviewed)
+ */
+export function buildWasmProcessorCode(): string {
+  return `
+      class WasmPluginProcessor extends AudioWorkletProcessor {
+        constructor(options) {
+          super();
+          this.wasmMemory = null;
+          this.processFunc = null;
+          // Exported WASM functions stored individually (wasmInstance is never set)
+          this.wasmSetParameter = null;
+          this.wasmAllocString = null;
+          this.inputPtr = 0;
+          this.outputPtr = 0;
+          this.blockSize = 128;
+          this.bypassed = false;
+          // Cached typed-array views over WASM memory (see header). null until the
+          // first process() call after init; rebuilt only on buffer detach.
+          this.inputView = null;
+          this.outputView = null;
+          this.viewBuffer = null;
+
+          this.port.onmessage = (e) => {
+            const { type, data } = e.data;
+            switch (type) {
+              case 'init':
+                this.initWasm(data.wasmBytes, data.blockSize);
+                break;
+              case 'setParameter':
+                this.setParameter(data.id, data.value);
+                break;
+              case 'bypass':
+                this.bypassed = data.bypassed;
+                break;
+            }
+          };
+        }
+
+        async initWasm(wasmBytes, blockSize) {
+          this.blockSize = blockSize;
+          // Force the views to be rebuilt on the next process() with the new
+          // block size / buffer.
+          this.viewBuffer = null;
+
+          const memory = new WebAssembly.Memory({ initial: 256, maximum: 512 });
+          this.wasmMemory = memory;
+
+          const importObject = {
+            env: {
+              memory,
+              log: (ptr, len) => {
+                const bytes = new Uint8Array(memory.buffer, ptr, len);
+                const str = new TextDecoder().decode(bytes);
+                // Plugin stdout — forwarded to plugin sandbox log only
+              }
+            }
+          };
+
+          const module = await WebAssembly.compile(wasmBytes);
+          const instance = await WebAssembly.instantiate(module, importObject);
+
+          this.processFunc = instance.exports.process;
+          this.wasmSetParameter = instance.exports.setParameter || null;
+          this.wasmAllocString = instance.exports.allocString || null;
+          this.inputPtr = instance.exports.getInputBuffer();
+          this.outputPtr = instance.exports.getOutputBuffer();
+
+          if (instance.exports.init) {
+            instance.exports.init(sampleRate, blockSize);
+          }
+
+          this.port.postMessage({ type: 'ready' });
+        }
+
+        setParameter(id, value) {
+          // Use the stored export references; wasmInstance is never set in this processor.
+          if (this.wasmSetParameter && this.wasmAllocString) {
+            const idBytes = new TextEncoder().encode(id);
+            const idPtr = this.wasmAllocString(idBytes.length);
+            new Uint8Array(this.wasmMemory.buffer, idPtr, idBytes.length).set(idBytes);
+            this.wasmSetParameter(idPtr, idBytes.length, value);
+          }
+        }
+
+        process(inputs, outputs, parameters) {
+          if (this.bypassed || !this.processFunc) {
+            // Pass through — copy each available input channel, silence the rest.
+            // Zero-fill in place to avoid allocating a silent buffer per block.
+            const inCh = inputs[0];
+            for (let ch = 0; ch < outputs[0].length; ch++) {
+              const src = inCh && inCh[ch];
+              if (src) outputs[0][ch].set(src);
+              else outputs[0][ch].fill(0);
+            }
+            return true;
+          }
+
+          // Rebuild the WASM-memory views only when the backing buffer changed
+          // (first call, or memory growth detached the previous ArrayBuffer).
+          if (this.viewBuffer !== this.wasmMemory.buffer) {
+            this.viewBuffer = this.wasmMemory.buffer;
+            this.inputView = new Float32Array(this.viewBuffer, this.inputPtr, this.blockSize * 2);
+            this.outputView = new Float32Array(this.viewBuffer, this.outputPtr, this.blockSize * 2);
+          }
+          const inputView = this.inputView;
+          const outputView = this.outputView;
+          const blockSize = this.blockSize;
+
+          // Copy input into the WASM input buffer.
+          const inCh = inputs[0];
+          for (let ch = 0; ch < Math.min((inCh && inCh.length) || 0, 2); ch++) {
+            inputView.set(inCh[ch], ch * blockSize);
+          }
+
+          // Process
+          this.processFunc(blockSize);
+
+          // Copy output out of the WASM output buffer. An index loop avoids the
+          // per-channel view allocation that subarray() would incur each block.
+          for (let ch = 0; ch < Math.min(outputs[0].length, 2); ch++) {
+            const out = outputs[0][ch];
+            const base = ch * blockSize;
+            for (let i = 0; i < blockSize; i++) out[i] = outputView[base + i];
+          }
+
+          return true;
+        }
+      }
+
+      registerProcessor('wasm-plugin-processor', WasmPluginProcessor);
+    `;
+}
 
 // ==================== Export ====================
 

@@ -63,7 +63,15 @@ export class FrameCache {
     if (sinkHit) { sinkHit.lastAccess = now; this.hits++; return sinkHit.data; }
 
     const hotHit = this.hot.get(frameIndex);
-    if (hotHit) { hotHit.lastAccess = now; this.hits++; return hotHit.data; }
+    if (hotHit) {
+      hotHit.lastAccess = now;
+      // Move to the most-recently-used end of the Map so findOldest() (which
+      // reads the first/oldest key) stays both O(1) and access-accurate.
+      this.hot.delete(frameIndex);
+      this.hot.set(frameIndex, hotHit);
+      this.hits++;
+      return hotHit.data;
+    }
 
     const warmHit = this.warm.get(frameIndex);
     if (warmHit) {
@@ -152,16 +160,19 @@ export class FrameCache {
     }
   }
 
+  /**
+   * Return the least-recently-used key (the one to evict/demote first), or null
+   * if the map is empty.
+   *
+   * The cache maintains every tier Map in access order — put() and warm→hot
+   * promotion append to the end, get() re-appends a hot hit, and demotions move
+   * the current oldest — so the LRU entry is always the first key. Reading it is
+   * O(1) via the Map iterator instead of the previous O(n) timestamp scan, which
+   * ran inside the eviction while-loops and made bulk eviction O(n²).
+   */
   private findOldest(map: Map<number, CachedFrame>): number | null {
-    let oldestIdx: number | null = null;
-    let oldestTime = Infinity;
-    for (const [idx, frame] of map) {
-      if (frame.lastAccess < oldestTime) {
-        oldestTime = frame.lastAccess;
-        oldestIdx = idx;
-      }
-    }
-    return oldestIdx;
+    const first = map.keys().next();
+    return first.done ? null : first.value;
   }
 
   /** VideoFrame.close() でGPUメモリを明示解放 (WebCodecs ハンドブック準拠) */

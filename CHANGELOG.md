@@ -7,6 +7,9 @@ Artone v3 の全変更を記録。
 
 ## [Unreleased]
 
+### Changed
+- **CIEDE2000 (ΔE00) を Sharma et al. (2005) 全 34 標準テストベクタで検証 (8 → 34)** (color、color-QC 正確性保証)。`color/delta-e.ts` の `deltaE00` は「Sharma et al. (2005) に完全準拠」と謳うが、テストは公開 34 ペア中 8 ペアしか網羅しておらず、最も間違えやすい分岐 (色相ラップアラウンド、グレー軸近傍の彩度ゼロ、実色相パス) が未検証だった。Sharma, Wu & Dalal (2005) Table 1 の全 34 ペア (期待値 4 桁) を追加。残り 26 ペア (ペア 9–34: グレー軸/色相境界/大差/JND スケール/実色) を含む全件が `toBeCloseTo(expected, 3)` で pass し、実装が canonical リファレンスと一致することを確証 (バグなし)。プロ用途 (interchange/カラーグレーディング) の標準式をリグレッションから保護。Sharma, Wu & Dalal (2005) "The CIEDE2000 Color-Difference Formula" (DOI:10.1002/col.20070) に基づく。テスト総数 4406 → 4432。
+
 ### Fixed
 - **リサンプラのダウンサンプル時アンチエイリアス不足を修正 (windowed-sinc カーネル幅を 1/cutoff で拡張)** (audio、Smith J.O. "Digital Audio Resampling" 準拠)。`audio/resampler.ts` の windowed-sinc は ダウンサンプル時に sinc を周波数方向に `cutoff` 倍してアンチエイリアス用カットオフを下げるが、これは時間方向に sinc を引き伸ばす (第一ゼロが ±1 → ±1/cutoff ソースサンプルへ)。カーネル半幅が固定 (sinc4=2, sinc16=8) のままだと、ローブが揃う前に窓が打ち切られ、アンチエイリアスフィルタが機能不全になっていた (通過域ドループ + エイリアス漏れ)。例: sinc16 で 4 倍ダウンサンプル (cutoff=0.25) 時、本来 ±32 サンプル必要なところを ±8 しか見ておらず、片側 8 ローブのうち 2 ローブで打ち切り。`effectiveHalfWidth(quality, cutoff)` を導入し、ダウンサンプル時 (cutoff<1) は半幅を `ceil(halfW/cutoff)` に拡張、窓が常に同数の sinc ローブを覆うように修正。streaming 版の history バッファ長・パディング・オフセットも同じ実効半幅で一貫させた。アップサンプリング (cutoff=1) と 'linear' tier は不変 (bit 完全一致、ゼロリスク)。stopband トーン (48k→12k で 9kHz) が passband トーン (1kHz) の 1/4 未満に減衰することを検証 + `effectiveHalfWidth` の幅計算 (アップ/ダウン/linear) 検証で 5 テスト追加。Smith J.O. "Digital Audio Resampling" のカーネル設計に基づく。テスト総数 4401 → 4406。
 

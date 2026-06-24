@@ -22,6 +22,17 @@ export interface Interval {
 export class IntervalIndex<T extends Interval> {
   private items: T[] = [];
   private sorted = false;
+  /**
+   * Largest `end - start` over all items, refreshed on sort. Used to bound the
+   * *lower* end of the scan window: an interval containing a query time `t`
+   * must satisfy `end > t`, and since `end <= start + maxLength`, it must also
+   * satisfy `start > t - maxLength`. So only items whose start lies in
+   * `(t - maxLength, t]` can match. It is always an upper bound on the true
+   * max length at query time (insert sets `sorted = false`, forcing a refresh
+   * before the next query; remove keeps the order and may leave it stale-high,
+   * which only widens the window — never drops a real hit).
+   */
+  private maxLength = 0;
 
   /** 区間を追加 (次回クエリ時に再ソート) */
   insert(item: T): void {
@@ -50,19 +61,30 @@ export class IntervalIndex<T extends Interval> {
   private ensureSorted(): void {
     if (this.sorted) return;
     this.items.sort((a, b) => a.start - b.start);
+    let maxLen = 0;
+    for (const item of this.items) {
+      const len = item.end - item.start;
+      if (len > maxLen) maxLen = len;
+    }
+    this.maxLength = maxLen;
     this.sorted = true;
   }
 
   /**
    * 指定時刻を含む区間を返す。
-   * start でソート済みなので、start <= time の範囲を二分探索で絞り込む。
+   *
+   * start でソート済みなので、マッチ候補は start が `(time - maxLength, time]`
+   * に入る区間に限られる (上下端とも二分探索で確定)。これにより playhead が
+   * タイムライン終端付近 (start <= time がほぼ全件) でも走査が
+   * O(log n + window) に収まる。
    */
   queryPoint(time: number): T[] {
     this.ensureSorted();
     const result: T[] = [];
-    // start <= time の上限位置を二分探索
+    // 候補: time - maxLength < start <= time
+    const lower = this.upperBound(time - this.maxLength);
     const upper = this.upperBound(time);
-    for (let i = 0; i < upper; i++) {
+    for (let i = lower; i < upper; i++) {
       const item = this.items[i];
       if (time >= item.start && time < item.end) {
         result.push(item);
@@ -73,12 +95,17 @@ export class IntervalIndex<T extends Interval> {
 
   /**
    * 指定範囲 [rangeStart, rangeEnd) と重なる区間を返す。
+   *
+   * 重なり条件 `start < rangeEnd && end > rangeStart` のうち、
+   * `end > rangeStart` は `start > rangeStart - maxLength` を含意するため、
+   * 候補は start が `(rangeStart - maxLength, rangeEnd]` の区間に限られる。
    */
   queryRange(rangeStart: number, rangeEnd: number): T[] {
     this.ensureSorted();
     const result: T[] = [];
+    const lower = this.upperBound(rangeStart - this.maxLength);
     const upper = this.upperBound(rangeEnd);
-    for (let i = 0; i < upper; i++) {
+    for (let i = lower; i < upper; i++) {
       const item = this.items[i];
       // 重なり判定: item.start < rangeEnd && item.end > rangeStart
       if (item.start < rangeEnd && item.end > rangeStart) {

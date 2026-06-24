@@ -144,3 +144,75 @@ describe('IntervalIndex — CRUD', () => {
     expect(idx.size).toBe(2);
   });
 });
+
+// ============================================================
+// max-length windowing: correctness at late query times
+// ============================================================
+
+/** Brute-force reference (the linear semantics the index must reproduce). */
+function refPoint(clips: Clip[], time: number): string[] {
+  return clips.filter((c) => time >= c.start && time < c.end).map((c) => c.id).sort();
+}
+function refRange(clips: Clip[], a: number, b: number): string[] {
+  return clips.filter((c) => c.start < b && c.end > a).map((c) => c.id).sort();
+}
+
+describe('IntervalIndex — windowing correctness', () => {
+  it('finds a hit when the playhead is far past the timeline start', () => {
+    const idx = new IntervalIndex<Clip>();
+    // Many early non-overlapping clips, plus one active clip near time=1000.
+    for (let i = 0; i < 200; i++) idx.insert(clip(`e${i}`, i, i + 1));
+    idx.insert(clip('late', 1000, 1010));
+    expect(idx.queryPoint(1005).map((c) => c.id)).toEqual(['late']);
+    expect(idx.queryPoint(500)).toEqual([]); // gap between dense block and late clip
+  });
+
+  it('a long spanning interval is still found long after its start (large maxLength)', () => {
+    const idx = new IntervalIndex<Clip>();
+    idx.insert(clip('bg', 0, 1000));        // spans the whole timeline
+    idx.insert(clip('short', 990, 995));
+    // At t=995 only bg is active (short is end-exclusive at 995).
+    expect(idx.queryPoint(995).map((c) => c.id).sort()).toEqual(['bg']);
+    // At t=992 both are active.
+    expect(idx.queryPoint(992).map((c) => c.id).sort()).toEqual(['bg', 'short']);
+  });
+
+  it('matches brute force over randomized mixed-length intervals (point & range)', () => {
+    // Deterministic PRNG so failures reproduce.
+    let seed = 90210;
+    const rng = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    for (let trial = 0; trial < 60; trial++) {
+      const clips: Clip[] = [];
+      const idx = new IntervalIndex<Clip>();
+      const n = 1 + Math.floor(rng() * 40);
+      for (let i = 0; i < n; i++) {
+        const start = rng() * 100;
+        // Mix of short clips and occasional long spanning ones (varied maxLength).
+        const len = rng() < 0.15 ? rng() * 80 + 20 : rng() * 4 + 0.01;
+        const c = clip(`c${i}`, start, start + len);
+        clips.push(c);
+        idx.insert(c);
+      }
+      for (let q = 0; q < 25; q++) {
+        const t = rng() * 130 - 5; // spans before-start..after-end
+        expect(idx.queryPoint(t).map((c) => c.id).sort()).toEqual(refPoint(clips, t));
+        const a = rng() * 120 - 5;
+        const b = a + rng() * 30;
+        expect(idx.queryRange(a, b).map((c) => c.id).sort()).toEqual(refRange(clips, a, b));
+      }
+    }
+  });
+
+  it('stays correct after removing the longest interval (stale-high maxLength is safe)', () => {
+    const idx = new IntervalIndex<Clip>();
+    idx.insert(clip('bg', 0, 1000));
+    idx.insert(clip('a', 10, 12));
+    idx.queryPoint(11);            // forces sort + maxLength = 1000
+    idx.remove('bg');             // keeps order; maxLength stays 1000 (safe upper bound)
+    expect(idx.queryPoint(11).map((c) => c.id)).toEqual(['a']);
+    expect(idx.queryPoint(500)).toEqual([]);
+  });
+});

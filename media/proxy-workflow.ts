@@ -15,6 +15,7 @@
  * @version 3.0.0
  */
 import { createLogger } from '../app/logger';
+import { setHighQualityScaling } from '../app/utils';
 
 const log = createLogger('ProxyWorkflow');
 
@@ -246,6 +247,7 @@ class ProxyEncoder {
     const canvas = new OffscreenCanvas(targetW, targetH);
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Failed to get 2D context');
+    setHighQualityScaling(ctx); // proxies downscale the source — use a good kernel
 
     while (currentTime < duration) {
       video.currentTime = currentTime;

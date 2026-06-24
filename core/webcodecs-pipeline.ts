@@ -13,6 +13,7 @@
  */
 
 import { createLogger } from '../app/logger';
+import { setHighQualityScaling } from '../app/utils';
 
 // ============================================================
 // Types
@@ -685,6 +686,7 @@ export class VideoPipeline {
       if (frame) {
         const canvas = new OffscreenCanvas(width, height);
         const ctx = canvas.getContext('2d')!;
+        setHighQualityScaling(ctx);
         ctx.drawImage(frame, 0, 0, width, height);
         frame.close();
 
@@ -759,9 +761,10 @@ export const FrameProcessors = {
     return async (frame: VideoFrame): Promise<VideoFrame> => {
       const canvas = new OffscreenCanvas(width, height);
       const ctx = canvas.getContext('2d')!;
-      
+
+      setHighQualityScaling(ctx);
       ctx.drawImage(frame, 0, 0, width, height);
-      
+
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },

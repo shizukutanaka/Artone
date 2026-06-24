@@ -1,4 +1,5 @@
 import { color } from '../app/design-system';
+import { setHighQualityScaling } from '../app/utils';
 /**
  * Artone v3 — Media Browser
  * 
@@ -327,6 +328,7 @@ export class MediaBrowser {
         canvas.height = height * scale;
 
         const ctx = canvas.getContext('2d')!;
+        setHighQualityScaling(ctx);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
         resolve(canvas.toDataURL('image/jpeg', 0.7));
@@ -395,6 +397,7 @@ export class MediaBrowser {
         canvas.height = img.height * scale;
 
         const ctx = canvas.getContext('2d')!;
+        setHighQualityScaling(ctx);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
         resolve(canvas.toDataURL('image/jpeg', 0.7));

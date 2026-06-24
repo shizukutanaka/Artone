@@ -8,6 +8,8 @@ Artone v3 の全変更を記録。
 ## [Unreleased]
 
 ### Changed
+- **画像縮小を高品質化: 全ダウンスケール `drawImage` に `imageSmoothingQuality='high'` を設定** (media/core、サムネイル/プロキシ画質、MDN/Qiita/Zenn 調査)。Canvas の既定は `imageSmoothingQuality='low'` で、映像フレームをサムネイル/プロキシ/リサイズへ縮小する際にエイリアス・ブロックノイズが出ていた。本コードベースでは production コードのどこにも `imageSmoothingQuality` を設定しておらず (grep 0 件)、サムネイル生成 (media-browser のビデオ/画像 2 箇所)・プロキシ生成 (proxy-workflow)・WebCodecs サムネイル抽出 + resize フィルタ (webcodecs-pipeline 2 箇所) の計 5 箇所が低品質縮小だった。共有ヘルパ `setHighQualityScaling(ctx)` (`app/utils.ts`、`imageSmoothingEnabled=true` + `imageSmoothingQuality='high'` をセット、bicubic 系カーネル選択) を追加し、5 箇所の縮小 drawImage 直前で呼ぶよう統一 (DRY)。サムネイル/プロキシ/出力リサイズの見た目が改善。ヘルパの単体テスト 2 件追加。MDN `CanvasRenderingContext2D.imageSmoothingQuality` に基づく。テスト総数 4464 → 4466。
+
 - **i18n キーカバレッジ CI ガードを追加 (コード → ロケール)** (i18n、ハードコード文字列禁止の徹底)。既存の `i18n-locale-completeness.test.ts` は全ロケールが en.json とキー集合一致することを保証するが、「コード中で使われる `t('a.b.c')` キーが en.json に実在するか」は未検証だった。存在しないキーは実行時に生キー/フォールバック表示になり UI が壊れる (CLAUDE.md 第一原則「ハードコード文字列禁止・t() 経由のみ」に反する静かな退行)。全ソース (23 ディレクトリ、`future/` 除外) を走査し、コメント除去後の静的 `t('dotted.key')` 呼び出しを抽出して en.json と照合する `tests/i18n-key-coverage.test.ts` を追加。動的キー (`t(変数)` / テンプレートリテラル) は静的検査不能のためスキップ。現状コードベースは全キー定義済み (missing 0) を確認 — 本テストは将来の未定義キー混入を CI で防ぐ。テスト総数 4462 → 4464。
 
 ### Changed

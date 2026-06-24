@@ -37,14 +37,19 @@ export interface CurvePoint {
 // ============================================================
 
 /**
- * Samples a 3D LUT using trilinear interpolation.
- * Input r/g/b are in [0, 1]. Returns [r, g, b] in [0, 1].
+ * Trilinear-samples a 3D LUT, writing the result into `out` (length ≥ 3).
+ *
+ * The allocation-free core shared by {@link sampleLUT} and
+ * {@link applyLUTToBuffer}. The earlier implementation allocated 16 tiny
+ * arrays per sample (8 corner reads + 7 lerps + the return), which on a 4K
+ * frame meant ~125M short-lived arrays per LUT pass — crippling GC pressure on
+ * the CPU grading fallback. This computes every corner and axis blend with
+ * scalar locals and a single shared base-index calculation instead.
+ *
+ * Math is identical to the previous version: `a + (b - a) * t` lerps, applied
+ * along R, then G, then B.
  */
-export function sampleLUT(lut: LUTData, r: number, g: number, b: number): [number, number, number] {
-  const N = lut.size;
-  if (N < 2) return [r, g, b];
-
-  // Scale to LUT grid coordinates
+function trilinear(data: Float32Array, N: number, r: number, g: number, b: number, out: number[]): void {
   const scale = N - 1;
   const ri = Math.min(Math.max(r * scale, 0), scale);
   const gi = Math.min(Math.max(g * scale, 0), scale);
@@ -53,53 +58,49 @@ export function sampleLUT(lut: LUTData, r: number, g: number, b: number): [numbe
   const r0 = Math.floor(ri);
   const g0 = Math.floor(gi);
   const b0 = Math.floor(bi);
-  const r1 = Math.min(r0 + 1, N - 1);
-  const g1 = Math.min(g0 + 1, N - 1);
-  const b1 = Math.min(b0 + 1, N - 1);
+  const r1 = Math.min(r0 + 1, scale);
+  const g1 = Math.min(g0 + 1, scale);
+  const b1 = Math.min(b0 + 1, scale);
 
   const dr = ri - r0;
   const dg = gi - g0;
   const db = bi - b0;
 
-  // Trilinear: 8 corners
-  const c000 = lutAt(lut.data, N, r0, g0, b0);
-  const c100 = lutAt(lut.data, N, r1, g0, b0);
-  const c010 = lutAt(lut.data, N, r0, g1, b0);
-  const c110 = lutAt(lut.data, N, r1, g1, b0);
-  const c001 = lutAt(lut.data, N, r0, g0, b1);
-  const c101 = lutAt(lut.data, N, r1, g0, b1);
-  const c011 = lutAt(lut.data, N, r0, g1, b1);
-  const c111 = lutAt(lut.data, N, r1, g1, b1);
+  const N2 = N * N;
+  // 8 corner base offsets (×3 RGB stride); the channel is added per component.
+  const o000 = (b0 * N2 + g0 * N + r0) * 3;
+  const o100 = (b0 * N2 + g0 * N + r1) * 3;
+  const o010 = (b0 * N2 + g1 * N + r0) * 3;
+  const o110 = (b0 * N2 + g1 * N + r1) * 3;
+  const o001 = (b1 * N2 + g0 * N + r0) * 3;
+  const o101 = (b1 * N2 + g0 * N + r1) * 3;
+  const o011 = (b1 * N2 + g1 * N + r0) * 3;
+  const o111 = (b1 * N2 + g1 * N + r1) * 3;
 
-  // Interpolate along R axis
-  const c00 = lerp3(c000, c100, dr);
-  const c10 = lerp3(c010, c110, dr);
-  const c01 = lerp3(c001, c101, dr);
-  const c11 = lerp3(c011, c111, dr);
-
-  // Along G axis
-  const c0 = lerp3(c00, c10, dg);
-  const c1 = lerp3(c01, c11, dg);
-
-  // Along B axis
-  return lerp3(c0, c1, db);
+  for (let c = 0; c < 3; c++) {
+    // R axis
+    const c00 = data[o000 + c] + (data[o100 + c] - data[o000 + c]) * dr;
+    const c10 = data[o010 + c] + (data[o110 + c] - data[o010 + c]) * dr;
+    const c01 = data[o001 + c] + (data[o101 + c] - data[o001 + c]) * dr;
+    const c11 = data[o011 + c] + (data[o111 + c] - data[o011 + c]) * dr;
+    // G axis
+    const c0 = c00 + (c10 - c00) * dg;
+    const c1 = c01 + (c11 - c01) * dg;
+    // B axis
+    out[c] = c0 + (c1 - c0) * db;
+  }
 }
 
-function lutAt(data: Float32Array, N: number, r: number, g: number, b: number): [number, number, number] {
-  const idx = (b * N * N + g * N + r) * 3;
-  return [data[idx], data[idx + 1], data[idx + 2]];
-}
-
-function lerp3(
-  a: [number, number, number],
-  b: [number, number, number],
-  t: number
-): [number, number, number] {
-  return [
-    a[0] + (b[0] - a[0]) * t,
-    a[1] + (b[1] - a[1]) * t,
-    a[2] + (b[2] - a[2]) * t,
-  ];
+/**
+ * Samples a 3D LUT using trilinear interpolation.
+ * Input r/g/b are in [0, 1]. Returns [r, g, b] in [0, 1].
+ */
+export function sampleLUT(lut: LUTData, r: number, g: number, b: number): [number, number, number] {
+  const N = lut.size;
+  if (N < 2) return [r, g, b];
+  const out: [number, number, number] = [0, 0, 0];
+  trilinear(lut.data, N, r, g, b, out);
+  return out;
 }
 
 /**
@@ -107,14 +108,17 @@ function lerp3(
  * Alpha channel is preserved.
  */
 export function applyLUTToBuffer(data: Uint8ClampedArray, lut: LUTData): void {
+  const N = lut.size;
+  if (N < 2) return; // degenerate LUT → identity (leave pixels untouched)
+
+  const lutData = lut.data;
+  // One reusable scratch tuple for the whole buffer — no per-pixel allocation.
+  const px: number[] = [0, 0, 0];
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i] / 255;
-    const g = data[i + 1] / 255;
-    const b = data[i + 2] / 255;
-    const [or, og, ob] = sampleLUT(lut, r, g, b);
-    data[i]     = Math.round(Math.max(0, Math.min(1, or)) * 255);
-    data[i + 1] = Math.round(Math.max(0, Math.min(1, og)) * 255);
-    data[i + 2] = Math.round(Math.max(0, Math.min(1, ob)) * 255);
+    trilinear(lutData, N, data[i] / 255, data[i + 1] / 255, data[i + 2] / 255, px);
+    data[i]     = Math.round(Math.max(0, Math.min(1, px[0])) * 255);
+    data[i + 1] = Math.round(Math.max(0, Math.min(1, px[1])) * 255);
+    data[i + 2] = Math.round(Math.max(0, Math.min(1, px[2])) * 255);
   }
 }
 

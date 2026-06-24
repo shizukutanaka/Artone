@@ -152,15 +152,46 @@ timeline/undo 外の全モジュールを実地監査し、最も確実で高イ
 | **テスト更新** | 既存「clamps to minimum」テストを「returns null」に変更 |
 | **テスト追加** | trim-symmetry INVARIANT 2 ケース (両辺 null / 両辺 min+1frame で非 null) |
 
+**Fix 3 — RecoveryManager を起動し localStorage 二重実装を統合** (`app/main.ts`, リスクゾーン recovery)
+
+堅牢な IndexedDB ベースの `RecoveryManager` (チェックサム検証・複数スナップショット・
+容量上限・トランザクショナル書き込み、95% テスト済み) がインスタンス化されているのに
+**`init()` も `startAutoSave()` も一度も呼ばれず完全に休眠**していた。実際の自動保存は
+`main.ts` が独自に持つ localStorage 直書き経路 (`saveRecoveryData`) で行われており、
+2 つのリカバリ実装が並存 (クラッシュハンドラも二重) していた。localStorage 経路は
+~5MB 制限・非トランザクショナルで、`RecoveryManager` の優位性を全く活かせていなかった。
+
+修正: `RecoveryManager` を唯一のリカバリ実装に統合。
+- `init()`/`initialize()` (React Context 経路) の両方で `recovery.init()` を呼び DB を開く
+- `setupAutoSave()` を `recovery.startAutoSave(() => buildRecoveryData(), …)` に置換
+  (定期保存とクラッシュスナップショットを RecoveryManager が所有)
+- `buildRecoveryData()` アダプタを追加: live timeline 状態を `serializeTimelineState`
+  (Map→entries / Set→array) で安全な形に変換して payload 化
+- `checkRecovery()` を `recovery.getLatestSnapshot()`/`restoreSnapshot()` 経由に置換
+- 重複していた crash handler 3 種 (`error`/`unhandledrejection`/`beforeunload`) を削除
+  (RecoveryManager.setupCrashDetection が所有)。RecoveryManager が扱わない
+  `visibilitychange` (タブ非表示時保存) のみ main.ts に残す
+- 死んだコード削除: `saveRecoveryData`/`recoveryKey`/`autoSaveTimer`/重複 `RecoveryData`
+  interface/未使用 `safeStorage*` import
+- greenfield (既存ユーザー無し) のため移行コード不要
+
+| 観点 | 内容 |
+|---|---|
+| **データ堅牢性** | localStorage(~5MB, 非トランザクショナル, 1 スナップショット) → IndexedDB(容量大, トランザクショナル, チェックサム検証, 複数スナップショット) |
+| **重複排除** | 2 つのリカバリ実装 + 二重クラッシュハンドラ → 1 系統に統合 (CLAUDE.md「重複は統合」) |
+| **テスト追加** | `tests/recovery-integration.test.ts` 4 ケース: timeline の Map/Set が IndexedDB 往復で保全されること (regression)・selection 復元・startAutoSave コールバックが live 状態を捕捉・素の JSON.stringify ではクリップが消失することの証明 |
+| **挙動不変** | typecheck PASS / 既存 recovery 50 + timeline 107 テスト維持 / 総数 4374 |
+
 ### 未実装 (優先度付き残課題)
 
 | 優先 | 場所 | 内容 |
 |---|---|---|
-| 🔴 CRITICAL | `app/shell.tsx:223-235` | `handleClipMove`/`handleClipResize` がエンジンを経由せず、ドラッグ編集が undo 不能。`moveClipCommand`/`trimClipCommand` 接続が必要。React state ⇔ エンジン同期設計が前提で影響大 |
-| 🟠 HIGH | `recovery/recovery-manager.ts:187-203` | `startAutoSave()` が `main.ts` から呼ばれておらず自動保存が機能していない。また recovery が IndexedDB を使わず localStorage に直書きしている (容量制限) |
+| 🔴 CRITICAL | `app/shell.tsx:223-235` | `handleClipMove`/`handleClipResize` がエンジンを経由せず、ドラッグ編集が undo 不能。`timelineClips` が React ローカル state でエンジンと未接続。React⇔エンジンを単一の真実源に統合する基盤データフロー改修が前提で影響大 |
+| 🟠 HIGH | `recovery/` 統合 | **→ 本PR で解決済み (Fix 3)** |
 | 🟡 MEDIUM | `app/TimelineView.tsx` (右端トリム) | **→ 本PR で解決済み** |
 | 🟡 MEDIUM | `undo/history-manager.ts` (goToPosition) | **→ 本PR で解決済み** |
-| 🟢 LOW | accessibility/, animation/, captions/ | テストゼロ。coverage gate 未達 |
+| ~~🟢 LOW~~ | ~~accessibility/, animation/, captions/~~ | **誤検出**: 監査AI(haiku)の誤り。`wcag-audit.test.ts`/`keyframe-animator.test.ts`/`caption-manager.test.ts` 等で既にテスト済み |
+| ❌ 却下 | `goToPosition()` redo-stack pruning | 監査AIの提案は誤り。`goToPosition` は双方向スクラバーで、forward stack を破棄すると前方ナビゲーションが壊れる (既存 `jumps forward` テストが fail)。メモリは `maxCommands` で既に上限あり |
 
 ## 3.9 現段階の棚卸し: Command システムの長所・短所・改善 (自己監査)
 

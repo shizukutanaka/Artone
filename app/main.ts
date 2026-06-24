@@ -13,9 +13,8 @@
 import { color } from './design-system';
 import { createLogger } from './logger';
 import { t } from '../i18n/i18n-manager';
-import { safeStorageGet, safeStorageSet, safeStorageRemove } from './utils';
 import { requestPersistentStorage } from './storage-persistence';
-import { MagneticTimeline, serializeTimelineState, type SerializedTimelineState } from '../timeline/magnetic-timeline';
+import { MagneticTimeline, serializeTimelineState } from '../timeline/magnetic-timeline';
 import { TextBasedEditor } from '../timeline/text-based-editing';
 import { MultiCamEditor } from '../timeline/multicam-editor';
 import { ColorGradingEngine } from '../color/grading-engine';
@@ -33,7 +32,7 @@ import { CollaborationEngine } from '../collab/collaboration-engine';
 import { HistoryManager } from '../undo/history-manager';
 import { ScopesManager } from '../scopes/video-scopes';
 import { PerformanceMonitor, AutoQualityAdjuster } from '../perf/performance-monitor';
-import { RecoveryManager } from '../recovery/recovery-manager';
+import { RecoveryManager, type RecoveryData } from '../recovery/recovery-manager';
 import { ProxyWorkflow } from '../media/proxy-workflow';
 import { KeyframeAnimator } from '../animation/keyframe-animator';
 import { MotionGraphicsEngine } from '../animation/motion-graphics';
@@ -95,18 +94,6 @@ const DEFAULT_CONFIG: AppConfig = {
 // Types
 // ============================================================
 
-interface RecoveryData {
-  projectId: string;
-  projectName: string;
-  timestamp: number;
-  data: { tracks: unknown[]; settings: unknown };
-  version: string;
-  // Serialized (JSON-safe) form — the live TimelineState holds Maps/Set that
-  // JSON.stringify would silently flatten to "{}".
-  timelineState?: SerializedTimelineState;
-  playhead?: number;
-}
-
 export class ArtoneApp {
   // Core engines
   public timeline: MagneticTimeline;
@@ -141,22 +128,16 @@ export class ArtoneApp {
   private isPlaying = false;
   private playbackFrame = 0;
   private animationId: number | null = null;
-  private autoSaveTimer: number | null = null;
-  private recoveryKey = 'artone_recovery';
 
-  // Named handler references so they can be removed in dispose() without leaking
-  // closures that keep the ArtoneApp instance alive after disposal.
-  private readonly _onBeforeUnload = (): void => { this.saveRecoveryData(); };
+  // Crash snapshots (error / unhandledrejection / beforeunload) and the periodic
+  // auto-save timer are owned by RecoveryManager (transactional IndexedDB). The
+  // only event RecoveryManager does not cover is tab-hide, so we keep a single
+  // named handler here that snapshots when the page becomes hidden. Named so it
+  // can be removed in dispose() without leaking a closure that pins the instance.
   private readonly _onVisibilityChange = (): void => {
-    if (document.hidden) this.saveRecoveryData();
-  };
-  private readonly _onError = (e: ErrorEvent): void => {
-    log.error('Artone crash:', e.error);
-    this.saveRecoveryData();
-  };
-  private readonly _onUnhandledRejection = (e: PromiseRejectionEvent): void => {
-    log.error('Artone unhandled rejection:', e.reason);
-    this.saveRecoveryData();
+    if (!document.hidden) return;
+    const proj = this.project.getCurrentProject();
+    void this.recovery.saveSnapshot('auto', proj?.id, proj?.name, this.buildRecoveryData());
   };
 
   constructor(config: Partial<AppConfig> = {}) {
@@ -210,6 +191,14 @@ export class ArtoneApp {
       }
     } catch (e) {
       errors.push({ module: 'storage-persistence', error: e });
+    }
+
+    // Open the recovery IndexedDB (sets up crash detection) BEFORE checking for
+    // a previous session's snapshot — checkRecovery() reads from it.
+    try {
+      await this.recovery.init();
+    } catch (e) {
+      errors.push({ module: 'recovery-init', error: e });
     }
 
     // Check for crash recovery
@@ -442,79 +431,85 @@ export class ArtoneApp {
   private setupAutoSave(): void {
     if (!this.config.autoSave) return;
 
-    this.autoSaveTimer = window.setInterval(() => {
-      this.saveRecoveryData();
-    }, this.config.autoSaveInterval);
+    // Delegate the periodic auto-save AND crash snapshots to RecoveryManager,
+    // which persists to a transactional IndexedDB store (checksum-verified,
+    // multi-snapshot, capacity-bounded) — far more robust than localStorage.
+    const proj = this.project.getCurrentProject();
+    this.recovery.startAutoSave(
+      () => this.buildRecoveryData(),
+      proj?.id ?? 'untitled',
+      proj?.name ?? 'Untitled',
+    );
   }
 
   private setupCrashRecovery(): void {
-    window.addEventListener('beforeunload', this._onBeforeUnload);
+    // error / unhandledrejection / beforeunload crash snapshots are installed by
+    // RecoveryManager.init() → setupCrashDetection(). Tab-hide is the only case
+    // it does not cover, so we attach just that here (named handler for cleanup).
     document.addEventListener('visibilitychange', this._onVisibilityChange);
-    window.addEventListener('error', this._onError);
-    window.addEventListener('unhandledrejection', this._onUnhandledRejection);
   }
 
-  private saveRecoveryData(): void {
-    try {
-      const recoveryData = {
-        timestamp: Date.now(),
-        projectId: this.project.getCurrentProject()?.id,
-        // Serialize so the Maps (tracks, clips) and Set (selection) survive the
-        // JSON round-trip — otherwise the entire timeline is lost from the snapshot.
-        timelineState: serializeTimelineState(this.timeline.getState()),
-        playhead: this.playbackFrame,
-        historyPosition: this.history.getPosition()
-      };
-
-      safeStorageSet(this.recoveryKey, JSON.stringify(recoveryData));
-    } catch (e) {
-      log.warn('Failed to save recovery data:', e);
-    }
+  /**
+   * Build the recovery payload from live engine state.
+   *
+   * The authoritative timeline lives in `timeline` as a serialized form (Maps →
+   * entries, Set → array) so the IndexedDB JSON round-trip cannot silently
+   * flatten it to `{}`. The typed clip/track/selection arrays mirror that data
+   * in a self-describing shape for inspection and forward compatibility.
+   */
+  private buildRecoveryData(): RecoveryData {
+    const state = this.timeline.getState();
+    return {
+      timeline: serializeTimelineState(state),
+      clips: [...state.clips.values()],
+      tracks: [...state.tracks.values()],
+      effects: [],
+      markers: [],
+      playhead: this.playbackFrame,
+      selection: [...state.selection],
+      historyPosition: this.history.getPosition(),
+      settings: { fps: this.config.defaultFps },
+    };
   }
 
   private async checkRecovery(): Promise<void> {
     try {
-      const saved = safeStorageGet(this.recoveryKey);
-      if (!saved) return;
+      const snapshot = await this.recovery.getLatestSnapshot();
+      if (!snapshot) return;
 
-      const recoveryData = JSON.parse(saved);
-      const age = Date.now() - recoveryData.timestamp;
+      // Only offer recovery for snapshots less than 1 hour old; older ones are
+      // pruned by RecoveryManager.cleanup() on its own schedule.
+      if (Date.now() - snapshot.timestamp > 3600000) return;
 
-      // Only recover if less than 1 hour old
-      if (age > 3600000) {
-        safeStorageRemove(this.recoveryKey);
-        return;
-      }
+      const shouldRecover = await this.showRecoveryDialog(snapshot.timestamp);
+      if (!shouldRecover) return;
 
-      // Show recovery dialog
-      const shouldRecover = await this.showRecoveryDialog(recoveryData);
-      
-      if (shouldRecover) {
-        await this.restoreFromRecovery(recoveryData);
-      }
-
-      safeStorageRemove(this.recoveryKey);
+      const data = await this.recovery.restoreSnapshot(snapshot.id);
+      if (data) await this.restoreFromRecovery(data, snapshot.projectId);
     } catch (e) {
       log.warn('Recovery check failed:', e);
     }
   }
 
-  private async showRecoveryDialog(data: RecoveryData): Promise<boolean> {
-    const time = new Date(data.timestamp).toLocaleTimeString();
+  private async showRecoveryDialog(timestamp: number): Promise<boolean> {
+    const time = new Date(timestamp).toLocaleTimeString();
     return confirm(t('recovery.restorePrompt', { time }));
   }
 
-  private async restoreFromRecovery(data: RecoveryData): Promise<void> {
-    if (data.projectId) {
-      await this.project.openProject(data.projectId);
+  private async restoreFromRecovery(data: RecoveryData, projectId?: string): Promise<void> {
+    if (projectId && projectId !== 'unknown') {
+      try {
+        await this.project.openProject(projectId);
+      } catch (e) {
+        // The project may have been deleted since the snapshot — keep the
+        // recovered playhead/timeline rather than aborting the whole restore.
+        log.warn('Recovery: failed to reopen project', e);
+      }
     }
 
-    if (data.timelineState) {
-      this.timeline.setPlayhead(data.timelineState.playhead);
-    }
-
-    if (data.playhead !== undefined) {
+    if (typeof data.playhead === 'number') {
       this.playbackFrame = data.playhead;
+      this.timeline.setPlayhead(data.playhead);
     }
 
     // Recovery restore complete — emit event for UI notification
@@ -529,7 +524,11 @@ export class ArtoneApp {
     const errors: Array<{ module: string; error: unknown }> = [];
     try { await this.project.init?.(); } catch (e) { errors.push({ module: 'project', error: e }); }
     try { await this.audio.init?.(); } catch (e) { errors.push({ module: 'audio', error: e }); }
-    try { this.setupAutoSave(); } catch (e) { errors.push({ module: 'autosave', error: e }); }
+    // Open the recovery DB before checking for a prior snapshot or starting
+    // auto-save — both depend on the IndexedDB connection being live.
+    try { await this.recovery.init(); } catch (e) { errors.push({ module: 'recovery-init', error: e }); }
+    try { await this.checkRecovery(); } catch (e) { errors.push({ module: 'recovery', error: e }); }
+    try { this.setupAutoSave(); this.setupCrashRecovery(); } catch (e) { errors.push({ module: 'autosave', error: e }); }
     if (errors.length > 0) {
       log.warn(`headless init: ${errors.length} error(s)`);
       this.emit?.('init:partial', { errors });
@@ -620,16 +619,13 @@ export class ArtoneApp {
   dispose(): void {
     this.stopPlaybackLoop();
 
-    if (this.autoSaveTimer) {
-      clearInterval(this.autoSaveTimer);
-    }
+    // RecoveryManager owns the auto-save timer + crash listeners; dispose() stops
+    // the timer and closes the IndexedDB connection.
+    this.recovery.dispose();
 
-    // Remove crash-recovery listeners so disposed instances are not kept alive
-    // by listener closures (prevents stale callbacks during HMR / test teardown).
-    window.removeEventListener('beforeunload', this._onBeforeUnload);
+    // Remove our tab-hide listener so disposed instances are not kept alive by a
+    // listener closure (prevents stale callbacks during HMR / test teardown).
     document.removeEventListener('visibilitychange', this._onVisibilityChange);
-    window.removeEventListener('error', this._onError);
-    window.removeEventListener('unhandledrejection', this._onUnhandledRejection);
 
     this.shortcuts.dispose();
     this.history.clear();

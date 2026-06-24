@@ -8,6 +8,9 @@ Artone v3 の全変更を記録。
 ## [Unreleased]
 
 ### Changed
+- **i18n キーカバレッジ CI ガードを追加 (コード → ロケール)** (i18n、ハードコード文字列禁止の徹底)。既存の `i18n-locale-completeness.test.ts` は全ロケールが en.json とキー集合一致することを保証するが、「コード中で使われる `t('a.b.c')` キーが en.json に実在するか」は未検証だった。存在しないキーは実行時に生キー/フォールバック表示になり UI が壊れる (CLAUDE.md 第一原則「ハードコード文字列禁止・t() 経由のみ」に反する静かな退行)。全ソース (23 ディレクトリ、`future/` 除外) を走査し、コメント除去後の静的 `t('dotted.key')` 呼び出しを抽出して en.json と照合する `tests/i18n-key-coverage.test.ts` を追加。動的キー (`t(変数)` / テンプレートリテラル) は静的検査不能のためスキップ。現状コードベースは全キー定義済み (missing 0) を確認 — 本テストは将来の未定義キー混入を CI で防ぐ。テスト総数 4462 → 4464。
+
+### Changed
 - **CIEDE2000 (ΔE00) を Sharma et al. (2005) 全 34 標準テストベクタで検証 (8 → 34)** (color、color-QC 正確性保証)。`color/delta-e.ts` の `deltaE00` は「Sharma et al. (2005) に完全準拠」と謳うが、テストは公開 34 ペア中 8 ペアしか網羅しておらず、最も間違えやすい分岐 (色相ラップアラウンド、グレー軸近傍の彩度ゼロ、実色相パス) が未検証だった。Sharma, Wu & Dalal (2005) Table 1 の全 34 ペア (期待値 4 桁) を追加。残り 26 ペア (ペア 9–34: グレー軸/色相境界/大差/JND スケール/実色) を含む全件が `toBeCloseTo(expected, 3)` で pass し、実装が canonical リファレンスと一致することを確証 (バグなし)。プロ用途 (interchange/カラーグレーディング) の標準式をリグレッションから保護。Sharma, Wu & Dalal (2005) "The CIEDE2000 Color-Difference Formula" (DOI:10.1002/col.20070) に基づく。テスト総数 4406 → 4432。
 
 ### Fixed

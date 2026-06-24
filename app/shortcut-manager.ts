@@ -167,6 +167,46 @@ const DAVINCI_OVERRIDES: Array<[string, Partial<Shortcut>]> = [
 ];
 
 // ============================================================
+// Modifier matching (pure — unit tested without a DOM)
+// ============================================================
+
+/** The modifier flags of a keyboard event that shortcut matching reads. */
+export interface EventModifiers {
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}
+
+/**
+ * Whether a shortcut's modifiers match an event's.
+ *
+ * Ctrl and Meta are unified into a single platform "command" modifier (Ctrl on
+ * Windows/Linux, ⌘ on macOS) so a binding made with either fires for either.
+ * The previous inline check only honoured `mods.ctrl` and never inspected
+ * `mods.meta`, so any meta-only binding — e.g. the FCP preset's ⌘B split —
+ * could never match (pressing ⌘B gave commandPressed=true while mods.ctrl=false).
+ */
+export function shortcutModifiersMatch(mods: ShortcutModifiers, ev: EventModifiers): boolean {
+  const commandWanted = mods.ctrl || mods.meta;
+  const commandPressed = ev.ctrlKey || ev.metaKey;
+  return (
+    commandWanted === commandPressed &&
+    mods.shift === ev.shiftKey &&
+    mods.alt === ev.altKey
+  );
+}
+
+/** Whether two modifier sets denote the same chord (ctrl/meta unified). */
+export function sameModifierChord(a: ShortcutModifiers, b: ShortcutModifiers): boolean {
+  return (
+    (a.ctrl || a.meta) === (b.ctrl || b.meta) &&
+    a.shift === b.shift &&
+    a.alt === b.alt
+  );
+}
+
+// ============================================================
 // Shortcut Manager
 // ============================================================
 
@@ -236,12 +276,7 @@ export class ShortcutManager {
         continue;
       }
 
-      const mods = shortcut.modifiers;
-      if (mods.ctrl !== (event.ctrlKey || event.metaKey)) continue;
-      if (mods.shift !== event.shiftKey) continue;
-      if (mods.alt !== event.altKey) continue;
-
-      return shortcut;
+      if (shortcutModifiersMatch(shortcut.modifiers, event)) return shortcut;
     }
     return null;
   }
@@ -329,11 +364,9 @@ export class ShortcutManager {
       if (excludeAction && shortcut.action === excludeAction) continue;
       if (shortcut.context !== 'global' && shortcut.context !== context && context !== 'global') continue;
 
-      if (shortcut.key === key &&
-          shortcut.modifiers.ctrl === modifiers.ctrl &&
-          shortcut.modifiers.shift === modifiers.shift &&
-          shortcut.modifiers.alt === modifiers.alt &&
-          shortcut.modifiers.meta === modifiers.meta) {
+      // Unify ctrl/meta so a conflict is detected consistently with how
+      // shortcutModifiersMatch() dispatches (⌘B and Ctrl+B are the same chord).
+      if (shortcut.key === key && sameModifierChord(shortcut.modifiers, modifiers)) {
         return shortcut;
       }
     }

@@ -220,14 +220,61 @@ function istft(
 
 // ─── Median filter ────────────────────────────────────────────────────────────
 
-/** In-place copy of `arr` for median work. */
-function medianOfSlice(buf: Float64Array, len: number): number {
-  // Partial selection sort for small kernels (kernel ≤ 31 typical)
-  const half = len >> 1;
-  // Simple insertion-based partial sort for correctness & simplicity
-  const scratch = buf.slice(0, len);
-  scratch.sort(); // Float64Array.prototype.sort is numeric
-  return scratch[half];
+/**
+ * Median of `buf[0..len)` via in-place quickselect.
+ *
+ * O(len) average (vs O(len·log len) for a full sort) and — crucially — zero
+ * allocation. The previous implementation called `buf.slice(0, len)` on every
+ * sample, copying `len` doubles and producing nFrames×nBins throwaway arrays
+ * per median-filter pass on a large spectrogram. Callers pass a scratch buffer
+ * they fully refill before each call, so reordering `buf[0..len)` in place is
+ * safe. Uses `<` directly (numeric, like Float64Array's default sort).
+ *
+ * Exported for direct unit testing against a sort-based reference.
+ *
+ * # AI generated (reviewed)
+ */
+export function medianOfSlice(buf: Float64Array, len: number): number {
+  const k = len >> 1;
+  let lo = 0;
+  let hi = len - 1;
+  while (lo < hi) {
+    const p = partitionForSelect(buf, lo, hi);
+    if (k === p) break;
+    if (k < p) hi = p - 1;
+    else lo = p + 1;
+  }
+  return buf[k];
+}
+
+/** Swap two elements of a Float64Array. */
+function swapF64(a: Float64Array, i: number, j: number): void {
+  const t = a[i];
+  a[i] = a[j];
+  a[j] = t;
+}
+
+/**
+ * Lomuto partition around a median-of-three pivot (robust against already-sorted
+ * input, which is common in spectrogram rows). Returns the pivot's final index.
+ */
+function partitionForSelect(a: Float64Array, lo: number, hi: number): number {
+  const mid = (lo + hi) >> 1;
+  // Median-of-three: order a[lo] <= a[mid] <= a[hi], then use a[mid] as pivot.
+  if (a[mid] < a[lo]) swapF64(a, lo, mid);
+  if (a[hi] < a[lo]) swapF64(a, lo, hi);
+  if (a[hi] < a[mid]) swapF64(a, mid, hi);
+  const pivot = a[mid];
+  swapF64(a, mid, hi); // park pivot at the end
+  let store = lo;
+  for (let i = lo; i < hi; i++) {
+    if (a[i] < pivot) {
+      swapF64(a, store, i);
+      store++;
+    }
+  }
+  swapF64(a, store, hi); // restore pivot to its sorted position
+  return store;
 }
 
 /**

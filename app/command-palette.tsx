@@ -41,7 +41,7 @@ interface CommandPaletteProps {
 
 // === ファジー検索 ===
 
-function fuzzyMatch(query: string, text: string): { match: boolean; score: number } {
+export function fuzzyMatch(query: string, text: string): { match: boolean; score: number } {
   if (!query) return { match: true, score: 0 };
   const q = query.toLowerCase();
   const t = text.toLowerCase();
@@ -70,7 +70,7 @@ function fuzzyMatch(query: string, text: string): { match: boolean; score: numbe
   return { match: false, score: 0 };
 }
 
-function searchItems(
+export function searchItems(
   items: PaletteItem[],
   query: string,
   currentTier: FeatureTier
@@ -124,6 +124,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     () => searchItems(items, query, currentTier),
     [items, query, currentTier]
   );
+
+  // Reset the highlight to the top result whenever the result set changes (e.g.
+  // typing narrows it). Without this, a stale selectedIndex can exceed
+  // results.length, leaving no visible selection and making Enter a no-op.
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [results]);
 
   // フォーカス: 開いたら入力にフォーカスし、閉じたら元の要素へ戻す (WCAG AAA)
   useEffect(() => {

@@ -141,6 +141,41 @@ const EASING_FUNCTIONS: Record<EasingType, (t: number) => number> = {
 };
 
 // ============================================================
+// Keyframe lookup
+// ============================================================
+
+/**
+ * Binary-search a time-ascending keyframe array for the last keyframe at or
+ * before `time`.
+ *
+ * Returns that keyframe's index, or -1 when `time` precedes the first keyframe.
+ * Mirrors the previous linear scan exactly (the last keyframe whose time is
+ * `<= time`) but in O(log n); see {@link KeyframeAnimator.getValue}. Exported
+ * for direct unit testing.
+ *
+ * @param keyframes Keyframes sorted ascending by `time` (invariant upheld by
+ *   addKeyframe/updateKeyframe).
+ * @param time Query time.
+ *
+ * # AI generated (reviewed)
+ */
+export function findPrevKeyframeIndex(keyframes: Keyframe[], time: number): number {
+  let lo = 0;
+  let hi = keyframes.length - 1;
+  let result = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (keyframes[mid].time <= time) {
+      result = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return result;
+}
+
+// ============================================================
 // Bezier Curve
 // ============================================================
 
@@ -342,24 +377,20 @@ export class KeyframeAnimator {
       return property.keyframes[0].value;
     }
 
-    // Find surrounding keyframes
-    let prevKey: Keyframe | null = null;
-    let nextKey: Keyframe | null = null;
-
-    for (const kf of property.keyframes) {
-      if (kf.time <= time) {
-        prevKey = kf;
-      }
-      if (kf.time > time && !nextKey) {
-        nextKey = kf;
-        break;
-      }
-    }
+    // Find the surrounding keyframes. Keyframes are kept in ascending time
+    // order (addKeyframe/updateKeyframe re-sort), so a binary search replaces
+    // the previous O(n) scan with O(log n) — getValue runs per animated
+    // property per frame (60fps), so the scan was a real hot-path cost.
+    const kfs = property.keyframes;
+    const prevIndex = findPrevKeyframeIndex(kfs, time);
 
     // Before first keyframe
-    if (!prevKey) {
-      return property.keyframes[0].value;
+    if (prevIndex === -1) {
+      return kfs[0].value;
     }
+
+    const prevKey = kfs[prevIndex];
+    const nextKey = prevIndex + 1 < kfs.length ? kfs[prevIndex + 1] : null;
 
     // After last keyframe
     if (!nextKey) {

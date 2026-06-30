@@ -900,12 +900,22 @@ export class MagneticTimeline {
   getTrackClips(trackId: string): Clip[] {
     const ids = this._getTrackIndex().get(trackId);
     if (!ids) return [];
-    return Array.from(ids, id => this.state.clips.get(id)!).filter(Boolean);
+    const result: Clip[] = [];
+    for (const id of ids) {
+      const clip = this.state.clips.get(id);
+      if (clip) result.push(clip);
+    }
+    return result;
   }
 
   getClipsAtTime(time: number): Clip[] {
     const hits = this.getClipIndex().queryPoint(time);
-    return hits.map((h) => this.state.clips.get(h.id)!).filter(Boolean);
+    const result: Clip[] = [];
+    for (const h of hits) {
+      const clip = this.state.clips.get(h.id);
+      if (clip) result.push(clip);
+    }
+    return result;
   }
 
   /**

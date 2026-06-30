@@ -1006,8 +1006,20 @@ export class MagneticTimeline {
     this.clipIndexCache = null; // invalidate O(n) build cache
     this.trackIndexCache = null;
     for (const listener of this.listeners) {
-      listener(this.state);
+      try {
+        listener(this.state);
+      } catch (e) {
+        // Isolate listeners from each other: a throw in one must not skip the rest.
+        // Re-raise asynchronously so devtools still sees the error.
+        queueMicrotask(() => { throw e; });
+      }
     }
+  }
+
+  /** Stop the playback interval and clear all subscribers. Call when discarding the instance. */
+  destroy(): void {
+    this.stopPlayback();
+    this.listeners.clear();
   }
 }
 

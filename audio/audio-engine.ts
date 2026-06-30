@@ -347,6 +347,10 @@ export class AudioEngine {
   ): Promise<AudioBuffer> {
     if (!this.ctx) throw new Error('Engine not initialized');
 
+    // Clamp to [0,1] so NaN/Infinity from callers can't poison AudioParam values
+    const clarity = Math.max(0, Math.min(1, params.clarity));
+    const warmth  = Math.max(0, Math.min(1, params.warmth));
+
     const offline = new OfflineAudioContext(
       buffer.numberOfChannels,
       buffer.length,
@@ -359,23 +363,23 @@ export class AudioEngine {
     // High-pass for clarity
     const highpass = offline.createBiquadFilter();
     highpass.type = 'highpass';
-    highpass.frequency.value = 80 + (1 - params.clarity) * 40;
+    highpass.frequency.value = 80 + (1 - clarity) * 40;
 
     // Low-shelf for warmth
-    const warmth = offline.createBiquadFilter();
-    warmth.type = 'lowshelf';
-    warmth.frequency.value = 250;
-    warmth.gain.value = params.warmth * 6;
+    const warmthFilter = offline.createBiquadFilter();
+    warmthFilter.type = 'lowshelf';
+    warmthFilter.frequency.value = 250;
+    warmthFilter.gain.value = warmth * 6;
 
     // Presence boost
     const presence = offline.createBiquadFilter();
     presence.type = 'peaking';
     presence.frequency.value = 3000;
-    presence.gain.value = params.clarity * 4;
+    presence.gain.value = clarity * 4;
 
     source.connect(highpass);
-    highpass.connect(warmth);
-    warmth.connect(presence);
+    highpass.connect(warmthFilter);
+    warmthFilter.connect(presence);
     presence.connect(offline.destination);
 
     source.start();
@@ -426,6 +430,9 @@ export class AudioEngine {
     duration: number
   ): Promise<AudioBuffer> {
     if (!this.ctx) throw new Error('Engine not initialized');
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error(`exportMix: invalid duration ${duration}`);
+    }
 
     const sampleRate = this.ctx.sampleRate;
     const length = Math.ceil(duration * sampleRate);
@@ -446,11 +453,14 @@ export class AudioEngine {
       sources.push(source);
     }
 
-    const rendered = await offline.startRendering();
     // Null source buffers after rendering to release the GC hold on AudioBuffer
     // references that would otherwise linger past the OfflineAudioContext lifetime.
-    for (const src of sources) src.buffer = null;
-    return rendered;
+    // Use finally so the nulling also runs when startRendering() rejects.
+    try {
+      return await offline.startRendering();
+    } finally {
+      for (const src of sources) src.buffer = null;
+    }
   }
 
   // ============================================================

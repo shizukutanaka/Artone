@@ -8,7 +8,7 @@
  */
 
 import { color } from './design-system';
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useMemo } from 'react';
 
 
 // ============================================================
@@ -334,7 +334,12 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   const [scrollX, setScrollX] = useState(0);
   const HEADER_W = 120;
 
-  const totalHeight = tracks.reduce((sum, t) => sum + t.height, 0);
+  // Memoize layout derived from tracks — these don't change on every playhead
+  // tick, but TimelineView re-renders at 60fps when playhead moves.
+  const totalHeight = useMemo(
+    () => tracks.reduce((sum, t) => sum + t.height, 0),
+    [tracks],
+  );
 
   const dragRef = useRef<ClipDragState | null>(null);
 
@@ -396,12 +401,20 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     [pxPerSecond, scrollX, onPlayheadChange]
   );
 
-  let trackTop = 0;
-  const trackPositions = tracks.map((track) => {
-    const top = trackTop;
-    trackTop += track.height;
-    return { track, top };
-  });
+  const trackPositions = useMemo(() => {
+    let top = 0;
+    return tracks.map((track) => {
+      const entry = { track, top };
+      top += track.height;
+      return entry;
+    });
+  }, [tracks]);
+
+  // O(1) clip→track position lookup — replaces O(T) find() inside clips.map().
+  const trackPosMap = useMemo(
+    () => new Map(trackPositions.map((p) => [p.track.id, p])),
+    [trackPositions],
+  );
 
   return (
     <div
@@ -452,7 +465,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
         {/* Clips */}
         {clips.map((clip) => {
-          const pos = trackPositions.find((p) => p.track.id === clip.trackId);
+          const pos = trackPosMap.get(clip.trackId);
           if (!pos) return null;
           return (
             <ClipView

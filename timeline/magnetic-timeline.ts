@@ -688,27 +688,37 @@ export class MagneticTimeline {
   }
 
   findNearestSnapPoint(time: number, excludeClipId?: string): number | null {
-    const points = this.getSnapPoints().filter(p => p.clipId !== excludeClipId);
-    
-    let nearest: SnapPoint | null = null;
+    // Scan candidates directly — avoids allocating getSnapPoints() array and
+    // a second filter() array on every drag-tick (timeline CLAUDE.md: GC禁止 during drag).
+    const timeThreshold = this.snapThreshold / this.state.zoom;
+    let nearestTime = -1;
     let minDist = Infinity;
 
-    for (const point of points) {
-      const dist = Math.abs(point.time - time);
-      if (dist < minDist) {
-        minDist = dist;
-        nearest = point;
-      }
+    // Playhead
+    const pdist = Math.abs(this.state.playhead - time);
+    if (pdist < minDist) { minDist = pdist; nearestTime = this.state.playhead; }
+
+    // Clip edges (skip the clip being dragged)
+    for (const clip of this.state.clips.values()) {
+      if (clip.id === excludeClipId) continue;
+      const d1 = Math.abs(clip.startTime - time);
+      if (d1 < minDist) { minDist = d1; nearestTime = clip.startTime; }
+      const endTime = clip.startTime + clip.duration;
+      const d2 = Math.abs(endTime - time);
+      if (d2 < minDist) { minDist = d2; nearestTime = endTime; }
     }
 
-    // Convert pixel threshold to time threshold
-    const timeThreshold = this.snapThreshold / this.state.zoom;
-    
-    if (nearest && minDist <= timeThreshold) {
-      return nearest.time;
+    // In/Out points
+    if (this.state.inPoint !== null) {
+      const d = Math.abs(this.state.inPoint - time);
+      if (d < minDist) { minDist = d; nearestTime = this.state.inPoint; }
+    }
+    if (this.state.outPoint !== null) {
+      const d = Math.abs(this.state.outPoint - time);
+      if (d < minDist) { minDist = d; nearestTime = this.state.outPoint; }
     }
 
-    return null;
+    return minDist <= timeThreshold && nearestTime >= 0 ? nearestTime : null;
   }
 
   // ============================================================

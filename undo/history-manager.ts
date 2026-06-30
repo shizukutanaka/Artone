@@ -654,7 +654,7 @@ export class HistoryManager {
   // ----- 永続化 -----
   private async saveToDB(): Promise<void> {
     if (!this.db) return;
-    
+
     const state: HistoryState = {
       position: this.position,
       commands: this.commands.map(cmd => ({
@@ -667,10 +667,16 @@ export class HistoryManager {
       branches: Array.from(this.branches.values()),
       currentBranch: this.currentBranch
     };
-    
-    const tx = this.db.transaction('history', 'readwrite');
-    const store = tx.objectStore('history');
-    store.put({ id: this.config.persistKey, state });
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction('history', 'readwrite');
+      const store = tx.objectStore('history');
+      store.put({ id: this.config.persistKey, state });
+      // Resolve/reject when the transaction settles — not when the request settles —
+      // so callers that await saveToDB() know the data is durable.
+      tx.oncomplete = () => resolve();
+      tx.onerror   = () => reject(tx.error);
+    });
   }
 
   private async loadFromDB(): Promise<void> {
@@ -907,6 +913,7 @@ export class HistoryManager {
       const tx = this.db.transaction('history', 'readwrite');
       const store = tx.objectStore('history');
       store.delete(this.config.persistKey);
+      tx.onerror = () => log.error('Failed to clear history from IndexedDB:', tx.error);
     }
   }
 
@@ -974,7 +981,7 @@ export function HistoryPanelUI(props: { history: HistoryManager }): string {
         gap: 8px;
         margin-bottom: 12px;
       ">
-        <button onclick="history.undo()" ${!props.history.canUndo() ? 'disabled' : ''} style="
+        <button data-action="undo" ${!props.history.canUndo() ? 'disabled' : ''} style="
           flex: 1;
           padding: 6px 12px;
           border: none;
@@ -985,7 +992,7 @@ export function HistoryPanelUI(props: { history: HistoryManager }): string {
         ">
           ← Undo
         </button>
-        <button onclick="history.redo()" ${!props.history.canRedo() ? 'disabled' : ''} style="
+        <button data-action="redo" ${!props.history.canRedo() ? 'disabled' : ''} style="
           flex: 1;
           padding: 6px 12px;
           border: none;
@@ -1042,6 +1049,34 @@ export function HistoryPanelUI(props: { history: HistoryManager }): string {
       </div>
     </div>
   `;
+}
+
+/**
+ * Mount the history panel into `container`, bind undo/redo button clicks, and
+ * return a cleanup function that removes all event listeners.
+ *
+ * Preferred over `HistoryPanelUI` + innerHTML alone because inline
+ * `onclick="history.undo()"` would reference `window.history` (the browser
+ * navigation API), not the HistoryManager instance.  The string template now
+ * uses `data-action` attributes; this function adds the actual handlers.
+ */
+export function mountHistoryPanel(
+  container: HTMLElement,
+  history: HistoryManager,
+): () => void {
+  container.innerHTML = HistoryPanelUI({ history });
+
+  const onClick = (e: Event) => {
+    const target = e.target as HTMLElement;
+    const btn = target.closest('[data-action]') as HTMLElement | null;
+    if (!btn) return;
+    if (btn.dataset['action'] === 'undo') history.undo();
+    else if (btn.dataset['action'] === 'redo') history.redo();
+    else if (btn.dataset['position'] !== undefined) history.goToPosition(Number(btn.dataset['position']));
+  };
+
+  container.addEventListener('click', onClick);
+  return () => container.removeEventListener('click', onClick);
 }
 
 function escapeHtml(s: string): string {

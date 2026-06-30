@@ -55,6 +55,13 @@ export class WaveformScope {
   private ctx: OffscreenCanvasRenderingContext2D;
   private config: ScopeConfig;
   private mode: WaveformMode = 'luma';
+  // Pre-allocated density maps: flat [scopeX * 256 + brightness] = pixel count.
+  // Replaces per-frame Map + dynamic array allocation (~thousands of GC objects
+  // at 60fps).  Size = config.width × 256 (fixed at construction time).
+  private readonly waveR: Uint32Array;
+  private readonly waveG: Uint32Array;
+  private readonly waveB: Uint32Array;
+  private readonly waveY: Uint32Array;
 
   constructor(config: Partial<ScopeConfig> = {}) {
     this.config = {
@@ -67,9 +74,15 @@ export class WaveformScope {
       backgroundColor: color.surface0,
       ...config
     };
-    
+
     this.canvas = new OffscreenCanvas(this.config.width, this.config.height);
     this.ctx = this.canvas.getContext('2d')!;
+
+    const buckets = this.config.width * 256;
+    this.waveR = new Uint32Array(buckets);
+    this.waveG = new Uint32Array(buckets);
+    this.waveB = new Uint32Array(buckets);
+    this.waveY = new Uint32Array(buckets);
   }
 
   setMode(mode: WaveformMode): void {
@@ -90,35 +103,38 @@ export class WaveformScope {
     return frame;
   }
 
-  /** ピクセルデータを X 位置ごとに集計する */
-  private buildAccumulator(
+  /**
+   * Accumulate pixel counts into the flat density maps.
+   * Replaces the old Map<number,{r:[],g:[],b:[],y:[]}> buildAccumulator()
+   * which allocated thousands of dynamic-growing arrays per frame.
+   */
+  private fillWaveBufs(
     data: Uint8ClampedArray,
     frameWidth: number,
     frameHeight: number,
-    scopeWidth: number
-  ): Map<number, { r: number[]; g: number[]; b: number[]; y: number[] }> {
+    scopeWidth: number,
+  ): void {
+    const { waveR, waveG, waveB, waveY } = this;
+    waveR.fill(0); waveG.fill(0); waveB.fill(0); waveY.fill(0);
+
     const scaleX = scopeWidth / frameWidth;
-    const acc = new Map<number, { r: number[]; g: number[]; b: number[]; y: number[] }>();
-
     for (let x = 0; x < frameWidth; x++) {
-      const scopeX = Math.floor(x * scaleX);
-      if (!acc.has(scopeX)) acc.set(scopeX, { r: [], g: [], b: [], y: [] });
-      const col = acc.get(scopeX)!;
-
+      const base = Math.floor(x * scaleX) * 256;
       for (let y = 0; y < frameHeight; y++) {
         const idx = (y * frameWidth + x) * 4;
         const r = data[idx], g = data[idx + 1], b = data[idx + 2];
-        const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        col.r.push(r); col.g.push(g); col.b.push(b); col.y.push(luma);
+        const luma = (r * 54 + g * 183 + b * 19) >> 8;
+        waveR[base + r]++;
+        waveG[base + g]++;
+        waveB[base + b]++;
+        waveY[base + luma]++;
       }
     }
-    return acc;
   }
 
   analyze(frame: VideoFrame | ImageData): ImageBitmap {
     const { width, height } = this.config;
 
-    // Clear
     this.ctx.fillStyle = this.config.backgroundColor;
     this.ctx.fillRect(0, 0, width, height);
 
@@ -127,69 +143,88 @@ export class WaveformScope {
 
     if (this.config.showGraticule) this.drawGraticule();
 
-    const accumulator = this.buildAccumulator(data, frameWidth, frameHeight, width);
-    this.ctx.globalAlpha = this.config.brightness * 0.3;
-    
+    this.fillWaveBufs(data, frameWidth, frameHeight, width);
+
+    // Find global max for opacity normalization (density-map waveform).
+    // Opacity is proportional to pixel density — matches professional scope behavior.
+    const { waveR, waveG, waveB, waveY } = this;
+    let maxCount = 0;
+    for (let i = 0, len = width * 256; i < len; i++) {
+      if (waveR[i] > maxCount) maxCount = waveR[i];
+      if (waveG[i] > maxCount) maxCount = waveG[i];
+      if (waveB[i] > maxCount) maxCount = waveB[i];
+      if (waveY[i] > maxCount) maxCount = waveY[i];
+    }
+    if (maxCount === 0) return this.canvas.transferToImageBitmap();
+
+    const scale = this.config.brightness * this.config.scale;
+
     if (this.mode === 'luma') {
       this.ctx.fillStyle = color.textPrimary;
-      accumulator.forEach((acc, x) => {
-        acc.y.forEach(y => {
-          const scopeY = height - (y / 255) * height;
-          this.ctx.fillRect(x, scopeY, 1, 1);
-        });
-      });
+      for (let x = 0; x < width; x++) {
+        const base = x * 256;
+        for (let brt = 0; brt < 256; brt++) {
+          const count = waveY[base + brt];
+          if (count === 0) continue;
+          this.ctx.globalAlpha = Math.min(1, (count / maxCount) * scale);
+          this.ctx.fillRect(x, height - Math.ceil((brt / 255) * height), 1, 1);
+        }
+      }
     } else if (this.mode === 'rgb') {
-      accumulator.forEach((acc, x) => {
-        // Red
-        this.ctx.fillStyle = SCOPE_RED;
-        acc.r.forEach(v => {
-          const scopeY = height - (v / 255) * height;
-          this.ctx.fillRect(x, scopeY, 1, 1);
-        });
-        // Green
-        this.ctx.fillStyle = SCOPE_GREEN;
-        acc.g.forEach(v => {
-          const scopeY = height - (v / 255) * height;
-          this.ctx.fillRect(x, scopeY, 1, 1);
-        });
-        // Blue
-        this.ctx.fillStyle = SCOPE_BLUE;
-        acc.b.forEach(v => {
-          const scopeY = height - (v / 255) * height;
-          this.ctx.fillRect(x, scopeY, 1, 1);
-        });
-      });
+      for (let x = 0; x < width; x++) {
+        const base = x * 256;
+        for (let brt = 0; brt < 256; brt++) {
+          const y = height - Math.ceil((brt / 255) * height);
+          const cr = waveR[base + brt];
+          if (cr > 0) {
+            this.ctx.globalAlpha = Math.min(1, (cr / maxCount) * scale);
+            this.ctx.fillStyle = SCOPE_RED;
+            this.ctx.fillRect(x, y, 1, 1);
+          }
+          const cg = waveG[base + brt];
+          if (cg > 0) {
+            this.ctx.globalAlpha = Math.min(1, (cg / maxCount) * scale);
+            this.ctx.fillStyle = SCOPE_GREEN;
+            this.ctx.fillRect(x, y, 1, 1);
+          }
+          const cb = waveB[base + brt];
+          if (cb > 0) {
+            this.ctx.globalAlpha = Math.min(1, (cb / maxCount) * scale);
+            this.ctx.fillStyle = SCOPE_BLUE;
+            this.ctx.fillRect(x, y, 1, 1);
+          }
+        }
+      }
     } else if (this.mode === 'parade') {
       const thirdWidth = width / 3;
-      
-      accumulator.forEach((acc, x) => {
-        const paradeX = x / 3;
-        
-        // Red (left third)
-        this.ctx.fillStyle = SCOPE_RED;
-        acc.r.forEach(v => {
-          const scopeY = height - (v / 255) * height;
-          this.ctx.fillRect(paradeX, scopeY, 1, 1);
-        });
-        
-        // Green (middle third)
-        this.ctx.fillStyle = SCOPE_GREEN;
-        acc.g.forEach(v => {
-          const scopeY = height - (v / 255) * height;
-          this.ctx.fillRect(paradeX + thirdWidth, scopeY, 1, 1);
-        });
-        
-        // Blue (right third)
-        this.ctx.fillStyle = SCOPE_BLUE;
-        acc.b.forEach(v => {
-          const scopeY = height - (v / 255) * height;
-          this.ctx.fillRect(paradeX + thirdWidth * 2, scopeY, 1, 1);
-        });
-      });
+      for (let x = 0; x < width; x++) {
+        const base = x * 256;
+        const paradeX = Math.floor(x / 3);
+        for (let brt = 0; brt < 256; brt++) {
+          const y = height - Math.ceil((brt / 255) * height);
+          const cr = waveR[base + brt];
+          if (cr > 0) {
+            this.ctx.globalAlpha = Math.min(1, (cr / maxCount) * scale);
+            this.ctx.fillStyle = SCOPE_RED;
+            this.ctx.fillRect(paradeX, y, 1, 1);
+          }
+          const cg = waveG[base + brt];
+          if (cg > 0) {
+            this.ctx.globalAlpha = Math.min(1, (cg / maxCount) * scale);
+            this.ctx.fillStyle = SCOPE_GREEN;
+            this.ctx.fillRect(paradeX + thirdWidth, y, 1, 1);
+          }
+          const cb = waveB[base + brt];
+          if (cb > 0) {
+            this.ctx.globalAlpha = Math.min(1, (cb / maxCount) * scale);
+            this.ctx.fillStyle = SCOPE_BLUE;
+            this.ctx.fillRect(paradeX + thirdWidth * 2, y, 1, 1);
+          }
+        }
+      }
     }
-    
+
     this.ctx.globalAlpha = 1;
-    
     return this.canvas.transferToImageBitmap();
   }
 

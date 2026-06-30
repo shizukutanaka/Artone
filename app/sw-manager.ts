@@ -20,6 +20,7 @@ export class ServiceWorkerManager {
   private registration: ServiceWorkerRegistration | null = null;
   private updateAvailable = false;
   private listeners = new Set<(state: 'updated' | 'offline' | 'online') => void>();
+  private readonly abortCtrl = new AbortController();
 
   async register(swUrl = '/sw.js'): Promise<boolean> {
     if (!('serviceWorker' in navigator)) return false;
@@ -51,15 +52,17 @@ export class ServiceWorkerManager {
       });
     });
 
+    const { signal } = this.abortCtrl;
+
     navigator.serviceWorker.addEventListener('message', (e) => {
       // ハンドラ拡張ポイント
       if (e.data?.type === 'SYNC_TRIGGERED') {
         // アプリ側でリスナー登録可
       }
-    });
+    }, { signal });
 
-    window.addEventListener('online', () => this.notify('online'));
-    window.addEventListener('offline', () => this.notify('offline'));
+    window.addEventListener('online', () => this.notify('online'), { signal });
+    window.addEventListener('offline', () => this.notify('offline'), { signal });
   }
 
   async applyUpdate(): Promise<void> {
@@ -129,6 +132,12 @@ export class ServiceWorkerManager {
         log.error('Listener error:', e);
       }
     }
+  }
+
+  /** Remove all global event listeners (online/offline/SW message). */
+  destroy(): void {
+    this.abortCtrl.abort();
+    this.listeners.clear();
   }
 
   private sendMessage<T>(msg: unknown): Promise<T | null> {

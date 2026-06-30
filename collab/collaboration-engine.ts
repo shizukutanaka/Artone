@@ -144,6 +144,13 @@ export class CollaborationEngine {
     }
     this.peers.clear();
     this.channels.clear();
+    // Clear per-session state so re-connecting starts clean. comments/annotations
+    // are project content and survive disconnect; they are NOT cleared here.
+    this.users.clear();
+    this.localUser = null;
+    this.vectorClock.clear();
+    this.docState.clear();
+    this.outgoing = [];
     this.connected = false;
     this.notify();
   }

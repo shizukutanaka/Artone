@@ -217,12 +217,17 @@ export class FrameCache {
   clear(): void {
     for (const frame of this.hot.values()) this.releaseFrame(frame);
     for (const frame of this.warm.values()) this.releaseFrame(frame);
-    // sink も解放 (clear は全消去)
-    for (const frame of this.sink.values()) this.releaseFrame(frame);
+    // Sink frames were never counted in currentBytes (see put()), so use closeData()
+    // not releaseFrame() — releaseFrame() would decrement currentBytes below zero.
+    for (const frame of this.sink.values()) this.closeData(frame);
     this.hot.clear();
     this.warm.clear();
     this.sink.clear();
     this.currentBytes = 0;
     log.info('Frame cache cleared');
+  }
+
+  destroy(): void {
+    this.clear();
   }
 }

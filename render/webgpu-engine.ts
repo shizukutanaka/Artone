@@ -162,7 +162,7 @@ export class WebGPURenderEngine {
     this.deviceLost = true;
     log.warn(`WebGPU device lost (${info?.reason ?? 'unknown'}): ${info?.message ?? ''} — attempting recovery`);
     this.notifyContext(true);
-    void this.attemptRecovery();
+    this.attemptRecovery().catch(e => log.error('WebGPU recovery failed', e));
   }
 
   /** Best-effort recovery: drop invalid resources and re-run initialize(). */

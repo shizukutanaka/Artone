@@ -192,14 +192,21 @@ export class RecoveryManager {
 
     this.stopAutoSave();
 
-    this.autoSaveTimer = window.setInterval(async () => {
+    // Guard flag prevents concurrent saves when saveSnapshot takes longer than the interval.
+    let saving = false;
+    this.autoSaveTimer = window.setInterval(() => {
+      if (saving) return;
+      saving = true;
       const data = getData();
-      await this.saveSnapshot('auto', projectId, projectName, data);
+      this.saveSnapshot('auto', projectId, projectName, data)
+        .catch(e => log.warn('Auto-save failed', e))
+        .finally(() => { saving = false; });
     }, this.config.autoSaveInterval);
 
     // Save immediately on start
     const data = getData();
-    this.saveSnapshot('auto', projectId, projectName, data);
+    this.saveSnapshot('auto', projectId, projectName, data)
+      .catch(e => log.warn('Initial auto-save failed', e));
   }
 
   stopAutoSave(): void {

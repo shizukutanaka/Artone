@@ -636,7 +636,7 @@ export class PluginBridge {
         isDragging = true;
         startY = me.clientY;
         startValue = instance.parameters.get(param.id) || param.defaultValue;
-      });
+      }, { signal });
       
       // Pass signal so these document-level listeners are cleaned up when the
       // plugin UI is closed (unloadPlugin) or re-opened (openPluginUI).
@@ -664,7 +664,7 @@ export class PluginBridge {
       const newState = !instance.bypassed;
       this.setBypass(instance.id, newState);
       bypassBtn.classList.toggle('active', newState);
-    });
+    }, { signal });
     
     // Preset selector
     const presetSelect = container.querySelector('.plugin-preset-select') as HTMLSelectElement;
@@ -680,7 +680,7 @@ export class PluginBridge {
           }
         }
       }
-    });
+    }, { signal });
     
     return container;
   }

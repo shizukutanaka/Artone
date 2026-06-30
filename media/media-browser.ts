@@ -343,6 +343,7 @@ export class MediaBrowser {
     let audioContext: AudioContext | null = null;
     try {
       const response = await fetch(url);
+      if (!response.ok) throw new Error(`generateAudioWaveform: fetch failed ${response.status} ${response.statusText}`);
       const arrayBuffer = await response.arrayBuffer();
       audioContext = new AudioContext();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);

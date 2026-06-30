@@ -329,11 +329,9 @@ export class KeyframeAnimator {
     property.keyframes.push(keyframe);
     property.keyframes.sort((a, b) => a.time - b.time);
 
-    // Update animation duration
-    animation.duration = Math.max(
-      animation.duration,
-      ...Array.from(animation.properties.values()).flatMap(p => p.keyframes.map(k => k.time))
-    );
+    // Update animation duration — the new keyframe is the only value that can
+    // raise the ceiling; no need to scan all other properties' keyframes.
+    animation.duration = Math.max(animation.duration, time);
 
     this.notify();
     return keyframe;

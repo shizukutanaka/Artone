@@ -352,6 +352,13 @@ export class CaptionManager {
 
     const caption = track.captions.find(c => c.id === captionId);
     if (caption) {
+      // Validate resulting time range before applying — Object.assign without
+      // guards can produce endTime <= startTime, making the caption invisible.
+      if (updates.startTime !== undefined || updates.endTime !== undefined) {
+        const newStart = updates.startTime ?? caption.startTime;
+        const newEnd   = updates.endTime   ?? caption.endTime;
+        if (!(newEnd > newStart)) return;
+      }
       const prevStart = caption.startTime;
       Object.assign(caption, updates);
       // Only resort when startTime changed — style and text updates never
@@ -772,11 +779,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       this.renderCaption(ctx, caption, width, height);
     }
 
-    // Create new frame
+    // Create new frame, then release the source — caller owns newFrame.
     const newFrame = new VideoFrame(canvas, {
       timestamp: videoFrame.timestamp,
       duration: videoFrame.duration || undefined
     });
+    videoFrame.close();
 
     return newFrame;
   }

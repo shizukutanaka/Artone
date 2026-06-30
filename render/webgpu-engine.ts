@@ -127,6 +127,10 @@ export class WebGPURenderEngine {
   private deviceLost = false;
   private intentionalDestroy = false;
   private readonly contextListeners = new Set<(lost: boolean) => void>();
+  // Pre-allocated param buffers — reused every frame to avoid per-layer/per-effect
+  // Float32Array allocation at 60fps (render CLAUDE.md: resource creation in render loop 禁止).
+  private readonly effectParamBuf    = new Float32Array(8);  // up to 8 numeric effect params
+  private readonly compositeParamBuf = new Float32Array(4);  // [opacity, blendMode, 0, 0]
 
   /** Subscribe to device lost/recovered transitions (UI can show a banner). */
   onContextChange(listener: (lost: boolean) => void): () => void {
@@ -594,7 +598,8 @@ export class WebGPURenderEngine {
       usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING
     });
 
-    const paramData = new Float32Array(8);
+    const paramData = this.effectParamBuf;
+    paramData.fill(0);
     let i = 0;
     for (const v of Object.values(effect.params)) {
       if (typeof v === 'number') paramData[i++] = v;
@@ -639,7 +644,11 @@ export class WebGPURenderEngine {
 
     const pipeline = this.pipelines.get('composite') as GPURenderPipeline;
 
-    const paramData = new Float32Array([layer.opacity, this.blendModeToInt(layer.blend), 0, 0]);
+    const paramData = this.compositeParamBuf;
+    paramData[0] = layer.opacity;
+    paramData[1] = this.blendModeToInt(layer.blend);
+    paramData[2] = 0;
+    paramData[3] = 0;
     const paramBuffer = this.device.createBuffer({
       size: 16,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST

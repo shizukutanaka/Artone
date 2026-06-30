@@ -673,6 +673,12 @@ export class VideoPipeline {
     // every thumbnail onto chunk 0 instead of spreading across the timeline.
     const interval = Math.max(1, Math.floor(chunks.length / count));
 
+    // Single canvas reused for all thumbnails (same dimensions) — createImageBitmap
+    // captures a snapshot of the current canvas state, so reuse is safe.
+    const thumbCanvas = new OffscreenCanvas(width, height);
+    const thumbCtx = thumbCanvas.getContext('2d')!;
+    setHighQualityScaling(thumbCtx);
+
     for (let i = 0; i < count; i++) {
       const chunkIndex = Math.min(i * interval, chunks.length - 1);
 
@@ -684,14 +690,9 @@ export class VideoPipeline {
       );
 
       if (frame) {
-        const canvas = new OffscreenCanvas(width, height);
-        const ctx = canvas.getContext('2d')!;
-        setHighQualityScaling(ctx);
-        ctx.drawImage(frame, 0, 0, width, height);
+        thumbCtx.drawImage(frame, 0, 0, width, height);
         frame.close();
-
-        const thumbnail = await createImageBitmap(canvas);
-        thumbnails.push(thumbnail);
+        thumbnails.push(await createImageBitmap(thumbCanvas));
       }
     }
 
@@ -745,42 +746,43 @@ export const FrameProcessors = {
 
   // Brightness/Contrast adjustment
   brightnessContrast: (brightness: number, contrast: number) => {
+    // Lazy-init canvas per closure: each factory call gets its own canvas that
+    // is created on the first frame and resized only when dimensions change.
+    // new VideoFrame(canvas, …) snapshots pixel state, so canvas reuse is safe.
+    let canvas: OffscreenCanvas | null = null;
+    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    const filterStr = `brightness(${1 + brightness}) contrast(${1 + contrast})`;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      const ctx = canvas.getContext('2d')!;
-      
-      ctx.filter = `brightness(${1 + brightness}) contrast(${1 + contrast})`;
-      ctx.drawImage(frame, 0, 0);
-      
+      const { displayWidth: w, displayHeight: h } = frame;
+      if (!canvas || canvas.width !== w || canvas.height !== h) {
+        canvas = new OffscreenCanvas(w, h);
+        ctx = canvas.getContext('2d')!;
+        ctx.filter = filterStr;
+      }
+      ctx!.drawImage(frame, 0, 0);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
 
   // Resize
   resize: (width: number, height: number) => {
+    // Canvas dimensions are fixed by the factory args — create once, reuse every frame.
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d')!;
+    setHighQualityScaling(ctx);
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d')!;
-
-      setHighQualityScaling(ctx);
       ctx.drawImage(frame, 0, 0, width, height);
-
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
 
   // Crop
   crop: (x: number, y: number, width: number, height: number) => {
+    // Output dimensions are fixed by factory args — create canvas once.
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d')!;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d')!;
-      
-      ctx.drawImage(
-        frame,
-        x, y, width, height,
-        0, 0, width, height
-      );
-      
+      ctx.drawImage(frame, x, y, width, height, 0, 0, width, height);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
@@ -808,20 +810,20 @@ export const FrameProcessors = {
 
   // Flip
   flip: (horizontal: boolean, vertical: boolean) => {
+    // Lazy-init canvas: created on first frame, reused when dimensions are stable.
+    // setTransform() replaces (not accumulates) the transform matrix, so no save/restore.
+    let canvas: OffscreenCanvas | null = null;
+    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    const sx = horizontal ? -1 : 1;
+    const sy = vertical   ? -1 : 1;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      const ctx = canvas.getContext('2d')!;
-      
-      ctx.translate(
-        horizontal ? frame.displayWidth : 0,
-        vertical ? frame.displayHeight : 0
-      );
-      ctx.scale(
-        horizontal ? -1 : 1,
-        vertical ? -1 : 1
-      );
-      ctx.drawImage(frame, 0, 0);
-      
+      const { displayWidth: w, displayHeight: h } = frame;
+      if (!canvas || canvas.width !== w || canvas.height !== h) {
+        canvas = new OffscreenCanvas(w, h);
+        ctx = canvas.getContext('2d')!;
+      }
+      ctx!.setTransform(sx, 0, 0, sy, horizontal ? w : 0, vertical ? h : 0);
+      ctx!.drawImage(frame, 0, 0);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },

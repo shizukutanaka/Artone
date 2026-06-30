@@ -111,8 +111,11 @@ export function makeLogFrequencies(n = EQ_DISPLAY_POINTS, sampleRate = 48000): F
     return freqs;
   }
   const logRange = Math.log10(fMax / fMin);
-  for (let i = 0; i < n; i++) {
-    freqs[i] = fMin * Math.pow(10, (i / Math.max(1, n - 1)) * logRange);
+  // Geometric series: each step multiplies by a constant ratio (1 pow instead of n)
+  const ratio = Math.pow(10, logRange / Math.max(1, n - 1));
+  freqs[0] = fMin;
+  for (let i = 1; i < n; i++) {
+    freqs[i] = freqs[i - 1] * ratio;
   }
   return freqs;
 }

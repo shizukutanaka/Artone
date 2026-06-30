@@ -161,6 +161,14 @@ export class AIEffectsEngine {
   // Cached foreground compositing canvas for removeBackground() — avoids per-frame alloc
   private _fgCanvas: OffscreenCanvas | null = null;
   private _fgCtx: OffscreenCanvasRenderingContext2D | null = null;
+  // Cached 64×64 canvas for computeHistogram() — reused across detectScenes() frames
+  private _histCanvas: OffscreenCanvas | null = null;
+  private _histCtx: OffscreenCanvasRenderingContext2D | null = null;
+  // Cached src/dst canvases for upscale() — recreated only on dimension change
+  private _upscaleSrcCanvas: OffscreenCanvas | null = null;
+  private _upscaleSrcCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _upscaleDstCanvas: OffscreenCanvas | null = null;
+  private _upscaleDstCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   constructor() {
     this.canvas = new OffscreenCanvas(1920, 1080);
@@ -538,9 +546,13 @@ export class AIEffectsEngine {
   private async computeHistogram(frame: VideoFrame | ImageBitmap): Promise<number[]> {
     // Use smaller size for performance
     const size = 64;
-    const canvas = new OffscreenCanvas(size, size);
-    // willReadFrequently: read back via getImageData below.
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    // Reuse a single 64×64 canvas across the entire detectScenes() frame loop to
+    // avoid allocating + discarding one OffscreenCanvas per frame.
+    if (!this._histCanvas) {
+      this._histCanvas = new OffscreenCanvas(size, size);
+      this._histCtx = this._histCanvas.getContext('2d', { willReadFrequently: true })!;
+    }
+    const ctx = this._histCtx!;
     ctx.drawImage(frame, 0, 0, size, size);
 
     const imageData = ctx.getImageData(0, 0, size, size);
@@ -664,20 +676,25 @@ export class AIEffectsEngine {
 
     // Lanczos-2 separable resampling — significantly sharper than browser bilinear.
     // Separable horizontal then vertical pass: O(W×H×4) vs O(W×H×16) for 2D kernel.
-    const srcCanvas = new OffscreenCanvas(width, height);
-    // willReadFrequently: source pixels are read back via getImageData.
-    const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true })!;
-    srcCtx.drawImage(frame, 0, 0);
-    const srcData = srcCtx.getImageData(0, 0, width, height);
+    // Canvases are cached and recreated only when frame dimensions change.
+    if (!this._upscaleSrcCanvas || this._upscaleSrcCanvas.width !== width || this._upscaleSrcCanvas.height !== height) {
+      this._upscaleSrcCanvas = new OffscreenCanvas(width, height);
+      // willReadFrequently: source pixels are read back via getImageData.
+      this._upscaleSrcCtx = this._upscaleSrcCanvas.getContext('2d', { willReadFrequently: true })!;
+    }
+    this._upscaleSrcCtx!.drawImage(frame, 0, 0);
+    const srcData = this._upscaleSrcCtx!.getImageData(0, 0, width, height);
 
     const resized = this.resizeLanczos2(srcData.data, width, height, newWidth, newHeight);
 
-    const dstCanvas = new OffscreenCanvas(newWidth, newHeight);
-    const dstCtx = dstCanvas.getContext('2d')!;
-    const dstImageData = dstCtx.createImageData(newWidth, newHeight);
+    if (!this._upscaleDstCanvas || this._upscaleDstCanvas.width !== newWidth || this._upscaleDstCanvas.height !== newHeight) {
+      this._upscaleDstCanvas = new OffscreenCanvas(newWidth, newHeight);
+      this._upscaleDstCtx = this._upscaleDstCanvas.getContext('2d')!;
+    }
+    const dstImageData = this._upscaleDstCtx!.createImageData(newWidth, newHeight);
     dstImageData.data.set(resized);
-    dstCtx.putImageData(dstImageData, 0, 0);
-    return createImageBitmap(dstCanvas);
+    this._upscaleDstCtx!.putImageData(dstImageData, 0, 0);
+    return createImageBitmap(this._upscaleDstCanvas);
   }
 
   // ============================================================

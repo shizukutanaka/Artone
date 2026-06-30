@@ -289,6 +289,18 @@ export class ExportEngine {
     }
   }
 
+  /**
+   * Release a finished job and revoke its output object URL.
+   * Call this when the UI no longer needs `job.outputPath` to allow the
+   * exported Blob to be garbage-collected.
+   */
+  releaseJob(jobId: string): void {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+    if (job.outputPath?.startsWith('blob:')) URL.revokeObjectURL(job.outputPath);
+    this.jobs.delete(jobId);
+  }
+
   // ============================================================
   // Export Pipeline
   // ============================================================
@@ -369,8 +381,10 @@ export class ExportEngine {
       this.notifyListeners(job);
       throw error;
     } finally {
-      this.encoder?.close();
-      this.audioEncoder?.close();
+      // WebCodecs spec: close() on an already-closed codec throws InvalidStateError;
+      // guard with state check (same pattern as webcodecs-pipeline.ts line 293).
+      if (this.encoder && this.encoder.state !== 'closed') this.encoder.close();
+      if (this.audioEncoder && this.audioEncoder.state !== 'closed') this.audioEncoder.close();
       this.encoder = null;
       this.audioEncoder = null;
     }

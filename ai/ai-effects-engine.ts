@@ -156,6 +156,8 @@ export class AIEffectsEngine {
   private bgMaskBuf:  Uint8Array = new Uint8Array(0);
   private morphBufA:  Uint8Array = new Uint8Array(0);
   private morphBufB:  Uint8Array = new Uint8Array(0);
+  // Reusable scratch buffer for boxBlur — resized only when face bounding box grows
+  private _blurTempBuf: Uint8ClampedArray = new Uint8ClampedArray(0);
 
   constructor() {
     this.canvas = new OffscreenCanvas(1920, 1080);
@@ -419,8 +421,12 @@ export class AIEffectsEngine {
     const width = frame instanceof VideoFrame ? frame.displayWidth : frame.width;
     const height = frame instanceof VideoFrame ? frame.displayHeight : frame.height;
 
-    this.canvas = new OffscreenCanvas(width, height);
-    this.ctx = this.canvas.getContext('2d')!;
+    // Reuse the shared canvas; recreate only when dimensions change.
+    // The constructor initialises it at 1920×1080 with willReadFrequently.
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas = new OffscreenCanvas(width, height);
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+    }
     this.ctx.drawImage(frame, 0, 0);
 
     for (const face of faces) {
@@ -441,7 +447,8 @@ export class AIEffectsEngine {
 
   private boxBlur(data: Uint8ClampedArray, width: number, height: number, radius: number): void {
     const r = Math.ceil(radius);
-    const temp = new Uint8ClampedArray(data.length);
+    if (this._blurTempBuf.length < data.length) this._blurTempBuf = new Uint8ClampedArray(data.length);
+    const temp = this._blurTempBuf;
 
     // Horizontal pass
     for (let y = 0; y < height; y++) {

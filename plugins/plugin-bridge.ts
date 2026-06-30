@@ -971,7 +971,6 @@ export type {
   PluginType,
   ParameterDescriptor,
   ParameterFlags,
-  PluginInstance,
   PluginPreset,
   PluginChain,
   ProcessBuffer

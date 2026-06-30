@@ -423,30 +423,40 @@ export type TransitionKind =
   | 'slide-left' | 'slide-right' | 'push-left' | 'push-right'
   | 'radial' | 'iris';
 
+// Module-level color constants avoid per-frame array literal allocation.
+const _BLACK: [number, number, number] = [0, 0, 0];
+const _WHITE: [number, number, number] = [255, 255, 255];
+
 /**
  * Resolve a named transition to a TransitionFn with an optional eased `t`.
+ *
+ * The returned function re-uses a single output buffer across calls (lazy-grow
+ * on dimension change), eliminating the per-frame `new Uint8ClampedArray` that
+ * would otherwise pressure the GC inside the render loop.
  *
  * @param kind  The transition kind.
  * @param ease  Optional easing applied to `t`. Default: linear.
  * @returns     A TransitionFn.
  */
 export function getTransition(kind: TransitionKind, ease: EaseFn = easeLinear): TransitionFn {
+  let outBuf: Uint8ClampedArray | undefined;
   return (a, b, w, h, t) => {
     const e = ease(clamp01(t));
     switch (kind) {
-      case 'cross-dissolve': return crossDissolve(a, b, w, h, e);
-      case 'dip-to-black':   return dipToColor(a, b, w, h, e, [0, 0, 0]);
-      case 'dip-to-white':   return dipToColor(a, b, w, h, e, [255, 255, 255]);
-      case 'wipe-left':      return wipe(a, b, w, h, e, 'left');
-      case 'wipe-right':     return wipe(a, b, w, h, e, 'right');
-      case 'wipe-up':        return wipe(a, b, w, h, e, 'up');
-      case 'wipe-down':      return wipe(a, b, w, h, e, 'down');
-      case 'slide-left':     return slide(a, b, w, h, e, 'left');
-      case 'slide-right':    return slide(a, b, w, h, e, 'right');
-      case 'push-left':      return push(a, b, w, h, e, 'left');
-      case 'push-right':     return push(a, b, w, h, e, 'right');
-      case 'radial':         return radialWipe(a, b, w, h, e);
-      case 'iris':           return irisWipe(a, b, w, h, e);
+      case 'cross-dissolve': outBuf = crossDissolve(a, b, w, h, e, outBuf); break;
+      case 'dip-to-black':   outBuf = dipToColor(a, b, w, h, e, _BLACK, outBuf); break;
+      case 'dip-to-white':   outBuf = dipToColor(a, b, w, h, e, _WHITE, outBuf); break;
+      case 'wipe-left':      outBuf = wipe(a, b, w, h, e, 'left',  0, outBuf); break;
+      case 'wipe-right':     outBuf = wipe(a, b, w, h, e, 'right', 0, outBuf); break;
+      case 'wipe-up':        outBuf = wipe(a, b, w, h, e, 'up',    0, outBuf); break;
+      case 'wipe-down':      outBuf = wipe(a, b, w, h, e, 'down',  0, outBuf); break;
+      case 'slide-left':     outBuf = slide(a, b, w, h, e, 'left',  outBuf); break;
+      case 'slide-right':    outBuf = slide(a, b, w, h, e, 'right', outBuf); break;
+      case 'push-left':      outBuf = push(a, b, w, h, e, 'left',  outBuf); break;
+      case 'push-right':     outBuf = push(a, b, w, h, e, 'right', outBuf); break;
+      case 'radial':         outBuf = radialWipe(a, b, w, h, e, outBuf); break;
+      case 'iris':           outBuf = irisWipe(a, b, w, h, e, 0, outBuf); break;
     }
+    return outBuf!;
   };
 }

@@ -152,6 +152,10 @@ export class AIEffectsEngine {
   // Reusable buffers for applyAlphaFeather — resized only when frame dimensions grow
   private alphaChannelBuf: Float32Array = new Float32Array(0);
   private alphaBlurredBuf: Float32Array = new Float32Array(0);
+  // Reusable buffers for background removal morphology — resized only when frame dimensions grow
+  private bgMaskBuf:  Uint8Array = new Uint8Array(0);
+  private morphBufA:  Uint8Array = new Uint8Array(0);
+  private morphBufB:  Uint8Array = new Uint8Array(0);
 
   constructor() {
     this.canvas = new OffscreenCanvas(1920, 1080);
@@ -845,7 +849,9 @@ export class AIEffectsEngine {
     bg: { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number },
     threshold: number
   ): Uint8Array {
-    const mask = new Uint8Array(width * height);
+    const n = width * height;
+    if (this.bgMaskBuf.length < n) this.bgMaskBuf = new Uint8Array(n);
+    const mask = this.bgMaskBuf;
     const tSq = (threshold * 10) ** 2;
     for (let i = 0; i < width * height; i++) {
       const dr = (data[i * 4] - bg.r) ** 2 / bg.vrR;
@@ -858,12 +864,21 @@ export class AIEffectsEngine {
 
   /** 1D-separable morphological closing (dilate then erode) on a binary mask. */
   private morphClose1D(mask: Uint8Array, width: number, height: number, r: number): Uint8Array {
-    const d = this.dilate1D(mask, width, height, r);
-    return this.erode1D(d, width, height, r);
+    const n = mask.length;
+    if (this.morphBufA.length < n) this.morphBufA = new Uint8Array(n);
+    if (this.morphBufB.length < n) this.morphBufB = new Uint8Array(n);
+    // dilate: mask → (tmp=A, dst=B)
+    this.dilate1D(mask, width, height, r, this.morphBufA, this.morphBufB);
+    // erode: B → (tmp=A, dst=B); H-pass reads B while V-pass writes B — safe because
+    // H-pass fully consumes B into A before V-pass begins writing to B.
+    this.erode1D(this.morphBufB, width, height, r, this.morphBufA, this.morphBufB);
+    return this.morphBufB;
   }
 
-  private dilate1D(src: Uint8Array, width: number, height: number, r: number): Uint8Array {
-    const tmp = new Uint8Array(src.length);
+  private dilate1D(
+    src: Uint8Array, width: number, height: number, r: number,
+    tmp: Uint8Array, dst: Uint8Array,
+  ): void {
     // Horizontal
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -876,7 +891,6 @@ export class AIEffectsEngine {
       }
     }
     // Vertical
-    const dst = new Uint8Array(src.length);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let v = 0;
@@ -887,11 +901,12 @@ export class AIEffectsEngine {
         dst[y * width + x] = v;
       }
     }
-    return dst;
   }
 
-  private erode1D(src: Uint8Array, width: number, height: number, r: number): Uint8Array {
-    const tmp = new Uint8Array(src.length);
+  private erode1D(
+    src: Uint8Array, width: number, height: number, r: number,
+    tmp: Uint8Array, dst: Uint8Array,
+  ): void {
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let v = 1;
@@ -902,7 +917,6 @@ export class AIEffectsEngine {
         tmp[y * width + x] = v;
       }
     }
-    const dst = new Uint8Array(src.length);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let v = 1;
@@ -913,7 +927,6 @@ export class AIEffectsEngine {
         dst[y * width + x] = v;
       }
     }
-    return dst;
   }
 
   // ============================================================

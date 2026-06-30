@@ -411,6 +411,12 @@ export class HistogramScope {
   private ctx: OffscreenCanvasRenderingContext2D;
   private config: ScopeConfig;
   private showRGB = true;
+  // Pre-allocated histogram accumulators — reused every analyze() call to avoid
+  // 4×Uint32Array(256) GC churn at 60fps (same pattern as audio meter buffers).
+  private readonly histR = new Uint32Array(256);
+  private readonly histG = new Uint32Array(256);
+  private readonly histB = new Uint32Array(256);
+  private readonly histY = new Uint32Array(256);
 
   constructor(config: Partial<ScopeConfig> = {}) {
     this.config = {
@@ -454,31 +460,35 @@ export class HistogramScope {
     }
     
     const { data } = imageData;
-    
-    // Calculate histograms
-    const histR = new Uint32Array(256);
-    const histG = new Uint32Array(256);
-    const histB = new Uint32Array(256);
-    const histY = new Uint32Array(256);
-    
+
+    // Reuse pre-allocated accumulators — fill(0) is O(256), far cheaper than
+    // allocating four new Uint32Array(256) instances every frame at 60fps.
+    const { histR, histG, histB, histY } = this;
+    histR.fill(0); histG.fill(0); histB.fill(0); histY.fill(0);
+
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
-      const y = Math.floor(0.2126 * r + 0.7152 * g + 0.0722 * b);
-      
+      // Integer BT.709 luma approximation: avoids FP per pixel.
+      // Coefficients: 54/256≈0.211, 183/256≈0.715, 19/256≈0.074, sum=256.
+      const y = (r * 54 + g * 183 + b * 19) >> 8;
       histR[r]++;
       histG[g]++;
       histB[b]++;
       histY[y]++;
     }
-    
-    // Find max for normalization
-    const maxR = Math.max(...histR);
-    const maxG = Math.max(...histG);
-    const maxB = Math.max(...histB);
-    const maxY = Math.max(...histY);
-    const maxAll = Math.max(maxR, maxG, maxB, maxY);
+
+    // Manual max loop — avoids spread operator on TypedArray which creates a
+    // temporary Array iterator and can trigger GC on every frame.
+    let maxAll = 0, maxY = 0;
+    for (let i = 0; i < 256; i++) {
+      if (histR[i] > maxAll) maxAll = histR[i];
+      if (histG[i] > maxAll) maxAll = histG[i];
+      if (histB[i] > maxAll) maxAll = histB[i];
+      if (histY[i] > maxAll) maxAll = histY[i];
+      if (histY[i] > maxY)   maxY   = histY[i];
+    }
     
     // Draw graticule
     if (this.config.showGraticule) {
@@ -625,38 +635,48 @@ export class HistogramScope {
     let shadowClip = 0, highlightClip = 0;
     let skinToneCount = 0;
     
+    // Precomputed angular sector boundary for skin tone [15°, 35°] in Cb/Cr space.
+    // Cross-product sector test replaces per-pixel Math.atan2 (expensive trig call).
+    // A point (u,v) is in [15°,35°] when cross(dir15,(u,v))>=0 AND cross(dir35,(u,v))<=0.
+    // cross((ax,ay),(bx,by)) = ax*by - ay*bx
+    // dir15 = (cos15°, sin15°) = (0.9659, 0.2588)  →  0.9659*v - 0.2588*u >= 0
+    // dir35 = (cos35°, sin35°) = (0.8192, 0.5736)  →  0.8192*v - 0.5736*u <= 0
+    const COS15 = 0.9659, SIN15 = 0.2588;
+    const COS35 = 0.8192, SIN35 = 0.5736;
+
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
-      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      
-      minR = Math.min(minR, r);
-      maxR = Math.max(maxR, r);
+      // Integer BT.709 luma: (r*54 + g*183 + b*19) >> 8, same approx as analyze().
+      const y = (r * 54 + g * 183 + b * 19) >> 8;
+
+      if (r < minR) minR = r;
+      if (r > maxR) maxR = r;
       sumR += r;
-      
-      minG = Math.min(minG, g);
-      maxG = Math.max(maxG, g);
+
+      if (g < minG) minG = g;
+      if (g > maxG) maxG = g;
       sumG += g;
-      
-      minB = Math.min(minB, b);
-      maxB = Math.max(maxB, b);
+
+      if (b < minB) minB = b;
+      if (b > maxB) maxB = b;
       sumB += b;
-      
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
+
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
       sumY += y;
-      
-      // Clipping
+
       if (r <= 5 || g <= 5 || b <= 5) shadowClip++;
       if (r >= 250 || g >= 250 || b >= 250) highlightClip++;
-      
-      // Skin tone detection (rough approximation)
-      const u = -0.1146 * r - 0.3854 * g + 0.5 * b;
-      const v = 0.5 * r - 0.4542 * g - 0.0458 * b;
-      const angle = Math.atan2(v, u) * (180 / Math.PI);
-      if (angle >= 15 && angle <= 35 && y > 50 && y < 200) {
-        skinToneCount++;
+
+      // Skin tone: angular sector [15°,35°] in Cb/Cr, luma guard [50,200].
+      if (y > 50 && y < 200) {
+        const u = -0.1146 * r - 0.3854 * g + 0.5   * b;
+        const v =  0.5    * r - 0.4542 * g - 0.0458 * b;
+        if (COS15 * v - SIN15 * u >= 0 && COS35 * v - SIN35 * u <= 0) {
+          skinToneCount++;
+        }
       }
     }
     

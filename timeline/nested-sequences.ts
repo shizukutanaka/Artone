@@ -559,8 +559,9 @@ export class NestedSequenceManager {
     if (!cached || cached.w !== sw || cached.h !== sh) {
       const canvas = new OffscreenCanvas(sw, sh);
       // willReadFrequently: the composited frame is read back via getImageData.
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-      cached = { canvas, ctx, w: sw, h: sh };
+      const newCtx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!newCtx) return null; // context acquisition failed (exhausted limit, etc.)
+      cached = { canvas, ctx: newCtx, w: sw, h: sh };
       this._renderCanvases.set(sequenceId, cached);
     }
     const { canvas, ctx } = cached;

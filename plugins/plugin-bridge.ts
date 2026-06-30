@@ -132,6 +132,7 @@ export class PluginBridge {
   async scanPlugins(directory: string): Promise<PluginDescriptor[]> {
     // In browser: fetch plugin index from server
     const response = await fetch(`${directory}/index.json`);
+    if (!response.ok) throw new Error(`Failed to fetch plugin index: ${response.status} ${response.statusText}`);
     const plugins: PluginDescriptor[] = await response.json();
     
     for (const plugin of plugins) {
@@ -161,6 +162,7 @@ export class PluginBridge {
     
     // Fetch WASM
     const response = await fetch(descriptor.wasmUrl);
+    if (!response.ok) throw new Error(`Failed to fetch WASM for plugin ${pluginId}: ${response.status} ${response.statusText}`);
     const wasmBytes = await response.arrayBuffer();
     const wasmModule = await WebAssembly.compile(wasmBytes);
     
@@ -301,6 +303,7 @@ export class PluginBridge {
     const presetsUrl = instance.descriptor.wasmUrl.replace('.wasm', '.presets.json');
     try {
       const response = await fetch(presetsUrl);
+      if (!response.ok) return; // 404 expected when plugin has no presets
       const presets: PluginPreset[] = await response.json();
       instance.presets = presets;
     } catch {

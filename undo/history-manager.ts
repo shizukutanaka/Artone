@@ -725,15 +725,15 @@ export class HistoryManager {
     this.commands.push(command);
     this.position++;
     
-    // 最大数制限
+    // 最大数制限 — splice() trims in-place (O(n) shift) vs slice() (O(n) alloc).
     if (this.commands.length > this.config.maxCommands) {
       const excess = this.commands.length - this.config.maxCommands;
-      this.commands = this.commands.slice(excess);
+      this.commands.splice(0, excess);
       this.position -= excess;
     }
-    
+
     this.notifyListeners();
-    
+
     if (this.config.autoPersist) {
       this.saveToDB();
     }
@@ -803,7 +803,7 @@ export class HistoryManager {
     // allowing the history to grow beyond config.maxCommands when groups were used.
     if (this.commands.length > this.config.maxCommands) {
       const excess = this.commands.length - this.config.maxCommands;
-      this.commands = this.commands.slice(excess);
+      this.commands.splice(0, excess);
       this.position -= excess;
     }
 

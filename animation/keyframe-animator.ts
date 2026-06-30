@@ -179,24 +179,33 @@ export function findPrevKeyframeIndex(keyframes: Keyframe[], time: number): numb
 // Bezier Curve
 // ============================================================
 
+// Module-level cache: the same 4 control points produce the same closure, so
+// memoize to avoid re-creating the Newton-Raphson closure on every interpolate()
+// call (called 60×/s per animated property during playback).
+const _bezierCache = new Map<string, (t: number) => number>();
+
 function cubicBezier(p1x: number, p1y: number, p2x: number, p2y: number): (t: number) => number {
+  const key = `${p1x},${p1y},${p2x},${p2y}`;
+  const cached = _bezierCache.get(key);
+  if (cached) return cached;
+
   // Newton-Raphson iteration to find t for given x
   const cx = 3 * p1x;
   const bx = 3 * (p2x - p1x) - cx;
   const ax = 1 - cx - bx;
-  
+
   const cy = 3 * p1y;
   const by = 3 * (p2y - p1y) - cy;
   const ay = 1 - cy - by;
-  
+
   function sampleCurveX(t: number): number {
     return ((ax * t + bx) * t + cx) * t;
   }
-  
+
   function sampleCurveY(t: number): number {
     return ((ay * t + by) * t + cy) * t;
   }
-  
+
   function solveCurveX(x: number): number {
     let t = x;
     for (let i = 0; i < 8; i++) {
@@ -208,8 +217,10 @@ function cubicBezier(p1x: number, p1y: number, p2x: number, p2y: number): (t: nu
     }
     return t;
   }
-  
-  return (x: number): number => sampleCurveY(solveCurveX(x));
+
+  const fn = (x: number): number => sampleCurveY(solveCurveX(x));
+  _bezierCache.set(key, fn);
+  return fn;
 }
 
 // ============================================================

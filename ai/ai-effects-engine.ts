@@ -343,7 +343,8 @@ export class AIEffectsEngine {
   }
 
   private applyAlphaFeather(data: Uint8ClampedArray, width: number, height: number, radius: number): void {
-    const r = Math.ceil(radius);
+    if (radius <= 0) return;
+    const r = Math.max(1, Math.ceil(radius));
     const n = width * height;
 
     // Reuse class-level buffers; reallocate only when frame size grows
@@ -375,7 +376,7 @@ export class AIEffectsEngine {
           }
         }
         
-        blurred[y * width + x] = sum / count;
+        blurred[y * width + x] = count > 0 ? sum / count : 0;
       }
     }
 
@@ -453,7 +454,7 @@ export class AIEffectsEngine {
   }
 
   private boxBlur(data: Uint8ClampedArray, width: number, height: number, radius: number): void {
-    const r = Math.ceil(radius);
+    const r = Math.max(0, Math.ceil(radius));
     if (this._blurTempBuf.length < data.length) this._blurTempBuf = new Uint8ClampedArray(data.length);
     const temp = this._blurTempBuf;
 
@@ -472,9 +473,9 @@ export class AIEffectsEngine {
         }
         
         const idx = (y * width + x) * 4;
-        temp[idx] = rSum / count;
-        temp[idx + 1] = gSum / count;
-        temp[idx + 2] = bSum / count;
+        temp[idx] = count > 0 ? rSum / count : 0;
+        temp[idx + 1] = count > 0 ? gSum / count : 0;
+        temp[idx + 2] = count > 0 ? bSum / count : 0;
         temp[idx + 3] = data[idx + 3];
       }
     }
@@ -494,9 +495,9 @@ export class AIEffectsEngine {
         }
         
         const idx = (y * width + x) * 4;
-        data[idx] = rSum / count;
-        data[idx + 1] = gSum / count;
-        data[idx + 2] = bSum / count;
+        data[idx] = count > 0 ? rSum / count : 0;
+        data[idx + 1] = count > 0 ? gSum / count : 0;
+        data[idx + 2] = count > 0 ? bSum / count : 0;
       }
     }
   }

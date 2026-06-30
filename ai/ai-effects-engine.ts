@@ -158,6 +158,9 @@ export class AIEffectsEngine {
   private morphBufB:  Uint8Array = new Uint8Array(0);
   // Reusable scratch buffer for boxBlur — resized only when face bounding box grows
   private _blurTempBuf: Uint8ClampedArray = new Uint8ClampedArray(0);
+  // Cached foreground compositing canvas for removeBackground() — avoids per-frame alloc
+  private _fgCanvas: OffscreenCanvas | null = null;
+  private _fgCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   constructor() {
     this.canvas = new OffscreenCanvas(1920, 1080);
@@ -292,7 +295,7 @@ export class AIEffectsEngine {
     // Ensure canvas size
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas = new OffscreenCanvas(width, height);
-      this.ctx = this.canvas.getContext('2d')!;
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
     }
 
     // Draw original
@@ -328,11 +331,13 @@ export class AIEffectsEngine {
       this.ctx.clearRect(0, 0, width, height);
     }
 
-    // Draw foreground with alpha
-    const tempCanvas = new OffscreenCanvas(width, height);
-    const tempCtx = tempCanvas.getContext('2d')!;
-    tempCtx.putImageData(imageData, 0, 0);
-    this.ctx.drawImage(tempCanvas, 0, 0);
+    // Draw foreground with alpha — lazy-grow cached canvas avoids per-frame alloc
+    if (!this._fgCanvas || this._fgCanvas.width !== width || this._fgCanvas.height !== height) {
+      this._fgCanvas = new OffscreenCanvas(width, height);
+      this._fgCtx = this._fgCanvas.getContext('2d')!;
+    }
+    this._fgCtx!.putImageData(imageData, 0, 0);
+    this.ctx.drawImage(this._fgCanvas, 0, 0);
 
     return createImageBitmap(this.canvas);
   }
@@ -390,8 +395,10 @@ export class AIEffectsEngine {
     const width = frame instanceof VideoFrame ? frame.displayWidth : frame.width;
     const height = frame instanceof VideoFrame ? frame.displayHeight : frame.height;
 
-    this.canvas = new OffscreenCanvas(width, height);
-    this.ctx = this.canvas.getContext('2d')!;
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas = new OffscreenCanvas(width, height);
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+    }
     this.ctx.drawImage(frame, 0, 0);
 
     const imageData = this.ctx.getImageData(0, 0, width, height);
@@ -683,8 +690,10 @@ export class AIEffectsEngine {
     const width = frame instanceof VideoFrame ? frame.displayWidth : frame.width;
     const height = frame instanceof VideoFrame ? frame.displayHeight : frame.height;
 
-    this.canvas = new OffscreenCanvas(width, height);
-    this.ctx = this.canvas.getContext('2d')!;
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas = new OffscreenCanvas(width, height);
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+    }
     this.ctx.drawImage(frame, 0, 0);
 
     const imageData = this.ctx.getImageData(0, 0, width, height);

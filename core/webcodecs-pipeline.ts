@@ -797,21 +797,25 @@ export const FrameProcessors = {
 
   // Rotate
   rotate: (degrees: number) => {
+    // degrees is fixed by the factory arg, so trig constants are computed once.
+    const radians = degrees * Math.PI / 180;
+    const cos = Math.abs(Math.cos(radians));
+    const sin = Math.abs(Math.sin(radians));
+    // Lazy-grow canvas: output dimensions depend on input frame size. For a fixed
+    // source resolution (the common case) the canvas is created once and reused.
+    let canvas: OffscreenCanvas | null = null;
+    let ctx: OffscreenCanvasRenderingContext2D | null = null;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const radians = degrees * Math.PI / 180;
-      const cos = Math.abs(Math.cos(radians));
-      const sin = Math.abs(Math.sin(radians));
-      
-      const newWidth = frame.displayWidth * cos + frame.displayHeight * sin;
-      const newHeight = frame.displayWidth * sin + frame.displayHeight * cos;
-      
-      const canvas = new OffscreenCanvas(newWidth, newHeight);
-      const ctx = canvas.getContext('2d')!;
-      
-      ctx.translate(newWidth / 2, newHeight / 2);
-      ctx.rotate(radians);
-      ctx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
-      
+      const newWidth  = frame.displayWidth  * cos + frame.displayHeight * sin;
+      const newHeight = frame.displayWidth  * sin + frame.displayHeight * cos;
+      if (!canvas || canvas.width !== newWidth || canvas.height !== newHeight) {
+        canvas = new OffscreenCanvas(newWidth, newHeight);
+        ctx = canvas.getContext('2d')!;
+      }
+      ctx!.setTransform(1, 0, 0, 1, 0, 0); // reset before each frame
+      ctx!.translate(newWidth / 2, newHeight / 2);
+      ctx!.rotate(radians);
+      ctx!.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },

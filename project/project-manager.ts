@@ -9,6 +9,9 @@
  * 
  * @version 1.0.0
  */
+import { createLogger } from '../app/logger';
+
+const log = createLogger('ProjectManager');
 
 // ============================================================
 // Types
@@ -555,10 +558,9 @@ export class ProjectManager {
     this.stopAutosave();
     
     // Autosave every 30 seconds
-    this.autosaveInterval = window.setInterval(async () => {
+    this.autosaveInterval = window.setInterval(() => {
       if (this.isDirty && this.currentProject) {
-        await this.saveProject();
-        // Autosave complete — silent by design
+        this.saveProject().catch(e => log.error('Autosave failed:', e));
       }
     }, 30000);
   }

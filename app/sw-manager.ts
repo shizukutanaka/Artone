@@ -147,9 +147,13 @@ export class ServiceWorkerManager {
     return new Promise((resolve) => {
       const ch = new MessageChannel();
       let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       const settle = (value: T | null): void => {
         if (settled) return;
         settled = true;
+        // Cancel the timeout so the closure is released immediately instead of
+        // being kept alive by the event loop for the remaining 5-second window.
+        if (timeoutId !== null) clearTimeout(timeoutId);
         // Close port1 to release the message channel; the transfer of port2 to
         // the SW means it gets closed on the other side when the SW drops it.
         ch.port1.close();
@@ -159,7 +163,7 @@ export class ServiceWorkerManager {
       navigator.serviceWorker.controller?.postMessage(msg, [ch.port2]);
       // Timeout: resolve null and close port so the channel isn't leaked when
       // the SW never responds (e.g. SW not running, wrong message type).
-      setTimeout(() => settle(null), 5000);
+      timeoutId = setTimeout(() => settle(null), 5000);
     });
   }
 }

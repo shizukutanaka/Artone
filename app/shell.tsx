@@ -260,8 +260,13 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     return new Promise((resolve) => {
       const el = document.createElement(file.type.startsWith('audio') ? 'audio' : 'video');
       el.preload = 'metadata';
-      el.onloadedmetadata = () => { resolve(el.duration || 30); };
-      el.onerror = () => resolve(30);
+      const cleanup = () => {
+        el.onloadedmetadata = null;
+        el.onerror = null;
+        el.src = ''; // stop any in-progress buffering and drop the src reference
+      };
+      el.onloadedmetadata = () => { const dur = el.duration || 30; cleanup(); resolve(dur); };
+      el.onerror = () => { cleanup(); resolve(30); };
       el.src = objectUrl;
     });
   }, []);

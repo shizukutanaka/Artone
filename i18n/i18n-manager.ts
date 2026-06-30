@@ -15,6 +15,16 @@
 
 export type LocaleCode = string; // BCP 47 (例: 'ja', 'en-US', 'zh-Hans')
 
+// Memoised key splits: lookup() is called on every t() call (every UI string render).
+// Translation keys are a small, fixed set — the cache reaches 100 % hit rate quickly
+// and eliminates the per-render `key.split('.')` allocation entirely.
+const _keySplitCache = new Map<string, string[]>();
+function splitKey(key: string): string[] {
+  let parts = _keySplitCache.get(key);
+  if (!parts) { parts = key.split('.'); _keySplitCache.set(key, parts); }
+  return parts;
+}
+
 export interface TranslationMap {
   [key: string]: string | TranslationMap;
 }
@@ -242,7 +252,7 @@ export class I18nManager {
   private lookup(locale: LocaleCode, key: string): string | undefined {
     const map = this.translations.get(locale);
     if (!map) return undefined;
-    const parts = key.split('.');
+    const parts = splitKey(key);
     let current: string | TranslationMap = map;
     for (const part of parts) {
       if (typeof current !== 'object' || current === null) return undefined;

@@ -730,6 +730,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       ctx.shadowBlur = 0;
       ctx.fillText(lines[i], x, lineY);
     }
+
+    // Ensure all shadow state is cleared so subsequent canvas draws are unaffected.
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
   }
 
   private wrapText(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, text: string, maxWidth: number): string[] {

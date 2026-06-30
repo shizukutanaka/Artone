@@ -96,12 +96,19 @@ export const DEFAULT_MAX_ENCODE_QUEUE = 8;
 export async function awaitEncoderQueueBelow(
   encoder: EventTarget & { encodeQueueSize: number },
   maxQueue: number = DEFAULT_MAX_ENCODE_QUEUE,
+  timeoutMs = 10_000,
 ): Promise<void> {
   if (encoder.encodeQueueSize < maxQueue) return;
   // 'dequeue' は queue が減るたびに発火するため、once 待ちで十分。
   // 1回の dequeue で必ず閾値未満になるとは限らないが、loop 側が次回必ず再チェックする。
-  await new Promise<void>((resolve) => {
-    encoder.addEventListener('dequeue', () => resolve(), { once: true });
+  // Timeout guard: if the encoder closes/errors without firing 'dequeue', the
+  // Promise would hang indefinitely without this deadline.
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`awaitEncoderQueueBelow: no dequeue within ${timeoutMs}ms — encoder may have stalled`)),
+      timeoutMs,
+    );
+    encoder.addEventListener('dequeue', () => { clearTimeout(timer); resolve(); }, { once: true });
   });
 }
 

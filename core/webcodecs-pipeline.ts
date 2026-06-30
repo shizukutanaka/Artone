@@ -572,10 +572,19 @@ export class VideoPipeline {
       frameStream = frameStream.pipeThrough(new FrameProcessorStream(processor));
     }
 
-    await frameStream
-      .pipeThrough(frameAdapter)
-      .pipeThrough(encoder)
-      .pipeTo(outputCollector);
+    try {
+      await frameStream
+        .pipeThrough(frameAdapter)
+        .pipeThrough(encoder)
+        .pipeTo(outputCollector);
+    } finally {
+      // flush() closes codecs on clean completion; close here guards error paths
+      // where flush() is never called (stream abort propagation skips it).
+      const dec = decoder.getDecoder();
+      const enc = encoder.getEncoder();
+      if (dec && dec.state !== 'closed') dec.close();
+      if (enc && enc.state !== 'closed') enc.close();
+    }
 
     return outputChunks;
   }

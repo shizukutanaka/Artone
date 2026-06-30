@@ -390,7 +390,9 @@ export class HDREngine {
       const CP = -C2 / P;
 
       const w0 = 1.0 - Math.smoothstep(0.0, m, x);
-      const w2 = Math.smoothstep(m + l0, m + l0, x);
+      // smoothstep(S0, S0, x) is degenerate (edge0 === edge1 → 0/0 = NaN at boundary).
+      // The Uchimura formula intends a unit step at S0: 0 below, 1 above.
+      const w2 = x >= m + l0 ? 1.0 : 0.0;
       const w1 = 1.0 - w0 - w2;
 
       const T = m * Math.pow(x / m, c) + b;

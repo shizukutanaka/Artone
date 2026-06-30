@@ -670,7 +670,9 @@ export class ColorGradingEngine {
       this._cpuCanvas = new OffscreenCanvas(w, h);
       // willReadFrequently: this context exists to read pixels back via
       // getImageData for CPU grading; avoids per-call GPU→CPU readback.
-      this._cpuCtx = this._cpuCanvas.getContext('2d', { willReadFrequently: true })!;
+      const newCtx = this._cpuCanvas.getContext('2d', { willReadFrequently: true });
+      if (!newCtx) throw new Error('ColorGradingEngine: failed to acquire 2D context for CPU grading');
+      this._cpuCtx = newCtx;;
     }
     const canvas = this._cpuCanvas;
     const ctx = this._cpuCtx!;

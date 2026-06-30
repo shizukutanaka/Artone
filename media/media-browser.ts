@@ -340,10 +340,11 @@ export class MediaBrowser {
   }
 
   private async generateAudioWaveform(url: string): Promise<string> {
+    let audioContext: AudioContext | null = null;
     try {
       const response = await fetch(url);
       const arrayBuffer = await response.arrayBuffer();
-      const audioContext = new AudioContext();
+      audioContext = new AudioContext();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
       const data = audioBuffer.getChannelData(0);
@@ -375,10 +376,12 @@ export class MediaBrowser {
         ctx.fillRect(x, y, canvas.width / samples - 1, barHeight);
       }
 
-      audioContext.close();
       return canvas.toDataURL('image/png');
     } catch {
       return ''; // Thumbnail generation failed — return empty string
+    } finally {
+      // Close in finally so the OS audio context is released even if decodeAudioData throws.
+      audioContext?.close();
     }
   }
 

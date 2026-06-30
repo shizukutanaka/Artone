@@ -304,7 +304,8 @@ export class FCPXMLExporter {
     xml.push(`          <spine>`);
 
     for (const track of tl.videoTracks) {
-      for (const clip of track.clips.sort((a, b) => a.startFrame - b.startFrame)) {
+      // Spread to avoid mutating the original clips array as a side effect of export.
+      for (const clip of [...track.clips].sort((a, b) => a.startFrame - b.startFrame)) {
         const refId = mediaMap.get(clip.mediaUrl) ?? 'r2';
         const offset = `${clip.startFrame}/${ratio}s`;
         const start = `${clip.sourceInFrame}/${ratio}s`;

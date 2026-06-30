@@ -250,8 +250,14 @@ export function gainComputeCompressor(
 // Utilities
 // ============================================================
 
+// Precomputed multiplier for dB→linear conversion: ln(10)/20.
+// Math.exp is ~5-10× faster than Math.pow in V8 (native exp() fast path vs
+// general pow()), which matters here because dbToLin() is called per sample
+// inside applyCompressor()'s tight loop.
+const _DB_TO_LIN_MUL = Math.LN10 / 20;
+
 export function dbToLin(db: number): number {
-  return Math.pow(10, db / 20);
+  return Math.exp(db * _DB_TO_LIN_MUL);
 }
 
 export function linToDb(lin: number): number {

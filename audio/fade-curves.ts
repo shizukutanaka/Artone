@@ -53,6 +53,11 @@ export interface CrossfadeOptions {
 
 /** Steepness constant for the log/exp curves (higher = more pronounced). */
 const LOG_CURVE_BASE = 50;
+// Precomputed at module load — avoids repeated Math.log / division inside the
+// per-sample switch branch of fadeInGain / fadeOutGain.
+const LOG_CURVE_LN        = Math.log(LOG_CURVE_BASE);       // ln(50) ≈ 3.912
+const LOG_CURVE_INV_DENOM = 1 / (1 - 1 / LOG_CURVE_BASE);  // 1/(1−1/50) = 50/49
+const EXP_CURVE_INV_DENOM = 1 / (LOG_CURVE_BASE - 1);      // 1/49
 
 /**
  * Evaluate a fade-IN gain (0 → 1) for a given shape at progress p ∈ [0, 1].
@@ -71,11 +76,12 @@ export function fadeInGain(shape: FadeShape, p: number): number {
       // sin law: g(0)=0, g(1)=1, g(0.5)=√0.5 ≈ 0.707 (−3 dB)
       return Math.sin(t * Math.PI * 0.5);
     case 'logarithmic':
-      // Fast rise then plateau: 1 - base^(-t) normalized
-      return (1 - Math.pow(LOG_CURVE_BASE, -t)) / (1 - 1 / LOG_CURVE_BASE);
+      // Fast rise then plateau: (1 − 50^(−t)) / (1 − 1/50).
+      // Math.exp is faster than Math.pow in V8 (native exp() fast path).
+      return (1 - Math.exp(-t * LOG_CURVE_LN)) * LOG_CURVE_INV_DENOM;
     case 'exponential':
-      // Slow rise then fast: (base^t - 1) normalized
-      return (Math.pow(LOG_CURVE_BASE, t) - 1) / (LOG_CURVE_BASE - 1);
+      // Slow rise then fast: (50^t − 1) / 49.
+      return (Math.exp(t * LOG_CURVE_LN) - 1) * EXP_CURVE_INV_DENOM;
     case 's-curve':
       // Raised cosine: smooth ease-in-out
       return 0.5 - 0.5 * Math.cos(t * Math.PI);

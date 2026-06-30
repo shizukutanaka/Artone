@@ -387,8 +387,16 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
   // for periodic Hann with 50 % overlap, ∑_k hann[n−k·hop] = 1 exactly).
   const outAccum = new Float32Array(N);
 
-  // Samples that are ready to be emitted (fully accumulated)
-  const ready: number[] = [];
+  // Pre-allocated analysis frame — reused every hop to avoid per-hop Float32Array
+  // allocation inside the process() while-loop.
+  const frame = new Float32Array(N);
+
+  // Ready-output buffer: pre-allocated Float32Array replaces the number[] + splice()
+  // pattern that created one number[] and one Float32Array per process() call.
+  // 64 hops × hop samples = conservative max before a single process() would overflow;
+  // typical input blocks are ≪ this.
+  const readyBuf = new Float32Array(hop * 64);
+  let readyLen = 0;
 
   function processFrame(frame: Float32Array): void {
     const spec = fft(frame);
@@ -416,7 +424,7 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
     for (let i = 0; i < N; i++) outAccum[i] += recon[i];
 
     // Emit the first `hop` samples (they will not be updated further)
-    for (let i = 0; i < hop; i++) ready.push(outAccum[i]);
+    for (let i = 0; i < hop; i++) readyBuf[readyLen++] = outAccum[i];
 
     // Shift accumulator by hop
     for (let i = 0; i < N - hop; i++) outAccum[i] = outAccum[i + hop];
@@ -435,9 +443,8 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
     ringBuf.set(input, ringLen);
     ringLen += input.length;
 
-    // Process complete frames
+    // Process complete frames — reuse pre-allocated `frame` to avoid per-hop alloc
     while (ringLen >= N) {
-      const frame = new Float32Array(N);
       for (let i = 0; i < N; i++) frame[i] = ringBuf[i] * hann[i];
       processFrame(frame);
       // Shift ring buffer by hop
@@ -445,7 +452,9 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
       ringLen -= hop;
     }
 
-    const out = new Float32Array(ready.splice(0, ready.length));
+    // Slice the ready buffer: one allocation (the output the caller owns).
+    const out = readyBuf.slice(0, readyLen);
+    readyLen = 0;
     return out;
   }
 
@@ -456,14 +465,15 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
 
   function flush(): Float32Array {
     if (ringLen > 0) {
-      // Pad with zeros to complete the last frame
-      const padded = new Float32Array(N);
-      padded.set(ringBuf.subarray(0, ringLen));
-      for (let i = 0; i < N; i++) padded[i] *= hann[i];
-      processFrame(padded);
+      // Reuse the pre-allocated `frame` buffer — zero-pad tail, apply window.
+      frame.fill(0);
+      frame.set(ringBuf.subarray(0, ringLen));
+      for (let i = 0; i < N; i++) frame[i] *= hann[i];
+      processFrame(frame);
       ringLen = 0;
     }
-    const out = new Float32Array(ready.splice(0, ready.length));
+    const out = readyBuf.slice(0, readyLen);
+    readyLen = 0;
     return out;
   }
 
@@ -475,7 +485,8 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
     ringBuf    = new Float32Array(N * 2);
     ringLen    = 0;
     outAccum.fill(0);
-    ready.length = 0;
+    frame.fill(0);
+    readyLen = 0;
   }
 
   return { process, setNoiseProfile, flush, reset };

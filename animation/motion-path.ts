@@ -178,7 +178,9 @@ export function bezierSecondDerivative(seg: BezierSegment, t: number): Vec2 {
 export function bezierCurvature(seg: BezierSegment, t: number): number {
   const d1 = bezierDerivative(seg, t);
   const d2 = bezierSecondDerivative(seg, t);
-  const denom = Math.pow(d1.x * d1.x + d1.y * d1.y, 1.5);
+  // x^1.5 = x * sqrt(x) — avoids the general Math.pow path
+  const mag2 = d1.x * d1.x + d1.y * d1.y;
+  const denom = mag2 * Math.sqrt(mag2);
   return denom < 1e-20 ? 0 : vecCross(d1, d2) / denom;
 }
 

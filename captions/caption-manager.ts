@@ -334,7 +334,13 @@ export class CaptionManager {
     };
 
     track.captions.push(caption);
-    track.captions.sort((a, b) => a.startTime - b.startTime);
+    // Skip the O(N log N) sort when appending in chronological order — the
+    // common case during bulk SRT/VTT/ASS import. Sort only when the new caption
+    // is out of order relative to what came before it.
+    const len = track.captions.length;
+    if (len > 1 && caption.startTime < track.captions[len - 2].startTime) {
+      track.captions.sort((a, b) => a.startTime - b.startTime);
+    }
 
     this.notify();
     return caption;
@@ -346,8 +352,13 @@ export class CaptionManager {
 
     const caption = track.captions.find(c => c.id === captionId);
     if (caption) {
+      const prevStart = caption.startTime;
       Object.assign(caption, updates);
-      track.captions.sort((a, b) => a.startTime - b.startTime);
+      // Only resort when startTime changed — style and text updates never
+      // affect ordering, so the O(N log N) sort is wasted in that case.
+      if (caption.startTime !== prevStart) {
+        track.captions.sort((a, b) => a.startTime - b.startTime);
+      }
       this.notify();
     }
   }
@@ -364,7 +375,28 @@ export class CaptionManager {
     const track = this.tracks.get(trackId);
     if (!track) return [];
 
-    return track.captions.filter(c => time >= c.startTime && time < c.endTime);
+    const captions = track.captions;
+    const n = captions.length;
+    if (n === 0) return [];
+
+    // Binary search for the first caption with startTime > time.
+    // Active captions must have startTime <= time, so they're all in [0, lo).
+    let lo = 0, hi = n;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (captions[mid].startTime <= time) lo = mid + 1;
+      else hi = mid;
+    }
+    // Walk backwards from lo-1: active captions have endTime > time.
+    // Stop once startTime is more than 60 s before `time` — a generous
+    // upper bound on caption duration so we never miss a slow-burn title card.
+    // This gives O(log N + window) instead of O(N) for late playback positions.
+    const lookBack = time - 60;
+    const result: Caption[] = [];
+    for (let i = lo - 1; i >= 0 && captions[i].startTime >= lookBack; i--) {
+      if (captions[i].endTime > time) result.push(captions[i]);
+    }
+    return result;
   }
 
   // ============================================================

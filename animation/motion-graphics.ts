@@ -413,27 +413,28 @@ export class MotionGraphicsEngine {
       });
     }
 
-    // Update particles
-    for (let i = system.particles.length - 1; i >= 0; i--) {
+    // Update particles — in-place compaction replaces splice() to avoid O(n²) removal cost.
+    let writeIdx = 0;
+    for (let i = 0; i < system.particles.length; i++) {
       const p = system.particles[i];
-      
+
       p.vx += emitter.gravity.x * deltaTime;
       p.vy += emitter.gravity.y * deltaTime;
       p.x += p.vx * deltaTime;
       p.y += p.vy * deltaTime;
       p.life -= deltaTime;
 
-      // Zero-lifetime particles are immediately dead; skip NaN arithmetic.
-      if (p.maxLife <= 0) { system.particles.splice(i, 1); continue; }
+      // Zero-lifetime or expired particles are dropped (not compacted into output).
+      if (p.maxLife <= 0 || p.life <= 0) continue;
+
       const t = 1 - p.life / p.maxLife;
       p.size = this.lerp(emitter.particleSize.start, emitter.particleSize.end, t);
       p.opacity = this.lerp(emitter.particleOpacity.start, emitter.particleOpacity.end, t);
       p.color = this.lerpColor(emitter.particleColor.start, emitter.particleColor.end, t);
 
-      if (p.life <= 0) {
-        system.particles.splice(i, 1);
-      }
+      system.particles[writeIdx++] = p;
     }
+    system.particles.length = writeIdx;
   }
 
   private randomRange(min: number, max: number): number {

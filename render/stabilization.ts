@@ -161,9 +161,15 @@ export function smoothTrajectory(
   radius:     number,
   method:     SmoothingMethod = 'gaussian',
 ): Translation[] {
-  const xs = smoothSeries(trajectory.map(t => t.x), radius, method);
-  const ys = smoothSeries(trajectory.map(t => t.y), radius, method);
-  return xs.map((x, i) => ({ x, y: ys[i] }));
+  const n = trajectory.length;
+  const xsIn: number[] = new Array(n);
+  const ysIn: number[] = new Array(n);
+  for (let i = 0; i < n; i++) { xsIn[i] = trajectory[i].x; ysIn[i] = trajectory[i].y; }
+  const xsOut = smoothSeries(xsIn, radius, method);
+  const ysOut = smoothSeries(ysIn, radius, method);
+  const result: Translation[] = new Array(n);
+  for (let i = 0; i < n; i++) result[i] = { x: xsOut[i], y: ysOut[i] };
+  return result;
 }
 
 // ─── Compensation ─────────────────────────────────────────────────────────────

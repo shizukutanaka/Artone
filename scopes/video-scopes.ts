@@ -1045,12 +1045,16 @@ export class ScopesManager {
   // Start continuous analysis
   startContinuous(getFrame: () => VideoFrame | null, onUpdate: (results: Map<ScopeType, ImageBitmap>) => void): void {
     const loop = () => {
-      const frame = getFrame();
-      if (frame) {
-        const results = this.analyze(frame);
-        onUpdate(results);
+      try {
+        const frame = getFrame();
+        if (frame) {
+          const results = this.analyze(frame);
+          onUpdate(results);
+        }
+      } finally {
+        // Always reschedule — an analyze() throw must not stop the scope loop
+        this.rafId = requestAnimationFrame(loop);
       }
-      this.rafId = requestAnimationFrame(loop);
     };
     this.rafId = requestAnimationFrame(loop);
   }

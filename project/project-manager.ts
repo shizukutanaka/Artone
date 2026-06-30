@@ -354,9 +354,8 @@ class ProjectDB {
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const projects = request.result as Project[];
-        // Sort by modified descending
-        projects.sort((a, b) => b.modified - a.modified);
-        resolve(projects);
+        // Sort by modified descending — spread to avoid mutating the IDB result
+        resolve([...projects].sort((a, b) => b.modified - a.modified));
       };
     });
   }
@@ -387,8 +386,7 @@ class ProjectDB {
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const versions = request.result as ProjectVersion[];
-        versions.sort((a, b) => b.timestamp - a.timestamp);
-        resolve(versions);
+        resolve([...versions].sort((a, b) => b.timestamp - a.timestamp));
       };
     });
   }

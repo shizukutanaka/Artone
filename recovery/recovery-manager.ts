@@ -301,9 +301,8 @@ export class RecoveryManager {
       
       request.onsuccess = () => {
         const snapshots = request.result as RecoverySnapshot[];
-        // Sort by timestamp descending
-        snapshots.sort((a, b) => b.timestamp - a.timestamp);
-        resolve(snapshots);
+        // Sort by timestamp descending — spread to avoid mutating the IDB result
+        resolve([...snapshots].sort((a, b) => b.timestamp - a.timestamp));
       };
       
       request.onerror = () => reject(request.error);
@@ -625,7 +624,7 @@ export function RecoveryDialogUI(props: {
           gap: 12px;
           justify-content: flex-end;
         ">
-          <button onclick="discardRecovery()" style="
+          <button data-action="discard" style="
             padding: 10px 20px;
             border: none;
             border-radius: 6px;
@@ -636,7 +635,7 @@ export function RecoveryDialogUI(props: {
           ">
             Start Fresh
           </button>
-          <button onclick="restoreSelected()" style="
+          <button data-action="restore" style="
             padding: 10px 20px;
             border: none;
             border-radius: 6px;
@@ -652,6 +651,33 @@ export function RecoveryDialogUI(props: {
       </div>
     </div>
   `;
+}
+
+/**
+ * Mount RecoveryDialogUI into a container and wire up event delegation.
+ * Returns a cleanup function that removes the listener.
+ */
+export function mountRecoveryDialog(
+  container: HTMLElement,
+  props: { snapshots: RecoverySnapshot[]; onRestore: (id: string) => void; onDiscard: () => void },
+): () => void {
+  container.innerHTML = RecoveryDialogUI(props);
+  // Track which snapshot item is selected (default: first)
+  let selectedId: string | null = props.snapshots[0]?.id ?? null;
+
+  const onClick = (e: Event): void => {
+    const target = e.target as HTMLElement;
+    const item = target.closest('.snapshot-item') as HTMLElement | null;
+    if (item?.dataset['id']) selectedId = item.dataset['id'];
+
+    const btn = target.closest('[data-action]') as HTMLElement | null;
+    if (!btn) return;
+    if (btn.dataset['action'] === 'discard') props.onDiscard();
+    else if (btn.dataset['action'] === 'restore' && selectedId) props.onRestore(selectedId);
+  };
+
+  container.addEventListener('click', onClick);
+  return () => container.removeEventListener('click', onClick);
 }
 
 // ============================================================

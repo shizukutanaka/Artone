@@ -35,6 +35,7 @@ export class TimecodeUtil {
     const dropFrame = tc.includes(';');
     const parts = tc.split(/[:;]/).map(Number);
     if (parts.length !== 4) throw new Error(`Invalid timecode: ${tc}`);
+    if (!parts.every(Number.isFinite)) throw new Error(`Invalid timecode (non-numeric component): ${tc}`);
     const [hh, mm, ss, ff] = parts;
     const fpsInt = Math.round(fps);
 

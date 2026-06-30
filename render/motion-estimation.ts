@@ -172,23 +172,29 @@ export function lucasKanade(
   const eps     = opts.epsilon       ?? 0.01;
   const minEig  = opts.minEigenvalue ?? 1e-3;
 
+  // Pre-allocate window buffers outside the per-point loop to avoid
+  // creating 4 new arrays per tracked point (typically 50-200 points/frame).
+  const winArea = (2 * r + 1) * (2 * r + 1);
+  const gxBuf = new Float64Array(winArea);
+  const gyBuf = new Float64Array(winArea);
+  const pxBuf = new Int32Array(winArea);
+  const pyBuf = new Int32Array(winArea);
+
   const results: FlowVector[] = [];
 
   for (const pt of points) {
     // Build structure tensor over the window in `prev`
     let gxx = 0, gxy = 0, gyy = 0;
-    const gxs: number[] = [];
-    const gys: number[] = [];
-    const px: number[] = [];
-    const py: number[] = [];
+    let wk = 0;
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         const sx = Math.round(pt.x) + dx;
         const sy = Math.round(pt.y) + dy;
         const { gx, gy } = gradientAt(prev, clampIdx(sx, prev.width), clampIdx(sy, prev.height));
         gxx += gx * gx; gxy += gx * gy; gyy += gy * gy;
-        gxs.push(gx); gys.push(gy);
-        px.push(sx); py.push(sy);
+        gxBuf[wk] = gx; gyBuf[wk] = gy;
+        pxBuf[wk] = sx; pyBuf[wk] = sy;
+        wk++;
       }
     }
 
@@ -206,12 +212,12 @@ export function lucasKanade(
     let converged = false;
     for (let iter = 0; iter < maxIter; iter++) {
       let bx = 0, by = 0;
-      for (let k = 0; k < gxs.length; k++) {
-        const ip = prev.data[clampIdx(py[k], prev.height) * prev.width + clampIdx(px[k], prev.width)];
-        const inx = sampleBilinear(next, px[k] + u, py[k] + v);
+      for (let k = 0; k < wk; k++) {
+        const ip = prev.data[clampIdx(pyBuf[k], prev.height) * prev.width + clampIdx(pxBuf[k], prev.width)];
+        const inx = sampleBilinear(next, pxBuf[k] + u, pyBuf[k] + v);
         const it = inx - ip;
-        bx += gxs[k] * it;
-        by += gys[k] * it;
+        bx += gxBuf[k] * it;
+        by += gyBuf[k] * it;
       }
       // Solve G·Δ = -b
       const du = -(gyy * bx - gxy * by) / det;

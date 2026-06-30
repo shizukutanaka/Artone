@@ -455,36 +455,51 @@ export function createHPSSProcessor(opts: HPSSOptions = {}): {
   const percFilterLen = opts.percussiveFilterLen ?? 17;
   const maskPower     = opts.maskPower          ?? 2;
 
-  let buffer: number[] = [];
+  // Float32Array ring buffer replaces number[] to avoid per-sample push() overhead.
+  // Capacity doubles when full (amortised O(1) per sample), same as Array growth.
+  let bufData = new Float32Array(winSize * 4);
+  let bufLen = 0;
+
+  function ensureCapacity(needed: number): void {
+    if (needed <= bufData.length) return;
+    const next = new Float32Array(needed * 2);
+    next.set(bufData.subarray(0, bufLen));
+    bufData = next;
+  }
 
   function processBuffer(): HPSSResult | null {
-    if (buffer.length < winSize) return null;
+    if (bufLen < winSize) return null;
     // Process all complete hops
-    const totalFrames = Math.floor((buffer.length - winSize) / hopSize) + 1;
+    const totalFrames = Math.floor((bufLen - winSize) / hopSize) + 1;
     const usedSamples = (totalFrames - 1) * hopSize + winSize;
-    const chunk = new Float32Array(buffer.slice(0, usedSamples));
+    const chunk = bufData.slice(0, usedSamples);
     const result = separateHPSS(chunk, { windowSize: winSize, hopSize, harmonicFilterLen: harmFilterLen, percussiveFilterLen: percFilterLen, maskPower });
-    // Keep leftover
-    buffer = buffer.slice(usedSamples - (winSize - hopSize));
+    // Keep leftover: shift the tail to the front in-place
+    const keepFrom = usedSamples - (winSize - hopSize);
+    const newLen = bufLen - keepFrom;
+    bufData.copyWithin(0, keepFrom, bufLen);
+    bufLen = newLen;
     return result;
   }
 
   return {
     push(block: Float32Array): HPSSResult | null {
-      for (let i = 0; i < block.length; i++) buffer.push(block[i]);
+      ensureCapacity(bufLen + block.length);
+      bufData.set(block, bufLen);
+      bufLen += block.length;
       return processBuffer();
     },
     flush(): HPSSResult {
-      if (buffer.length === 0) {
+      if (bufLen === 0) {
         const empty = new Float32Array(0);
         return { harmonic: empty, percussive: empty, residual: empty };
       }
-      const chunk = new Float32Array(buffer);
-      buffer = [];
+      const chunk = bufData.slice(0, bufLen);
+      bufLen = 0;
       return separateHPSS(chunk, { windowSize: winSize, hopSize, harmonicFilterLen: harmFilterLen, percussiveFilterLen: percFilterLen, maskPower });
     },
     reset(): void {
-      buffer = [];
+      bufLen = 0;
     },
   };
 }

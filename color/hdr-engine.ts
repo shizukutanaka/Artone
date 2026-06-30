@@ -19,6 +19,8 @@ export type HDRFormat = 'sdr' | 'hdr10' | 'hdr10plus' | 'hlg' | 'dolby_vision';
 export type ColorSpace = 'rec709' | 'rec2020' | 'dci_p3' | 'aces';
 export type TransferFunction = 'gamma22' | 'gamma24' | 'pq' | 'hlg' | 'linear';
 
+const GAMMA22_ENC = 1 / 2.2;
+
 export interface HDRMetadata {
   format: HDRFormat;
   colorSpace: ColorSpace;
@@ -539,10 +541,10 @@ export class HDREngine {
         b = mapped.b;
       }
 
-      // Apply gamma for SDR output
-      r = Math.pow(r, 1 / 2.2);
-      g = Math.pow(g, 1 / 2.2);
-      b = Math.pow(b, 1 / 2.2);
+      // Apply gamma for SDR output (Math.exp faster than Math.pow in V8)
+      r = r > 0 ? Math.exp(GAMMA22_ENC * Math.log(r)) : 0;
+      g = g > 0 ? Math.exp(GAMMA22_ENC * Math.log(g)) : 0;
+      b = b > 0 ? Math.exp(GAMMA22_ENC * Math.log(b)) : 0;
 
       data[i] = Math.round(Math.max(0, Math.min(255, r * 255)));
       data[i + 1] = Math.round(Math.max(0, Math.min(255, g * 255)));

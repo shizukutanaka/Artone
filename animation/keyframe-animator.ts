@@ -83,43 +83,44 @@ const EASING_FUNCTIONS: Record<EasingType, (t: number) => number> = {
   
   easeIn: (t) => t * t,
   easeOut: (t) => 1 - (1 - t) * (1 - t),
-  easeInOut: (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
-  
+  easeInOut: (t) => { if (t < 0.5) return 2*t*t; const x = 2-2*t; return 1 - x*x/2; },
+
   easeInQuad: (t) => t * t,
   easeOutQuad: (t) => 1 - (1 - t) * (1 - t),
-  easeInOutQuad: (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
-  
+  easeInOutQuad: (t) => { if (t < 0.5) return 2*t*t; const x = 2-2*t; return 1 - x*x/2; },
+
   easeInCubic: (t) => t * t * t,
-  easeOutCubic: (t) => 1 - Math.pow(1 - t, 3),
-  easeInOutCubic: (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
-  
+  easeOutCubic: (t) => { const x = 1-t; return 1 - x*x*x; },
+  easeInOutCubic: (t) => { if (t < 0.5) return 4*t*t*t; const x = 2-2*t; return 1 - x*x*x/2; },
+
   easeInQuart: (t) => t * t * t * t,
-  easeOutQuart: (t) => 1 - Math.pow(1 - t, 4),
-  easeInOutQuart: (t) => t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2,
-  
-  easeInExpo: (t) => t === 0 ? 0 : Math.pow(2, 10 * t - 10),
-  easeOutExpo: (t) => t === 1 ? 1 : 1 - Math.pow(2, -10 * t),
+  easeOutQuart: (t) => { const x = 1-t; return 1 - x*x*x*x; },
+  easeInOutQuart: (t) => { if (t < 0.5) return 8*t*t*t*t; const x = 2-2*t; return 1 - x*x*x*x/2; },
+
+  // Math.exp((n*t+c)*Math.LN2) ≡ Math.pow(2, n*t+c) but uses the native exp() fast path.
+  easeInExpo: (t) => t === 0 ? 0 : Math.exp((10*t - 10) * Math.LN2),
+  easeOutExpo: (t) => t === 1 ? 1 : 1 - Math.exp(-10*t * Math.LN2),
   easeInOutExpo: (t) => {
     if (t === 0) return 0;
     if (t === 1) return 1;
-    return t < 0.5 
-      ? Math.pow(2, 20 * t - 10) / 2 
-      : (2 - Math.pow(2, -20 * t + 10)) / 2;
+    return t < 0.5
+      ? Math.exp((20*t - 10) * Math.LN2) / 2
+      : (2 - Math.exp((-20*t + 10) * Math.LN2)) / 2;
   },
-  
+
   easeInElastic: (t) => {
     if (t === 0 || t === 1) return t;
-    return -Math.pow(2, 10 * t - 10) * Math.sin((t * 10 - 10.75) * (2 * Math.PI) / 3);
+    return -Math.exp((10*t - 10) * Math.LN2) * Math.sin((t * 10 - 10.75) * (2 * Math.PI) / 3);
   },
   easeOutElastic: (t) => {
     if (t === 0 || t === 1) return t;
-    return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * (2 * Math.PI) / 3) + 1;
+    return Math.exp(-10*t * Math.LN2) * Math.sin((t * 10 - 0.75) * (2 * Math.PI) / 3) + 1;
   },
   easeInOutElastic: (t) => {
     if (t === 0 || t === 1) return t;
     return t < 0.5
-      ? -(Math.pow(2, 20 * t - 10) * Math.sin((20 * t - 11.125) * (2 * Math.PI) / 4.5)) / 2
-      : (Math.pow(2, -20 * t + 10) * Math.sin((20 * t - 11.125) * (2 * Math.PI) / 4.5)) / 2 + 1;
+      ? -(Math.exp((20*t - 10) * Math.LN2) * Math.sin((20*t - 11.125) * (2 * Math.PI) / 4.5)) / 2
+      : (Math.exp((-20*t + 10) * Math.LN2) * Math.sin((20*t - 11.125) * (2 * Math.PI) / 4.5)) / 2 + 1;
   },
   
   easeInBounce: (t) => 1 - EASING_FUNCTIONS.easeOutBounce(1 - t),

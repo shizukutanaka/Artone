@@ -29,6 +29,9 @@ export class TimecodeUtil {
   }
 
   static tcToFrames(tc: string, fps: number): number {
+    // Mirror the guard in framesToTC — NaN/Infinity/negative fps → Math.round gives 0
+    // or NaN, making the entire return value NaN and silently corrupting frame counts.
+    if (!(fps > 0)) throw new Error(`tcToFrames: invalid fps ${fps}`);
     const dropFrame = tc.includes(';');
     const parts = tc.split(/[:;]/).map(Number);
     if (parts.length !== 4) throw new Error(`Invalid timecode: ${tc}`);

@@ -89,9 +89,10 @@ export class WebGPURenderEngine {
   private device: GPUDevice | null = null;
   private context: GPUCanvasContext | null = null;
 
-  // Cache
+  // Texture LRU cache — Map insertion order tracks MRU (newest = last entry).
+  // delete+set on hit moves an entry to the MRU end; keys().next() gives LRU
+  // (oldest = first entry) for eviction — all O(1), no cacheOrder array needed.
   private textureCache: Map<string, GPUTexture> = new Map();
-  private cacheOrder: string[] = [];
   private cacheHits = 0;
   private cacheMisses = 0;
   
@@ -166,7 +167,6 @@ export class WebGPURenderEngine {
     // All GPU objects belonged to the lost device and are now invalid; drop refs
     // (do not call .destroy() — the device is gone). Textures re-upload next frame.
     this.textureCache.clear();
-    this.cacheOrder = [];
     this.pipelines.clear();
     this.shaders.clear();
     this.sampler = null;
@@ -487,24 +487,22 @@ export class WebGPURenderEngine {
   }
 
   private cacheTexture(id: string, texture: GPUTexture): void {
-    // Evict if full
+    // Evict LRU (first Map entry) while at capacity.
     while (this.textureCache.size >= this.config.maxTextureCache) {
-      const oldest = this.cacheOrder.shift();
-      if (oldest) {
-        this.textureCache.get(oldest)?.destroy();
-        this.textureCache.delete(oldest);
-      }
+      const { value: oldest, done } = this.textureCache.keys().next();
+      if (done) break;
+      this.textureCache.get(oldest)?.destroy();
+      this.textureCache.delete(oldest);
     }
-
     this.textureCache.set(id, texture);
-    this.cacheOrder.push(id);
   }
 
   private updateCacheOrder(id: string): void {
-    const idx = this.cacheOrder.indexOf(id);
-    if (idx > -1) {
-      this.cacheOrder.splice(idx, 1);
-      this.cacheOrder.push(id);
+    // Re-append to Map end so this entry is now the MRU.
+    const tex = this.textureCache.get(id);
+    if (tex !== undefined) {
+      this.textureCache.delete(id);
+      this.textureCache.set(id, tex);
     }
   }
 
@@ -513,7 +511,6 @@ export class WebGPURenderEngine {
       tex.destroy();
     }
     this.textureCache.clear();
-    this.cacheOrder = [];
     this.cacheHits = 0;
     this.cacheMisses = 0;
   }

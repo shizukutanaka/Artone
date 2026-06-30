@@ -202,7 +202,8 @@ export function createResampler(options: ResampleOptions): Resampler {
   let totalOut = 0;  // total output samples emitted so far
 
   // Ring of the most recent `halfW` input samples (needed for inter-block kernel).
-  let history: Float32Array = new Float32Array(halfW);
+  // Pre-allocated and reused every block — avoids new Float32Array(halfW) per call.
+  const history: Float32Array = new Float32Array(halfW);
 
   function process(input: Float32Array): Float32Array {
     if (srcSR === dstSR) {
@@ -254,12 +255,13 @@ export function createResampler(options: ResampleOptions): Resampler {
     totalIn  += input.length;
     totalOut  = newTotalOut;
 
-    // Save the last `halfW` input samples as history for the next block
+    // Save the last `halfW` input samples into the pre-allocated history buffer.
     const copyStart = Math.max(0, input.length - halfW);
-    const newHistory = new Float32Array(halfW);
-    const srcSlice   = input.subarray(copyStart);
-    newHistory.set(srcSlice, halfW - srcSlice.length);
-    history = newHistory;
+    const srcSlice  = input.subarray(copyStart);
+    const dstOffset = halfW - srcSlice.length;
+    // Zero-fill the prefix only when input is shorter than halfW (rare).
+    if (dstOffset > 0) history.fill(0, 0, dstOffset);
+    history.set(srcSlice, dstOffset);
 
     return out;
   }
@@ -267,7 +269,7 @@ export function createResampler(options: ResampleOptions): Resampler {
   function reset(): void {
     totalIn  = 0;
     totalOut = 0;
-    history  = new Float32Array(halfW);
+    history.fill(0);  // reuse pre-allocated buffer
   }
 
   function outputLength(inputLength: number): number {

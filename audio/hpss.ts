@@ -288,11 +288,13 @@ function medianFilterTime(mag: Float64Array[], kernLen: number): Float64Array[] 
   const nFrames = mag.length;
   const nBins   = nFrames > 0 ? mag[0].length : 0;
   const half    = kernLen >> 1;
-  const result: Float64Array[] = [];
+  // One flat allocation + subarray views avoids nFrames separate new Float64Array(nBins) calls.
+  const flat    = new Float64Array(nFrames * nBins);
+  const result  = Array.from({length: nFrames}, (_, f) => flat.subarray(f * nBins, (f + 1) * nBins));
   const scratch = new Float64Array(kernLen);
 
   for (let f = 0; f < nFrames; f++) {
-    const row = new Float64Array(nBins);
+    const row = result[f];
     for (let b = 0; b < nBins; b++) {
       for (let k = 0; k < kernLen; k++) {
         const fi = Math.max(0, Math.min(nFrames - 1, f - half + k));
@@ -300,7 +302,6 @@ function medianFilterTime(mag: Float64Array[], kernLen: number): Float64Array[] 
       }
       row[b] = medianOfSlice(scratch, kernLen);
     }
-    result.push(row);
   }
   return result;
 }
@@ -315,11 +316,12 @@ function medianFilterFreq(mag: Float64Array[], kernLen: number): Float64Array[] 
   const nFrames = mag.length;
   const nBins   = nFrames > 0 ? mag[0].length : 0;
   const half    = kernLen >> 1;
-  const result: Float64Array[] = [];
+  const flat    = new Float64Array(nFrames * nBins);
+  const result  = Array.from({length: nFrames}, (_, f) => flat.subarray(f * nBins, (f + 1) * nBins));
   const scratch = new Float64Array(kernLen);
 
   for (let f = 0; f < nFrames; f++) {
-    const row = new Float64Array(nBins);
+    const row = result[f];
     for (let b = 0; b < nBins; b++) {
       for (let k = 0; k < kernLen; k++) {
         const bi = Math.max(0, Math.min(nBins - 1, b - half + k));
@@ -327,7 +329,6 @@ function medianFilterFreq(mag: Float64Array[], kernLen: number): Float64Array[] 
       }
       row[b] = medianOfSlice(scratch, kernLen);
     }
-    result.push(row);
   }
   return result;
 }
@@ -349,18 +350,22 @@ function wienerMasks(
 ): { hRe: Float64Array[]; hIm: Float64Array[]; pRe: Float64Array[]; pIm: Float64Array[] } {
   const nFrames = H.length;
   const nBins   = nFrames > 0 ? H[0].length : 0;
-  const hRe: Float64Array[] = [];
-  const hIm: Float64Array[] = [];
-  const pRe: Float64Array[] = [];
-  const pIm: Float64Array[] = [];
+  // Four flat allocations + subarray views instead of 4×nFrames separate Float64Array(nBins) calls.
+  const flatHRe = new Float64Array(nFrames * nBins);
+  const flatHIm = new Float64Array(nFrames * nBins);
+  const flatPRe = new Float64Array(nFrames * nBins);
+  const flatPIm = new Float64Array(nFrames * nBins);
+  const mkViews = (flat: Float64Array): Float64Array[] =>
+    Array.from({length: nFrames}, (_, f) => flat.subarray(f * nBins, (f + 1) * nBins));
+  const hRe = mkViews(flatHRe);
+  const hIm = mkViews(flatHIm);
+  const pRe = mkViews(flatPRe);
+  const pIm = mkViews(flatPIm);
   const EPS = 1e-10;
   const useSq = p === 2;
 
   for (let f = 0; f < nFrames; f++) {
-    const hrRow = new Float64Array(nBins);
-    const hiRow = new Float64Array(nBins);
-    const prRow = new Float64Array(nBins);
-    const piRow = new Float64Array(nBins);
+    const hrRow = hRe[f], hiRow = hIm[f], prRow = pRe[f], piRow = pIm[f];
     for (let b = 0; b < nBins; b++) {
       const h = H[f][b], pv = P[f][b];
       const hp = useSq ? h * h : (h > 0 ? Math.exp(p * Math.log(h)) : 0);
@@ -373,8 +378,6 @@ function wienerMasks(
       prRow[b] = mP * re[f][b];
       piRow[b] = mP * im[f][b];
     }
-    hRe.push(hrRow); hIm.push(hiRow);
-    pRe.push(prRow); pIm.push(piRow);
   }
   return { hRe, hIm, pRe, pIm };
 }

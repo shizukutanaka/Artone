@@ -708,6 +708,11 @@ export class ColorGradingEngine {
     const contrastScale = 1 + w.contrast;
     const contrastBias  = w.pivot * (1 - contrastScale);
     const saturation    = w.saturation;
+    // Loop-invariant identity checks hoisted before the pixel loop.
+    // V8 constant-folds these const booleans and eliminates the branch inside
+    // the loop, so we pay zero per-pixel cost for the common "no adjustment" case.
+    const noGamma = gammaR === 1 && gammaG === 1 && gammaB === 1;
+    const noSat   = saturation === 1;
 
     for (let i = 0; i < data.length; i += 4) {
       let r = data[i]     / 255;
@@ -719,10 +724,14 @@ export class ColorGradingEngine {
       g += liftG * (1 - g);
       b += liftB * (1 - b);
 
-      // Gamma
-      r = Math.pow(Math.max(r, 0), gammaR);
-      g = Math.pow(Math.max(g, 0), gammaG);
-      b = Math.pow(Math.max(b, 0), gammaB);
+      // Gamma — Math.exp(γ · ln r) is faster than Math.pow(r, γ) in V8 because
+      // Math.exp uses the native fast-path while Math.pow goes through general pow().
+      // Skip entirely when all three channels have identity gamma (gammaR/G/B = 1).
+      if (!noGamma) {
+        r = r > 0 ? Math.exp(gammaR * Math.log(r)) : 0;
+        g = g > 0 ? Math.exp(gammaG * Math.log(g)) : 0;
+        b = b > 0 ? Math.exp(gammaB * Math.log(b)) : 0;
+      }
 
       // Gain
       r *= gainR;
@@ -739,11 +748,13 @@ export class ColorGradingEngine {
       g = g * contrastScale + contrastBias;
       b = b * contrastScale + contrastBias;
 
-      // Saturation
-      const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      r = luma + (r - luma) * saturation;
-      g = luma + (g - luma) * saturation;
-      b = luma + (b - luma) * saturation;
+      // Saturation — skip when saturation === 1 (no-op by definition).
+      if (!noSat) {
+        const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        r = luma + (r - luma) * saturation;
+        g = luma + (g - luma) * saturation;
+        b = luma + (b - luma) * saturation;
+      }
 
       data[i]     = Math.max(0, Math.min(255, r * 255));
       data[i + 1] = Math.max(0, Math.min(255, g * 255));

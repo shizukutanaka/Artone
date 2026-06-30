@@ -271,6 +271,19 @@ export class Vectorscope {
   private ctx: OffscreenCanvasRenderingContext2D;
   private config: ScopeConfig;
   private mode: VectorscopeMode = 'standard';
+  // Pre-allocated density + colour accumulators for standard-mode rendering.
+  // Replaces per-pixel `rgb(r,g,b)` string creation (~50 K new strings/frame at 60 fps)
+  // and N individual fillRect calls with a single putImageData per frame.
+  // Size = config.width × config.height (fixed at construction time).
+  private readonly scopeDensity: Uint32Array;
+  private readonly scopeRSum: Uint32Array;
+  private readonly scopeGSum: Uint32Array;
+  private readonly scopeBSum: Uint32Array;
+  // Separate offscreen canvas for scope dots so they composite *over* the
+  // graticule (drawn first on the main canvas) via ctx.drawImage().
+  private readonly dotCanvas: OffscreenCanvas;
+  private readonly dotCtx: OffscreenCanvasRenderingContext2D;
+  private readonly dotImageData: ImageData;
 
   constructor(config: Partial<ScopeConfig> = {}) {
     this.config = {
@@ -283,9 +296,18 @@ export class Vectorscope {
       backgroundColor: color.surface0,
       ...config
     };
-    
+
     this.canvas = new OffscreenCanvas(this.config.width, this.config.height);
     this.ctx = this.canvas.getContext('2d')!;
+
+    const pixels = this.config.width * this.config.height;
+    this.scopeDensity = new Uint32Array(pixels);
+    this.scopeRSum    = new Uint32Array(pixels);
+    this.scopeGSum    = new Uint32Array(pixels);
+    this.scopeBSum    = new Uint32Array(pixels);
+    this.dotCanvas    = new OffscreenCanvas(this.config.width, this.config.height);
+    this.dotCtx       = this.dotCanvas.getContext('2d')!;
+    this.dotImageData = new ImageData(this.config.width, this.config.height);
   }
 
   setMode(mode: VectorscopeMode): void {
@@ -323,43 +345,139 @@ export class Vectorscope {
     }
     
     const { data, width: frameWidth, height: frameHeight } = imageData;
-    
+
     // Sample pixels (downsample for performance)
     const sampleStep = Math.max(1, Math.floor(frameWidth * frameHeight / 50000));
-    
-    this.ctx.globalAlpha = this.config.brightness * 0.5;
-    
-    for (let i = 0; i < data.length; i += 4 * sampleStep) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      
-      // Convert RGB to YUV (BT.709) — ベクトルスコープは U/V (色差) のみ使用
-      const u = -0.1146 * r - 0.3854 * g + 0.5 * b; // Cb
-      const v = 0.5 * r - 0.4542 * g - 0.0458 * b;  // Cr
-      
-      // Map to scope coordinates
-      const scopeX = centerX + (u / 128) * radius * this.config.scale;
-      const scopeY = centerY - (v / 128) * radius * this.config.scale;
-      
-      // Color based on mode
-      if (this.mode === 'standard') {
-        this.ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-      } else if (this.mode === 'skin-tone') {
-        // Highlight skin tones (I-line region)
-        const angle = Math.atan2(v, u) * (180 / Math.PI);
-        const isSkinTone = angle >= 15 && angle <= 35;
-        this.ctx.fillStyle = isSkinTone ? SCOPE_SKIN : color.surface4;
-      } else {
-        this.ctx.fillStyle = color.textPrimary;
-      }
-      
-      this.ctx.fillRect(scopeX, scopeY, 2, 2);
+
+    if (this.mode === 'standard') {
+      this.renderStandardMode(data, centerX, centerY, radius, sampleStep);
+    } else if (this.mode === 'skin-tone') {
+      this.renderSkinToneMode(data, centerX, centerY, radius, sampleStep);
+    } else {
+      this.renderHueVsSatMode(data, centerX, centerY, radius, sampleStep);
     }
-    
-    this.ctx.globalAlpha = 1;
-    
+
     return this.canvas.transferToImageBitmap();
+  }
+
+  /**
+   * Standard mode: true-colour vectorscope dots, density-mapped opacity.
+   * Accumulates pixel counts + RGB sums per scope position into pre-allocated
+   * Uint32Array buffers, then renders to dotImageData with a single putImageData.
+   * Eliminates ~50 K `rgb(r,g,b)` string allocations and fillRect calls per frame.
+   */
+  private renderStandardMode(
+    data: Uint8ClampedArray,
+    cx: number, cy: number, radius: number,
+    sampleStep: number,
+  ): void {
+    const { width, height, scale, brightness } = this.config;
+    const { scopeDensity, scopeRSum, scopeGSum, scopeBSum } = this;
+    scopeDensity.fill(0); scopeRSum.fill(0); scopeGSum.fill(0); scopeBSum.fill(0);
+
+    // Hoist loop-invariant: radius*scale/128 is constant across every pixel
+    const rScale = radius * scale / 128;
+
+    for (let i = 0; i < data.length; i += 4 * sampleStep) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      // BT.709 Cb/Cr colour-difference signals
+      const u = -0.1146 * r - 0.3854 * g + 0.5   * b;
+      const v =  0.5    * r - 0.4542 * g - 0.0458 * b;
+      const px = Math.round(cx + u * rScale);
+      const py = Math.round(cy - v * rScale);
+      if (px >= 0 && px < width && py >= 0 && py < height) {
+        const idx = py * width + px;
+        scopeDensity[idx]++;
+        scopeRSum[idx] += r;
+        scopeGSum[idx] += g;
+        scopeBSum[idx] += b;
+      }
+    }
+
+    let maxDensity = 0;
+    for (let i = 0, len = width * height; i < len; i++) {
+      if (scopeDensity[i] > maxDensity) maxDensity = scopeDensity[i];
+    }
+
+    const dotPx = this.dotImageData.data;
+    dotPx.fill(0);  // transparent background — composites over graticule
+    if (maxDensity > 0) {
+      const alphaMul = brightness * 255;
+      for (let i = 0, len = width * height; i < len; i++) {
+        const cnt = scopeDensity[i];
+        if (cnt === 0) continue;
+        const alpha = Math.min(255, ((cnt / maxDensity) * alphaMul + 0.5) | 0);
+        const avgR = ((scopeRSum[i] / cnt) + 0.5) | 0;
+        const avgG = ((scopeGSum[i] / cnt) + 0.5) | 0;
+        const avgB = ((scopeBSum[i] / cnt) + 0.5) | 0;
+        // Write 2×2 square (matches original fillRect(x, y, 2, 2))
+        const px = i % width, py = (i / width) | 0;
+        for (let dy = 0; dy < 2; dy++) {
+          for (let dx = 0; dx < 2; dx++) {
+            const nx = px + dx, ny = py + dy;
+            if (nx < width && ny < height) {
+              const pidx = (ny * width + nx) * 4;
+              dotPx[pidx]     = avgR;
+              dotPx[pidx + 1] = avgG;
+              dotPx[pidx + 2] = avgB;
+              dotPx[pidx + 3] = alpha;
+            }
+          }
+        }
+      }
+    }
+    this.dotCtx.putImageData(this.dotImageData, 0, 0);
+    this.ctx.drawImage(this.dotCanvas, 0, 0);
+  }
+
+  /**
+   * Skin-tone mode: highlights the I-line angular sector [15°,35°] in Cb/Cr space.
+   * Uses cross-product sector test to replace Math.atan2() per pixel — same
+   * technique already applied in HistogramScope.getStats().
+   */
+  private renderSkinToneMode(
+    data: Uint8ClampedArray,
+    cx: number, cy: number, radius: number,
+    sampleStep: number,
+  ): void {
+    const { scale, brightness } = this.config;
+    // Angular sector [15°,35°] cross-product boundary vectors (BT.709 Cb/Cr).
+    // A point (u,v) is inside when: COS15*v - SIN15*u ≥ 0 AND COS35*v - SIN35*u ≤ 0.
+    const COS15 = 0.9659, SIN15 = 0.2588;
+    const COS35 = 0.8192, SIN35 = 0.5736;
+    const rScale = radius * scale / 128;
+
+    this.ctx.globalAlpha = brightness * 0.5;
+    for (let i = 0; i < data.length; i += 4 * sampleStep) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const u = -0.1146 * r - 0.3854 * g + 0.5   * b;
+      const v =  0.5    * r - 0.4542 * g - 0.0458 * b;
+      const isSkinTone = COS15 * v - SIN15 * u >= 0 && COS35 * v - SIN35 * u <= 0;
+      this.ctx.fillStyle = isSkinTone ? SCOPE_SKIN : color.surface4;
+      this.ctx.fillRect(cx + u * rScale, cy - v * rScale, 2, 2);
+    }
+    this.ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Hue-vs-saturation mode: single constant colour — no per-pixel string allocation.
+   */
+  private renderHueVsSatMode(
+    data: Uint8ClampedArray,
+    cx: number, cy: number, radius: number,
+    sampleStep: number,
+  ): void {
+    const { scale, brightness } = this.config;
+    const rScale = radius * scale / 128;
+    this.ctx.globalAlpha = brightness * 0.5;
+    this.ctx.fillStyle = color.textPrimary;
+    for (let i = 0; i < data.length; i += 4 * sampleStep) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const u = -0.1146 * r - 0.3854 * g + 0.5   * b;
+      const v =  0.5    * r - 0.4542 * g - 0.0458 * b;
+      this.ctx.fillRect(cx + u * rScale, cy - v * rScale, 2, 2);
+    }
+    this.ctx.globalAlpha = 1;
   }
 
   private drawGraticule(cx: number, cy: number, r: number): void {

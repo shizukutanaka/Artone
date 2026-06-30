@@ -264,10 +264,15 @@ export class RecoveryManager {
     return new Promise((resolve, reject) => {
       const tx = this.requireDB().transaction(this.config.storeName, 'readwrite');
       const store = tx.objectStore(this.config.storeName);
-      const request = store.put(snapshot);
-      
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+
+      store.put(snapshot);
+
+      // Resolve on tx.oncomplete (durable commit) — critical in the data-loss
+      // risk zone. request.onsuccess fires when the write is enqueued but the
+      // transaction may still abort (disk full, browser killed), leaving a false
+      // "snapshot saved" result and potentially losing crash-recovery data.
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error ?? new Error('writeSnapshot: transaction aborted'));
     });
   }
 
@@ -353,10 +358,11 @@ export class RecoveryManager {
     return new Promise((resolve) => {
       const tx = this.requireDB().transaction(this.config.storeName, 'readwrite');
       const store = tx.objectStore(this.config.storeName);
-      const request = store.delete(id);
-      
-      request.onsuccess = () => resolve(true);
-      request.onerror = () => resolve(false);
+
+      store.delete(id);
+
+      tx.oncomplete = () => resolve(true);
+      tx.onabort = () => resolve(false);
     });
   }
 

@@ -104,11 +104,12 @@ export async function awaitEncoderQueueBelow(
   // Timeout guard: if the encoder closes/errors without firing 'dequeue', the
   // Promise would hang indefinitely without this deadline.
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`awaitEncoderQueueBelow: no dequeue within ${timeoutMs}ms — encoder may have stalled`)),
-      timeoutMs,
-    );
-    encoder.addEventListener('dequeue', () => { clearTimeout(timer); resolve(); }, { once: true });
+    const onDequeue = () => { clearTimeout(timer); resolve(); };
+    const timer = setTimeout(() => {
+      encoder.removeEventListener('dequeue', onDequeue);
+      reject(new Error(`awaitEncoderQueueBelow: no dequeue within ${timeoutMs}ms — encoder may have stalled`));
+    }, timeoutMs);
+    encoder.addEventListener('dequeue', onDequeue, { once: true });
   });
 }
 

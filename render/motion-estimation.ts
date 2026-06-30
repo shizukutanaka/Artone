@@ -226,7 +226,7 @@ export function lucasKanade(
       if (Math.hypot(du, dv) < eps) { converged = true; break; }
     }
 
-    results.push({ from: pt, flow: { x: u, y: v }, valid: converged || true });
+    results.push({ from: pt, flow: { x: u, y: v }, valid: converged });
   }
 
   return results;

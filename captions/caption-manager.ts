@@ -252,6 +252,9 @@ export class CaptionManager {
   // Cached canvas for burnInCaptions() — recreated only when frame dimensions change.
   private _burnCanvas: OffscreenCanvas | null = null;
   private _burnCtx: OffscreenCanvasRenderingContext2D | null = null;
+  // Per-track maximum observed caption duration (seconds). Only grows — a conservative
+  // upper bound used as the getCaptionsAtTime lookback window.
+  private _trackMaxDuration: Map<string, number> = new Map();
 
   // ============================================================
   // Track Management
@@ -341,6 +344,9 @@ export class CaptionManager {
     if (len > 1 && caption.startTime < track.captions[len - 2].startTime) {
       track.captions.sort((a, b) => a.startTime - b.startTime);
     }
+    const dur = endTime - startTime;
+    const prev = this._trackMaxDuration.get(trackId) ?? 0;
+    if (dur > prev) this._trackMaxDuration.set(trackId, dur);
 
     this.notify();
     return caption;
@@ -395,10 +401,11 @@ export class CaptionManager {
       else hi = mid;
     }
     // Walk backwards from lo-1: active captions have endTime > time.
-    // Stop once startTime is more than 60 s before `time` — a generous
-    // upper bound on caption duration so we never miss a slow-burn title card.
+    // Use the maximum observed duration for this track as the lookback window so
+    // long title cards (>60 s) are never missed. Falls back to 60 s on an empty track.
     // This gives O(log N + window) instead of O(N) for late playback positions.
-    const lookBack = time - 60;
+    const maxDur = this._trackMaxDuration.get(trackId) ?? 60;
+    const lookBack = time - Math.max(60, maxDur);
     const result: Caption[] = [];
     for (let i = lo - 1; i >= 0 && captions[i].startTime >= lookBack; i--) {
       if (captions[i].endTime > time) result.push(captions[i]);
@@ -780,13 +787,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     }
 
     // Create new frame, then release the source — caller owns newFrame.
-    const newFrame = new VideoFrame(canvas, {
-      timestamp: videoFrame.timestamp,
-      duration: videoFrame.duration || undefined
-    });
-    videoFrame.close();
-
-    return newFrame;
+    // try/finally guarantees videoFrame.close() even if VideoFrame() throws (e.g. OOM).
+    try {
+      return new VideoFrame(canvas, {
+        timestamp: videoFrame.timestamp,
+        duration: videoFrame.duration || undefined
+      });
+    } finally {
+      videoFrame.close();
+    }
   }
 
   // ============================================================

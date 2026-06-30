@@ -12,6 +12,9 @@
  * Pike: シンプルなAPI
  */
 import { color } from '../app/design-system';
+import { createLogger } from '../app/logger';
+
+const log = createLogger('HistoryManager');
 
 // ============================================================
 // Types

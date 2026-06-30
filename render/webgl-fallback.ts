@@ -108,6 +108,10 @@ export class WebGLFallbackRenderer {
 
   /** WebGL 2.0 コンテキストを初期化。成功時 true。 */
   initialize(canvas: HTMLCanvasElement | OffscreenCanvas): boolean {
+    if (this.gl !== null) {
+      log.warn('WebGLFallbackRenderer already initialized — call destroy() before re-initializing');
+      return false;
+    }
     const gl = canvas.getContext('webgl2', {
       alpha: true,
       premultipliedAlpha: true,
@@ -276,7 +280,7 @@ export class WebGLFallbackRenderer {
 
     const start = performance.now();
 
-    gl.viewport(0, 0, (this.canvas as HTMLCanvasElement).width, (this.canvas as HTMLCanvasElement).height);
+    gl.viewport(0, 0, this.canvas!.width, this.canvas!.height);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(program);

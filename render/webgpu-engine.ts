@@ -209,7 +209,11 @@ export class WebGPURenderEngine {
       this.canvas = canvas;
       // Watch for device loss so we can pause rendering and auto-recover.
       this.watchDeviceLost(this.device);
-      this.context = canvas.getContext('webgpu') as GPUCanvasContext;
+      this.context = canvas.getContext('webgpu') as GPUCanvasContext | null;
+      if (!this.context) {
+        log.error('WebGPU canvas context unavailable');
+        return false;
+      }
 
       const format = navigator.gpu.getPreferredCanvasFormat();
       this.context.configure({
@@ -229,10 +233,13 @@ export class WebGPURenderEngine {
 
       // Pre-allocate persistent uniform buffers — one per param layout.
       // These replace per-frame createBuffer() calls in applyEffect/compositeLayer.
+      // Destroy any previously allocated buffers to prevent leaks on re-initialization.
+      this._effectParamGPUBuf?.destroy();
       this._effectParamGPUBuf = this.device.createBuffer({
         size: 32,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
       });
+      this._compositeParamGPUBuf?.destroy();
       this._compositeParamGPUBuf = this.device.createBuffer({
         size: 16,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST

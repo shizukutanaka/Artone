@@ -13,7 +13,7 @@
  * 呼び出し: Cmd+K (Mac) / Ctrl+K (Win/Linux)
  */
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue } from 'react';
 import { ds, color, space, radius, motion, shadow, z, type FeatureTier } from './design-system';
 import { t } from '../i18n/i18n-manager';
 import { trapTabKey, captureFocus } from './focus-trap';
@@ -120,9 +120,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const listRef = useRef<HTMLDivElement>(null);
   const paletteRef = useRef<HTMLDivElement>(null);
 
+  // Defer search computation so keyboard input stays responsive under heavy item lists.
+  // Input updates synchronously; results update at lower priority (no input lag).
+  const deferredQuery = useDeferredValue(query);
+  const isPending = query !== deferredQuery;
+
   const results = useMemo(
-    () => searchItems(items, query, currentTier),
-    [items, query, currentTier]
+    () => searchItems(items, deferredQuery, currentTier),
+    [items, deferredQuery, currentTier]
   );
 
   // Reset the highlight to the top result whenever the result set changes (e.g.
@@ -246,11 +251,35 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               fontSize: 16,
             }}
           />
+          {/* Subtle spinner while deferred search catches up to typed query */}
+          {isPending && (
+            <span
+              aria-hidden="true"
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: '50%',
+                border: `2px solid ${color.textTertiary}`,
+                borderTopColor: 'transparent',
+                flexShrink: 0,
+                animation: 'spin 0.6s linear infinite',
+              }}
+            />
+          )}
         </div>
 
-        {/* 結果リスト */}
-        <div ref={listRef} style={{ maxHeight: 400, overflowY: 'auto', padding: `${space[1]}px 0` }}>
-          {results.length === 0 && query && (
+        {/* 結果リスト — dim while deferred query lags behind typed query */}
+        <div
+          ref={listRef}
+          style={{
+            maxHeight: 400,
+            overflowY: 'auto',
+            padding: `${space[1]}px 0`,
+            opacity: isPending ? 0.6 : 1,
+            transition: `opacity ${motion.fast} ${motion.easeOut}`,
+          }}
+        >
+          {results.length === 0 && deferredQuery && !isPending && (
             <div
               style={{
                 padding: `${space[6]}px ${space[4]}px`,
@@ -344,6 +373,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         @keyframes slideDown {
           from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
           to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </>

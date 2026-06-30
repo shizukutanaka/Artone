@@ -149,6 +149,9 @@ export class AIEffectsEngine {
   private ctx: OffscreenCanvasRenderingContext2D;
   private listeners: Set<() => void> = new Set();
   private recognizer: SpeechRecognizer | null = null;
+  // Reusable buffers for applyAlphaFeather — resized only when frame dimensions grow
+  private alphaChannelBuf: Float32Array = new Float32Array(0);
+  private alphaBlurredBuf: Float32Array = new Float32Array(0);
 
   constructor() {
     this.canvas = new OffscreenCanvas(1920, 1080);
@@ -330,15 +333,20 @@ export class AIEffectsEngine {
 
   private applyAlphaFeather(data: Uint8ClampedArray, width: number, height: number, radius: number): void {
     const r = Math.ceil(radius);
-    const alphaChannel = new Float32Array(width * height);
+    const n = width * height;
+
+    // Reuse class-level buffers; reallocate only when frame size grows
+    if (this.alphaChannelBuf.length < n) this.alphaChannelBuf = new Float32Array(n);
+    if (this.alphaBlurredBuf.length < n) this.alphaBlurredBuf = new Float32Array(n);
+    const alphaChannel = this.alphaChannelBuf;
+    const blurred = this.alphaBlurredBuf;
 
     // Extract alpha
-    for (let i = 0; i < width * height; i++) {
+    for (let i = 0; i < n; i++) {
       alphaChannel[i] = data[i * 4 + 3] / 255;
     }
 
     // Simple box blur
-    const blurred = new Float32Array(width * height);
     
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -361,7 +369,7 @@ export class AIEffectsEngine {
     }
 
     // Apply blurred alpha
-    for (let i = 0; i < width * height; i++) {
+    for (let i = 0; i < n; i++) {
       data[i * 4 + 3] = Math.round(blurred[i] * 255);
     }
   }

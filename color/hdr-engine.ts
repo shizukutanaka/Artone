@@ -21,6 +21,37 @@ export type TransferFunction = 'gamma22' | 'gamma24' | 'pq' | 'hlg' | 'linear';
 
 const GAMMA22_ENC = 1 / 2.2;
 
+// PQ EOTF LUT: 8-bit code value → normalized linear [0,1] (i.e. L_nits / 10000).
+// Eliminates 2× Math.pow per channel per pixel in processFrame().
+const _PQ_EOTF_LUT = (() => {
+  const m1 = 2610 / 16384;
+  const m2 = 2523 / 4096 * 128;
+  const c1 = 3424 / 4096;
+  const c2 = 2413 / 4096 * 32;
+  const c3 = 2392 / 4096 * 32;
+  const lut = new Float32Array(256);
+  for (let v = 0; v < 256; v++) {
+    const x = v / 255;
+    const Vp = Math.pow(x, 1 / m2);
+    const n = Math.max(Vp - c1, 0);
+    lut[v] = Math.pow(n / (c2 - c3 * Vp), 1 / m1);
+  }
+  return lut;
+})();
+
+// HLG EOTF LUT: 8-bit code value → linear [0,1].
+const _HLG_EOTF_LUT = (() => {
+  const a = 0.17883277;
+  const b = 0.28466892;
+  const c = 0.55991073;
+  const lut = new Float32Array(256);
+  for (let v = 0; v < 256; v++) {
+    const x = v / 255;
+    lut[v] = x <= 0.5 ? (x * x) / 3 : (Math.exp((x - c) / a) + b) / 12;
+  }
+  return lut;
+})();
+
 export interface HDRMetadata {
   format: HDRFormat;
   colorSpace: ColorSpace;
@@ -513,14 +544,15 @@ export class HDREngine {
       if (metadata) {
         switch (metadata.transferFunction) {
           case 'pq':
-            r = this.pqEOTF(r) / 10000;
-            g = this.pqEOTF(g) / 10000;
-            b = this.pqEOTF(b) / 10000;
+            // Module-level LUTs replace 2×Math.pow per channel (6 pow calls → 3 lookups)
+            r = _PQ_EOTF_LUT[data[i]];
+            g = _PQ_EOTF_LUT[data[i + 1]];
+            b = _PQ_EOTF_LUT[data[i + 2]];
             break;
           case 'hlg':
-            r = this.hlgEOTF(r);
-            g = this.hlgEOTF(g);
-            b = this.hlgEOTF(b);
+            r = _HLG_EOTF_LUT[data[i]];
+            g = _HLG_EOTF_LUT[data[i + 1]];
+            b = _HLG_EOTF_LUT[data[i + 2]];
             break;
         }
 

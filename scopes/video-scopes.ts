@@ -27,6 +27,12 @@ const SCOPE_GREEN = '#33ff33';  // G channel (BT.709)
 const SCOPE_BLUE  = '#3333ff';  // B channel (BT.709)
 const SCOPE_SKIN  = '#e0a080';  // skin tone reference
 
+// Pre-parsed RGB components for waveform ImageData rendering.
+// These avoid string parsing inside the 60fps render loop.
+const WAVE_R_R = 0xff, WAVE_R_G = 0x33, WAVE_R_B = 0x33;  // #ff3333
+const WAVE_G_R = 0x33, WAVE_G_G = 0xff, WAVE_G_B = 0x33;  // #33ff33
+const WAVE_B_R = 0x33, WAVE_B_G = 0x33, WAVE_B_B = 0xff;  // #3333ff
+
 
 export interface ScopeConfig {
   type: ScopeType;
@@ -62,6 +68,13 @@ export class WaveformScope {
   private readonly waveG: Uint32Array;
   private readonly waveB: Uint32Array;
   private readonly waveY: Uint32Array;
+  // Separate dot canvas for waveform density rendering. Same pattern as Vectorscope:
+  // graticule stays on main canvas, density dots written to waveImageData via
+  // putImageData on dotCtx, then composited with ctx.drawImage(). Replaces up to
+  // 300K fillRect(1,1)+globalAlpha API calls per frame (RGB mode) with one drawImage.
+  private readonly dotCanvas: OffscreenCanvas;
+  private readonly dotCtx: OffscreenCanvasRenderingContext2D;
+  private readonly waveImageData: ImageData;
 
   constructor(config: Partial<ScopeConfig> = {}) {
     this.config = {
@@ -83,6 +96,9 @@ export class WaveformScope {
     this.waveG = new Uint32Array(buckets);
     this.waveB = new Uint32Array(buckets);
     this.waveY = new Uint32Array(buckets);
+    this.dotCanvas = new OffscreenCanvas(this.config.width, this.config.height);
+    this.dotCtx = this.dotCanvas.getContext('2d')!;
+    this.waveImageData = new ImageData(this.config.width, this.config.height);
   }
 
   setMode(mode: WaveformMode): void {
@@ -159,15 +175,29 @@ export class WaveformScope {
 
     const scale = this.config.brightness * this.config.scale;
 
+    // Write waveform dots directly to pre-allocated ImageData, then put in one call.
+    // Replaces up to 300K fillRect(1,1)+globalAlpha assignments per frame (RGB mode).
+    const d = this.waveImageData.data;
+    d.fill(0); // clear to transparent
+
+    // Source-over blend one channel color into the ImageData at pixel offset `off`.
+    const blendChannel = (off: number, cr: number, cg: number, cb: number, a: number): void => {
+      const ia = 255 - a;
+      d[off]     = ((cr * a + d[off]     * ia) >> 8);
+      d[off + 1] = ((cg * a + d[off + 1] * ia) >> 8);
+      d[off + 2] = ((cb * a + d[off + 2] * ia) >> 8);
+      d[off + 3] = a + ((d[off + 3] * ia) >> 8);
+    };
+
     if (this.mode === 'luma') {
-      this.ctx.fillStyle = color.textPrimary;
       for (let x = 0; x < width; x++) {
         const base = x * 256;
         for (let brt = 0; brt < 256; brt++) {
           const count = waveY[base + brt];
           if (count === 0) continue;
-          this.ctx.globalAlpha = Math.min(1, (count / maxCount) * scale);
-          this.ctx.fillRect(x, height - Math.ceil((brt / 255) * height), 1, 1);
+          const y = height - Math.ceil((brt / 255) * height);
+          const a = Math.min(255, (count / maxCount) * scale * 255) | 0;
+          blendChannel((y * width + x) * 4, 255, 255, 255, a);
         }
       }
     } else if (this.mode === 'rgb') {
@@ -175,56 +205,34 @@ export class WaveformScope {
         const base = x * 256;
         for (let brt = 0; brt < 256; brt++) {
           const y = height - Math.ceil((brt / 255) * height);
+          const off = (y * width + x) * 4;
           const cr = waveR[base + brt];
-          if (cr > 0) {
-            this.ctx.globalAlpha = Math.min(1, (cr / maxCount) * scale);
-            this.ctx.fillStyle = SCOPE_RED;
-            this.ctx.fillRect(x, y, 1, 1);
-          }
+          if (cr > 0) blendChannel(off, WAVE_R_R, WAVE_R_G, WAVE_R_B, Math.min(255, (cr / maxCount) * scale * 255) | 0);
           const cg = waveG[base + brt];
-          if (cg > 0) {
-            this.ctx.globalAlpha = Math.min(1, (cg / maxCount) * scale);
-            this.ctx.fillStyle = SCOPE_GREEN;
-            this.ctx.fillRect(x, y, 1, 1);
-          }
+          if (cg > 0) blendChannel(off, WAVE_G_R, WAVE_G_G, WAVE_G_B, Math.min(255, (cg / maxCount) * scale * 255) | 0);
           const cb = waveB[base + brt];
-          if (cb > 0) {
-            this.ctx.globalAlpha = Math.min(1, (cb / maxCount) * scale);
-            this.ctx.fillStyle = SCOPE_BLUE;
-            this.ctx.fillRect(x, y, 1, 1);
-          }
+          if (cb > 0) blendChannel(off, WAVE_B_R, WAVE_B_G, WAVE_B_B, Math.min(255, (cb / maxCount) * scale * 255) | 0);
         }
       }
     } else if (this.mode === 'parade') {
-      const thirdWidth = width / 3;
+      const thirdWidth = Math.floor(width / 3);
       for (let x = 0; x < width; x++) {
         const base = x * 256;
         const paradeX = Math.floor(x / 3);
         for (let brt = 0; brt < 256; brt++) {
           const y = height - Math.ceil((brt / 255) * height);
           const cr = waveR[base + brt];
-          if (cr > 0) {
-            this.ctx.globalAlpha = Math.min(1, (cr / maxCount) * scale);
-            this.ctx.fillStyle = SCOPE_RED;
-            this.ctx.fillRect(paradeX, y, 1, 1);
-          }
+          if (cr > 0) blendChannel((y * width + paradeX) * 4, WAVE_R_R, WAVE_R_G, WAVE_R_B, Math.min(255, (cr / maxCount) * scale * 255) | 0);
           const cg = waveG[base + brt];
-          if (cg > 0) {
-            this.ctx.globalAlpha = Math.min(1, (cg / maxCount) * scale);
-            this.ctx.fillStyle = SCOPE_GREEN;
-            this.ctx.fillRect(paradeX + thirdWidth, y, 1, 1);
-          }
+          if (cg > 0) blendChannel((y * width + paradeX + thirdWidth) * 4, WAVE_G_R, WAVE_G_G, WAVE_G_B, Math.min(255, (cg / maxCount) * scale * 255) | 0);
           const cb = waveB[base + brt];
-          if (cb > 0) {
-            this.ctx.globalAlpha = Math.min(1, (cb / maxCount) * scale);
-            this.ctx.fillStyle = SCOPE_BLUE;
-            this.ctx.fillRect(paradeX + thirdWidth * 2, y, 1, 1);
-          }
+          if (cb > 0) blendChannel((y * width + paradeX + thirdWidth * 2) * 4, WAVE_B_R, WAVE_B_G, WAVE_B_B, Math.min(255, (cb / maxCount) * scale * 255) | 0);
         }
       }
     }
 
-    this.ctx.globalAlpha = 1;
+    this.dotCtx.putImageData(this.waveImageData, 0, 0);
+    this.ctx.drawImage(this.dotCanvas, 0, 0);
     return this.canvas.transferToImageBitmap();
   }
 

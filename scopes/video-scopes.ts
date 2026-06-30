@@ -295,6 +295,9 @@ export class Vectorscope {
   private readonly scopeRSum: Uint32Array;
   private readonly scopeGSum: Uint32Array;
   private readonly scopeBSum: Uint32Array;
+  // Skin-tone density accumulator — reused by renderSkinToneMode() to avoid
+  // per-frame allocation (same pattern as scopeDensity above).
+  private readonly skinDensity: Uint32Array;
   // Separate offscreen canvas for scope dots so they composite *over* the
   // graticule (drawn first on the main canvas) via ctx.drawImage().
   private readonly dotCanvas: OffscreenCanvas;
@@ -324,6 +327,7 @@ export class Vectorscope {
     this.scopeRSum    = new Uint32Array(pixels);
     this.scopeGSum    = new Uint32Array(pixels);
     this.scopeBSum    = new Uint32Array(pixels);
+    this.skinDensity  = new Uint32Array(pixels);
     this.dotCanvas    = new OffscreenCanvas(this.config.width, this.config.height);
     this.dotCtx       = this.dotCanvas.getContext('2d')!;
     this.dotImageData = new ImageData(this.config.width, this.config.height);
@@ -452,52 +456,134 @@ export class Vectorscope {
 
   /**
    * Skin-tone mode: highlights the I-line angular sector [15°,35°] in Cb/Cr space.
-   * Uses cross-product sector test to replace Math.atan2() per pixel — same
-   * technique already applied in HistogramScope.getStats().
+   * Uses cross-product sector test to replace Math.atan2() per pixel.
+   *
+   * Accumulates all pixels into two density maps (total + skin-tone), then renders
+   * a single putImageData instead of up to 50 K per-pixel fillRect calls per frame.
+   * SCOPE_SKIN = #e0a080 (R:224,G:160,B:128); non-skin = color.surface4 (#252525).
    */
   private renderSkinToneMode(
     data: Uint8ClampedArray,
     cx: number, cy: number, radius: number,
     sampleStep: number,
   ): void {
-    const { scale, brightness } = this.config;
-    // Angular sector [15°,35°] cross-product boundary vectors (BT.709 Cb/Cr).
-    // A point (u,v) is inside when: COS15*v - SIN15*u ≥ 0 AND COS35*v - SIN35*u ≤ 0.
+    const { width, height, scale, brightness } = this.config;
     const COS15 = 0.9659, SIN15 = 0.2588;
     const COS35 = 0.8192, SIN35 = 0.5736;
     const rScale = radius * scale / 128;
 
-    this.ctx.globalAlpha = brightness * 0.5;
+    const { scopeDensity, skinDensity } = this;
+    scopeDensity.fill(0); skinDensity.fill(0);
+
     for (let i = 0; i < data.length; i += 4 * sampleStep) {
       const r = data[i], g = data[i + 1], b = data[i + 2];
       const u = -0.1146 * r - 0.3854 * g + 0.5   * b;
       const v =  0.5    * r - 0.4542 * g - 0.0458 * b;
-      const isSkinTone = COS15 * v - SIN15 * u >= 0 && COS35 * v - SIN35 * u <= 0;
-      this.ctx.fillStyle = isSkinTone ? SCOPE_SKIN : color.surface4;
-      this.ctx.fillRect(cx + u * rScale, cy - v * rScale, 2, 2);
+      const px = Math.round(cx + u * rScale);
+      const py = Math.round(cy - v * rScale);
+      if (px >= 0 && px < width && py >= 0 && py < height) {
+        const idx = py * width + px;
+        scopeDensity[idx]++;
+        if (COS15 * v - SIN15 * u >= 0 && COS35 * v - SIN35 * u <= 0) {
+          skinDensity[idx]++;
+        }
+      }
     }
-    this.ctx.globalAlpha = 1;
+
+    let maxDensity = 0;
+    for (let i = 0, len = width * height; i < len; i++) {
+      if (scopeDensity[i] > maxDensity) maxDensity = scopeDensity[i];
+    }
+
+    const dotPx = this.dotImageData.data;
+    dotPx.fill(0);
+
+    if (maxDensity > 0) {
+      const alphaMul = brightness * 0.5 * 255;
+      for (let i = 0, len = width * height; i < len; i++) {
+        const cnt = scopeDensity[i];
+        if (cnt === 0) continue;
+        const alpha = Math.min(255, ((cnt / maxDensity) * alphaMul + 0.5) | 0);
+        const isSkin = skinDensity[i] > 0;
+        // Write 2×2 square (matches original fillRect(x,y,2,2) dot size)
+        const px = i % width, py = (i / width) | 0;
+        for (let dy = 0; dy < 2; dy++) {
+          for (let dx = 0; dx < 2; dx++) {
+            const nx = px + dx, ny = py + dy;
+            if (nx < width && ny < height) {
+              const pidx = (ny * width + nx) * 4;
+              // SCOPE_SKIN #e0a080: R=0xe0, G=0xa0, B=0x80
+              // color.surface4 #252525: R=G=B=0x25
+              dotPx[pidx]     = isSkin ? 0xe0 : 0x25;
+              dotPx[pidx + 1] = isSkin ? 0xa0 : 0x25;
+              dotPx[pidx + 2] = isSkin ? 0x80 : 0x25;
+              dotPx[pidx + 3] = alpha;
+            }
+          }
+        }
+      }
+    }
+    this.dotCtx.putImageData(this.dotImageData, 0, 0);
+    this.ctx.drawImage(this.dotCanvas, 0, 0);
   }
 
   /**
-   * Hue-vs-saturation mode: single constant colour — no per-pixel string allocation.
+   * Hue-vs-saturation mode: single constant colour (color.textPrimary = #FFFFFF).
+   * Accumulates to a density map and renders via single putImageData, eliminating
+   * up to 50 K per-pixel fillRect calls per frame.
    */
   private renderHueVsSatMode(
     data: Uint8ClampedArray,
     cx: number, cy: number, radius: number,
     sampleStep: number,
   ): void {
-    const { scale, brightness } = this.config;
+    const { width, height, scale, brightness } = this.config;
     const rScale = radius * scale / 128;
-    this.ctx.globalAlpha = brightness * 0.5;
-    this.ctx.fillStyle = color.textPrimary;
+
+    const { scopeDensity } = this;
+    scopeDensity.fill(0);
+
     for (let i = 0; i < data.length; i += 4 * sampleStep) {
       const r = data[i], g = data[i + 1], b = data[i + 2];
       const u = -0.1146 * r - 0.3854 * g + 0.5   * b;
       const v =  0.5    * r - 0.4542 * g - 0.0458 * b;
-      this.ctx.fillRect(cx + u * rScale, cy - v * rScale, 2, 2);
+      const px = Math.round(cx + u * rScale);
+      const py = Math.round(cy - v * rScale);
+      if (px >= 0 && px < width && py >= 0 && py < height) {
+        scopeDensity[py * width + px]++;
+      }
     }
-    this.ctx.globalAlpha = 1;
+
+    let maxDensity = 0;
+    for (let i = 0, len = width * height; i < len; i++) {
+      if (scopeDensity[i] > maxDensity) maxDensity = scopeDensity[i];
+    }
+
+    const dotPx = this.dotImageData.data;
+    dotPx.fill(0);
+
+    if (maxDensity > 0) {
+      // color.textPrimary = #FFFFFF
+      const alphaMul = brightness * 0.5 * 255;
+      for (let i = 0, len = width * height; i < len; i++) {
+        const cnt = scopeDensity[i];
+        if (cnt === 0) continue;
+        const alpha = Math.min(255, ((cnt / maxDensity) * alphaMul + 0.5) | 0);
+        const px = i % width, py = (i / width) | 0;
+        for (let dy = 0; dy < 2; dy++) {
+          for (let dx = 0; dx < 2; dx++) {
+            const nx = px + dx, ny = py + dy;
+            if (nx < width && ny < height) {
+              const pidx = (ny * width + nx) * 4;
+              dotPx[pidx] = 0xff; dotPx[pidx + 1] = 0xff; dotPx[pidx + 2] = 0xff;
+              dotPx[pidx + 3] = alpha;
+            }
+          }
+        }
+      }
+    }
+    this.dotCtx.putImageData(this.dotImageData, 0, 0);
+    this.ctx.drawImage(this.dotCanvas, 0, 0);
   }
 
   private drawGraticule(cx: number, cy: number, r: number): void {

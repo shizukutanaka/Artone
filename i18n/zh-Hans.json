@@ -360,7 +360,10 @@
       "scale": "缩放",
       "rotation": "旋转",
       "alpha": "α",
-      "enabled": "启用"
+      "enabled": "启用",
+      "x": "X",
+      "y": "Y",
+      "fps": "帧率"
     }
   },
   "captions": {

@@ -389,7 +389,10 @@
       "scale": "スケール",
       "rotation": "回転",
       "alpha": "α",
-      "enabled": "有効"
+      "enabled": "有効",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {

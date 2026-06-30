@@ -360,7 +360,10 @@
       "scale": "مقياس",
       "rotation": "دوران",
       "alpha": "α",
-      "enabled": "مفعّل"
+      "enabled": "مفعّل",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {

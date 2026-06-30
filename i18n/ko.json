@@ -360,7 +360,10 @@
       "scale": "크기",
       "rotation": "회전",
       "alpha": "α",
-      "enabled": "활성화"
+      "enabled": "활성화",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {

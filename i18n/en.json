@@ -427,7 +427,10 @@
       "scale": "Scale",
       "rotation": "Rotation",
       "alpha": "α",
-      "enabled": "Enabled"
+      "enabled": "Enabled",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {

@@ -275,10 +275,10 @@ const ClipInspector: React.FC<{ sel: ClipSelection; onChange: (s: ClipSelection)
     </Section>
 
     <Section title={t('inspector.section.transform')}>
-      <Row label="X">
+      <Row label={t('inspector.label.x')}>
         <NumberInput value={sel.position.x} onChange={(v) => onChange({ ...sel, position: { ...sel.position, x: v } })} unit="px" />
       </Row>
-      <Row label="Y">
+      <Row label={t('inspector.label.y')}>
         <NumberInput value={sel.position.y} onChange={(v) => onChange({ ...sel, position: { ...sel.position, y: v } })} unit="px" />
       </Row>
       <Row label={t('inspector.label.scale')}>
@@ -390,7 +390,7 @@ const ProjectInspector: React.FC<{ sel: ProjectSelection; onChange: (s: ProjectS
           }}
         />
       </Row>
-      <Row label="FPS">
+      <Row label={t('inspector.label.fps')}>
         <select
           value={sel.fps}
           onChange={(e) => onChange({ ...sel, fps: parseFloat(e.target.value) })}

@@ -360,7 +360,10 @@
       "scale": "Escala",
       "rotation": "Rotación",
       "alpha": "α",
-      "enabled": "Activado"
+      "enabled": "Activado",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {

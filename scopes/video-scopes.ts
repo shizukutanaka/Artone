@@ -61,6 +61,10 @@ export class WaveformScope {
   private ctx: OffscreenCanvasRenderingContext2D;
   private config: ScopeConfig;
   private mode: WaveformMode = 'luma';
+  // Cached temp canvas for VideoFrame→ImageData extraction. Reused across
+  // frames; recreated only when frame dimensions change (avoids per-frame alloc).
+  private _tempCanvas: OffscreenCanvas | null = null;
+  private _tempCtx: OffscreenCanvasRenderingContext2D | null = null;
   // Pre-allocated density maps: flat [scopeX * 256 + brightness] = pixel count.
   // Replaces per-frame Map + dynamic array allocation (~thousands of GC objects
   // at 60fps).  Size = config.width × 256 (fixed at construction time).
@@ -108,13 +112,17 @@ export class WaveformScope {
   /** VideoFrame または ImageData から ImageData を取得する */
   private extractImageData(frame: VideoFrame | ImageData): ImageData {
     if (frame instanceof VideoFrame) {
-      const tempCanvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      // willReadFrequently: getImageData() is called every frame; without it
-      // Chrome keeps the canvas GPU-backed and each read triggers a slow
-      // GPU→CPU readback (Qiita: canvas パフォーマンス向上).
-      const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      tempCtx.drawImage(frame, 0, 0);
-      return tempCtx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
+      const w = frame.displayWidth, h = frame.displayHeight;
+      // Reuse temp canvas when dimensions are unchanged (typical at 60fps).
+      // Recreate only on resolution change to avoid per-frame OffscreenCanvas alloc.
+      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
+        this._tempCanvas = new OffscreenCanvas(w, h);
+        // willReadFrequently: keeps canvas CPU-backed so getImageData() avoids
+        // GPU→CPU readback stall (Qiita: canvas パフォーマンス向上).
+        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
+      }
+      this._tempCtx!.drawImage(frame, 0, 0);
+      return this._tempCtx!.getImageData(0, 0, w, h);
     }
     return frame;
   }
@@ -292,6 +300,9 @@ export class Vectorscope {
   private readonly dotCanvas: OffscreenCanvas;
   private readonly dotCtx: OffscreenCanvasRenderingContext2D;
   private readonly dotImageData: ImageData;
+  // Cached temp canvas for VideoFrame→ImageData extraction.
+  private _tempCanvas: OffscreenCanvas | null = null;
+  private _tempCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   constructor(config: Partial<ScopeConfig> = {}) {
     this.config = {
@@ -341,17 +352,18 @@ export class Vectorscope {
     // Get pixel data
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
-      const tempCanvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      // willReadFrequently: getImageData() is called every frame; without it
-      // Chrome keeps the canvas GPU-backed and each read triggers a slow
-      // GPU→CPU readback (Qiita: canvas パフォーマンス向上).
-      const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      tempCtx.drawImage(frame, 0, 0);
-      imageData = tempCtx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
+      const w = frame.displayWidth, h = frame.displayHeight;
+      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
+        this._tempCanvas = new OffscreenCanvas(w, h);
+        // willReadFrequently keeps canvas CPU-backed; avoids GPU→CPU readback stall.
+        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
+      }
+      this._tempCtx!.drawImage(frame, 0, 0);
+      imageData = this._tempCtx!.getImageData(0, 0, w, h);
     } else {
       imageData = frame;
     }
-    
+
     const { data, width: frameWidth, height: frameHeight } = imageData;
 
     // Sample pixels (downsample for performance)
@@ -578,6 +590,9 @@ export class HistogramScope {
   private readonly histG = new Uint32Array(256);
   private readonly histB = new Uint32Array(256);
   private readonly histY = new Uint32Array(256);
+  // Cached temp canvas shared by analyze() and getStats() for VideoFrame extraction.
+  private _tempCanvas: OffscreenCanvas | null = null;
+  private _tempCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   constructor(config: Partial<ScopeConfig> = {}) {
     this.config = {
@@ -609,17 +624,18 @@ export class HistogramScope {
     // Get pixel data
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
-      const tempCanvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      // willReadFrequently: getImageData() is called every frame; without it
-      // Chrome keeps the canvas GPU-backed and each read triggers a slow
-      // GPU→CPU readback (Qiita: canvas パフォーマンス向上).
-      const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      tempCtx.drawImage(frame, 0, 0);
-      imageData = tempCtx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
+      const w = frame.displayWidth, h = frame.displayHeight;
+      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
+        this._tempCanvas = new OffscreenCanvas(w, h);
+        // willReadFrequently keeps canvas CPU-backed; avoids GPU→CPU readback stall.
+        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
+      }
+      this._tempCtx!.drawImage(frame, 0, 0);
+      imageData = this._tempCtx!.getImageData(0, 0, w, h);
     } else {
       imageData = frame;
     }
-    
+
     const { data } = imageData;
 
     // Reuse pre-allocated accumulators — fill(0) is O(256), far cheaper than
@@ -762,13 +778,13 @@ export class HistogramScope {
   getStats(frame: VideoFrame | ImageData): ScopeAnalysis {
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
-      const tempCanvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      // willReadFrequently: getImageData() is called every frame; without it
-      // Chrome keeps the canvas GPU-backed and each read triggers a slow
-      // GPU→CPU readback (Qiita: canvas パフォーマンス向上).
-      const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      tempCtx.drawImage(frame, 0, 0);
-      imageData = tempCtx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
+      const w = frame.displayWidth, h = frame.displayHeight;
+      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
+        this._tempCanvas = new OffscreenCanvas(w, h);
+        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
+      }
+      this._tempCtx!.drawImage(frame, 0, 0);
+      imageData = this._tempCtx!.getImageData(0, 0, w, h);
     } else {
       imageData = frame;
     }

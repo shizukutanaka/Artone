@@ -11,7 +11,7 @@
  * @version 3.2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ds, color, space, radius, motion, z, type FeatureTier, CSS_VARIABLES, typography } from './design-system';
 import { FirstRunExperience, type FirstRunResult, type ExperienceLevel } from './first-run';
 import { CommandPalette, createDefaultCommands, type PaletteItem } from './command-palette';
@@ -331,7 +331,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     if (engine.isReady && pendingFiles.length > 0) {
       handleImport(pendingFiles).catch(() => undefined);
     }
-  }, [engine.isReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [engine.isReady, pendingFiles, handleImport]);
 
   // グローバルショートカット
   useEffect(() => {
@@ -348,7 +348,10 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
   }, [engine.lastCommand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // コマンドパレット — エンジンの実アクションを渡す
-  const commands: PaletteItem[] = createDefaultCommands({
+  // useMemo prevents recreating the commands array (and all its closures) on every
+  // render. actions is stable (engine-context useMemo), so this only rebuilds when
+  // the engine reinitializes (rare).
+  const commands = useMemo<PaletteItem[]>(() => createDefaultCommands({
     play: () => actions.togglePlayPause(),
     save: () => { actions.save(); },
     undo: () => actions.undo(),
@@ -373,7 +376,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     toggleTheme: () => {},
     showShortcuts: () => {},
     about: () => {},
-  });
+  }), [actions]);
 
   const sidebarWidth = sidebarOpen ? 280 : 0;
 

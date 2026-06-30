@@ -295,7 +295,12 @@ export class CollaborationEngine {
   deleteAnnotation(annotationId: string): void {
     const annotation = this.annotations.get(annotationId);
     if (annotation) {
-      this._annotationFrameIndex.get(annotation.frame)?.delete(annotationId);
+      const frameSet = this._annotationFrameIndex.get(annotation.frame);
+      if (frameSet) {
+        frameSet.delete(annotationId);
+        // Remove the empty Set so the index doesn't accumulate stale keys.
+        if (frameSet.size === 0) this._annotationFrameIndex.delete(annotation.frame);
+      }
     }
     this.annotations.delete(annotationId);
     this.broadcastUpdate('annotation-delete', { annotationId });

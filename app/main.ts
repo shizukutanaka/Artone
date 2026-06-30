@@ -128,6 +128,10 @@ export class ArtoneApp {
   private isPlaying = false;
   private playbackFrame = 0;
   private animationId: number | null = null;
+  /** Wall-clock time (performance.now()) when play() was last called, for drift-free frame advance. */
+  private playbackStartWallTime = 0;
+  /** Timeline frame at the moment play() was called, so elapsed wall-time maps to the right frame. */
+  private playbackStartFrame = 0;
 
   // Crash snapshots (error / unhandledrejection / beforeunload) and the periodic
   // auto-save timer are owned by RecoveryManager (transactional IndexedDB). The
@@ -322,6 +326,10 @@ export class ArtoneApp {
 
   play(): void {
     this.isPlaying = true;
+    // Record the wall-clock origin and the frame we're starting from so the RAF
+    // loop can derive the correct frame index without accumulating delta-error.
+    this.playbackStartWallTime = performance.now();
+    this.playbackStartFrame = this.playbackFrame;
     this.timeline.play();
     this.startPlaybackLoop();
   }
@@ -334,27 +342,27 @@ export class ArtoneApp {
 
   private startPlaybackLoop(): void {
     const fps = this.config.defaultFps;
-    const frameTime = 1000 / fps;
-    let lastTime = performance.now();
 
     const loop = (currentTime: number) => {
       if (!this.isPlaying) return;
 
-      // Performance monitoring
       this.perf.beginFrame();
 
-      const delta = currentTime - lastTime;
-      if (delta >= frameTime) {
-        lastTime = currentTime - (delta % frameTime);
-        
+      // Derive the current frame from wall-clock elapsed time so we don't
+      // accumulate per-RAF rounding error (the old delta-based approach drifted).
+      const elapsedSec = (currentTime - this.playbackStartWallTime) / 1000;
+      const newFrame = this.playbackStartFrame + Math.floor(elapsedSec * fps);
+
+      if (newFrame !== this.playbackFrame) {
+        this.playbackFrame = newFrame;
+        const timeSec = newFrame / fps;
+        this.timeline.setPlayhead(timeSec);
+        this.emit?.('playhead', { frame: newFrame, time: timeSec });
+
         this.perf.markPhase('timeline');
         this.renderPreviewFrame();
-        
-        // Auto quality adjustment
-        const quality = this.autoQuality.update();
-        if (quality < 1.0) {
-          // Quality scale は AutoQualityAdjuster が perf 経由で制御
-        }
+
+        this.autoQuality.update();
       }
 
       this.perf.endFrame();
@@ -548,8 +556,16 @@ export class ArtoneApp {
   }
 
   seek(time: number): void {
+    const fps = this.config.defaultFps;
+    this.playbackFrame = Math.floor(time * fps);
     this.timeline.setPlayhead(time);
-    this.playbackFrame = Math.floor(time * this.config.defaultFps);
+    // Re-anchor the RAF scheduler so playback continues from the new position
+    // without a jump when play() was active during the seek.
+    if (this.isPlaying) {
+      this.playbackStartWallTime = performance.now();
+      this.playbackStartFrame = this.playbackFrame;
+    }
+    this.emit?.('playhead', { frame: this.playbackFrame, time });
   }
 
   async save(): Promise<void> {

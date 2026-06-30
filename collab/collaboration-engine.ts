@@ -81,6 +81,10 @@ export class CollaborationEngine {
   private users: Map<string, CollabUser> = new Map();
   private comments: Map<string, Comment> = new Map();
   private annotations: Map<string, Annotation> = new Map();
+  // Secondary index: frame number → annotation IDs for O(1) lookup.
+  // Kept in sync by addAnnotation()/deleteAnnotation() to avoid O(N)
+  // full-scan in getAnnotationsForFrame() which is called at 60fps during scrubbing.
+  private _annotationFrameIndex: Map<number, Set<string>> = new Map();
   private versions: Version[] = [];
   private localUser: CollabUser | null = null;
   private peers: Map<string, RTCPeerConnection> = new Map();
@@ -279,19 +283,35 @@ export class CollaborationEngine {
     };
 
     this.annotations.set(annotation.id, annotation);
+    // Update secondary frame index
+    let frameSet = this._annotationFrameIndex.get(frame);
+    if (!frameSet) { frameSet = new Set(); this._annotationFrameIndex.set(frame, frameSet); }
+    frameSet.add(annotation.id);
     this.broadcastUpdate('annotation-add', annotation);
     this.notify();
     return annotation;
   }
 
   deleteAnnotation(annotationId: string): void {
+    const annotation = this.annotations.get(annotationId);
+    if (annotation) {
+      this._annotationFrameIndex.get(annotation.frame)?.delete(annotationId);
+    }
     this.annotations.delete(annotationId);
     this.broadcastUpdate('annotation-delete', { annotationId });
     this.notify();
   }
 
   getAnnotationsForFrame(frame: number): Annotation[] {
-    return Array.from(this.annotations.values()).filter(a => a.frame === frame);
+    // O(1) frame lookup via secondary index; was O(N) full scan at 60fps during scrubbing.
+    const ids = this._annotationFrameIndex.get(frame);
+    if (!ids || ids.size === 0) return [];
+    const result: Annotation[] = [];
+    for (const id of ids) {
+      const a = this.annotations.get(id);
+      if (a) result.push(a);
+    }
+    return result;
   }
 
   // ============================================================

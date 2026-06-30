@@ -58,6 +58,9 @@ interface PluginInstance {
   presets: PluginPreset[];
   currentPreset: number;
   bypassed: boolean;
+  /** O(1) lookup maps built once at instantiation — avoids .find()/.findIndex() per setParameter call. */
+  paramById: Map<string, ParameterDescriptor>;
+  paramIndexById: Map<string, number>;
 }
 
 interface PluginPreset {
@@ -180,12 +183,19 @@ export class PluginBridge {
       });
     }
     
-    // Initialize parameters
+    // Initialize parameters and build O(1) lookup indices (paramById, paramIndexById).
+    // These avoid repeated .find()/.findIndex() in setParameter(), which is called
+    // at up to 60fps during automation playback.
     const parameters = new Map<string, number>();
-    for (const param of descriptor.parameters) {
+    const paramById = new Map<string, ParameterDescriptor>();
+    const paramIndexById = new Map<string, number>();
+    for (let i = 0; i < descriptor.parameters.length; i++) {
+      const param = descriptor.parameters[i];
       parameters.set(param.id, param.defaultValue);
+      paramById.set(param.id, param);
+      paramIndexById.set(param.id, i);
     }
-    
+
     const instance: PluginInstance = {
       id: instanceId,
       descriptor,
@@ -195,7 +205,9 @@ export class PluginBridge {
       parameters,
       presets: [],
       currentPreset: -1,
-      bypassed: false
+      bypassed: false,
+      paramById,
+      paramIndexById,
     };
     
     this.instances.set(instanceId, instance);
@@ -243,16 +255,16 @@ export class PluginBridge {
     const instance = this.instances.get(instanceId);
     if (!instance) return;
     
-    const param = instance.descriptor.parameters.find(p => p.id === parameterId);
+    const param = instance.paramById.get(parameterId);
     if (!param) return;
-    
+
     const clampedValue = Math.max(param.minValue, Math.min(param.maxValue, value));
     instance.parameters.set(parameterId, clampedValue);
-    
-    // Update WASM instance
+
+    // Update WASM instance — O(1) index lookup via pre-built map
     const exports = instance.wasmInstance.exports as { setParameter?: (id: number, value: number) => void };
     if (exports.setParameter) {
-      const paramIndex = instance.descriptor.parameters.findIndex(p => p.id === parameterId);
+      const paramIndex = instance.paramIndexById.get(parameterId)!;
       exports.setParameter(paramIndex, clampedValue);
     }
     

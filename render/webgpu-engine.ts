@@ -561,8 +561,9 @@ export class WebGPURenderEngine {
     });
     clearPass.end();
 
-    // Frame-local GPU resources created during encoding; destroyed after submit.
-    const transientBuffers: GPUBuffer[] = [];
+    // Intermediate effect textures are tracked here and destroyed after submit.
+    // Param buffers are pre-allocated persistently (_effectParamGPUBuf,
+    // _compositeParamGPUBuf) so no transient buffer array is needed.
     const transientTextures: GPUTexture[] = [];
 
     // Render each layer
@@ -573,7 +574,7 @@ export class WebGPURenderEngine {
       let tex = layer.texture;
       for (const effect of layer.effects) {
         if (!effect.enabled) continue;
-        const out = await this.applyEffect(encoder, tex, effect, transientBuffers);
+        const out = await this.applyEffect(encoder, tex, effect);
         if (out) {
           transientTextures.push(out);
           tex = out;
@@ -581,14 +582,12 @@ export class WebGPURenderEngine {
       }
 
       // Composite
-      await this.compositeLayer(encoder, outputView, tex, layer, transientBuffers);
+      await this.compositeLayer(encoder, outputView, tex, layer);
     }
 
     this.device.queue.submit([encoder.finish()]);
 
-    // REGRESSION: destroy all frame-local GPU resources after submit.
-    // paramBuffers and intermediate effect textures were previously leaked every frame.
-    for (const buf of transientBuffers) buf.destroy();
+    // Destroy intermediate effect textures created during this frame.
     for (const t of transientTextures) t.destroy();
 
     // Update stats
@@ -599,7 +598,6 @@ export class WebGPURenderEngine {
     encoder: GPUCommandEncoder,
     input: GPUTexture,
     effect: RenderEffect,
-    transient: GPUBuffer[]
   ): Promise<GPUTexture | null> {
     if (!this.device) return null;
 
@@ -652,7 +650,6 @@ export class WebGPURenderEngine {
     output: GPUTextureView,
     texture: GPUTexture,
     layer: RenderLayer,
-    transient: GPUBuffer[]
   ): Promise<void> {
     if (!this.device || !this.sampler) return;
 

@@ -160,6 +160,14 @@ export class MagneticTimeline {
    */
   private clipIndexCache: IntervalIndex<{ id: string; start: number; end: number }> | null = null;
 
+  /**
+   * Lazy per-track clip-ID index. Maps trackId → Set of clipIds for that
+   * track. Allows getTrackClips() and shiftClipsAfter() to iterate only the
+   * K clips on the target track instead of all N clips (O(K) vs O(N)).
+   * Invalidated alongside clipIndexCache on every mutation.
+   */
+  private trackIndexCache: Map<string, Set<string>> | null = null;
+
   constructor() {
     this.state = {
       tracks: new Map(),
@@ -369,9 +377,12 @@ export class MagneticTimeline {
   // ============================================================
 
   private shiftClipsAfter(trackId: string, afterTime: number, delta: number, excludeClipId?: string): void {
-    for (const clip of this.state.clips.values()) {
-      if (clip.id === excludeClipId) continue;
-      if (clip.trackId === trackId && clip.startTime >= afterTime) {
+    const ids = this._getTrackIndex().get(trackId);
+    if (!ids) return;
+    for (const id of ids) {
+      if (id === excludeClipId) continue;
+      const clip = this.state.clips.get(id)!;
+      if (clip.startTime >= afterTime) {
         clip.startTime = Math.max(0, clip.startTime + delta);
       }
     }
@@ -887,8 +898,9 @@ export class MagneticTimeline {
   // ============================================================
 
   getTrackClips(trackId: string): Clip[] {
-    return Array.from(this.state.clips.values())
-      .filter(c => c.trackId === trackId);
+    const ids = this._getTrackIndex().get(trackId);
+    if (!ids) return [];
+    return Array.from(ids, id => this.state.clips.get(id)!).filter(Boolean);
   }
 
   getClipsAtTime(time: number): Clip[] {
@@ -966,9 +978,23 @@ export class MagneticTimeline {
     }
   }
 
+  /** Build and return the per-track clip-ID index. */
+  private _getTrackIndex(): Map<string, Set<string>> {
+    if (!this.trackIndexCache) {
+      this.trackIndexCache = new Map<string, Set<string>>();
+      for (const clip of this.state.clips.values()) {
+        let set = this.trackIndexCache.get(clip.trackId);
+        if (!set) { set = new Set<string>(); this.trackIndexCache.set(clip.trackId, set); }
+        set.add(clip.id);
+      }
+    }
+    return this.trackIndexCache;
+  }
+
   /** Invalidate the clip-index cache and fire all listeners. */
   private _fireListeners(): void {
     this.clipIndexCache = null; // invalidate O(n) build cache
+    this.trackIndexCache = null;
     for (const listener of this.listeners) {
       listener(this.state);
     }

@@ -289,6 +289,8 @@ export class ColorGradingEngine {
   private luts: Map<string, LUTData> = new Map();
   private gpu: GPUDevice | null = null;
   private shaders: Map<string, GPUShaderModule> = new Map();
+  /** Cached compute pipeline — created once after GPU init, reused per frame. */
+  private computePipeline: GPUComputePipeline | null = null;
 
   constructor() {
     this.initGPU();
@@ -307,12 +309,20 @@ export class ColorGradingEngine {
   private compileShaders(): void {
     if (!this.gpu) return;
 
-    // Unified color grading shader
     const gradeShader = this.gpu.createShaderModule({
       label: 'Color Grade',
       code: GRADE_SHADER_CODE,
     });
     this.shaders.set('grade', gradeShader);
+
+    // Create the compute pipeline once; bind-group layouts are inferred (auto).
+    // Pipeline creation is expensive (~ms); cache it here so processGPU() pays
+    // only the cheap bind-group / uniform-write cost per frame.
+    this.computePipeline = this.gpu.createComputePipeline({
+      label: 'Color Grade Compute',
+      layout: 'auto',
+      compute: { module: gradeShader, entryPoint: 'main' },
+    });
   }
 
   // ============================================================
@@ -492,13 +502,147 @@ export class ColorGradingEngine {
     const grade = this.grades.get(gradeId);
     if (!grade) return null;
 
-    // CPU fallback
-    if (!this.gpu) {
-      return this.processCPU(input, grade);
+    // GPU path: single corrector node with no LUT and no non-trivial curves.
+    // Multi-node chains and grades with LUTs/curves fall through to CPU.
+    if (this.gpu && this.computePipeline) {
+      const correctors = grade.nodeOrder
+        .map(id => grade.nodes.get(id))
+        .filter((n): n is ColorNode => !!n?.enabled && n.type === 'corrector');
+
+      if (
+        correctors.length === 1 &&
+        !correctors[0].lut &&
+        this.isIdentityCurves(correctors[0].curves)
+      ) {
+        return this.processGPU(input, correctors[0].wheels);
+      }
     }
 
-    // GPU processing would go here
     return this.processCPU(input, grade);
+  }
+
+  /**
+   * Returns true when every curve in `c` is the identity (linear pass-through).
+   * A curve is identity if it has exactly two control points: (0,0) and (1,1).
+   */
+  private isIdentityCurves(c: Curves): boolean {
+    const isId = (pts: CurvePoint[]) =>
+      pts.length === 2 &&
+      pts[0].x === 0 && pts[0].y === 0 &&
+      pts[1].x === 1 && pts[1].y === 1;
+
+    return (
+      isId(c.master) && isId(c.red) && isId(c.green) && isId(c.blue) &&
+      c.hueVsSat.length === 0 && c.hueVsHue.length === 0 && c.lumVsSat.length === 0
+    );
+  }
+
+  /**
+   * GPU compute-shader grading path.
+   * Uploads the input image to a GPU texture, dispatches the WGSL wheels
+   * shader (workgroup_size 8×8), reads back via a staging buffer, and returns
+   * an ImageBitmap.  Called only when GPU and computePipeline are ready and
+   * the grade has a single corrector node with identity curves and no LUT.
+   */
+  private async processGPU(
+    input: ImageBitmap | HTMLVideoElement | HTMLCanvasElement,
+    wheels: ColorWheels,
+  ): Promise<ImageBitmap> {
+    const gpu = this.gpu!;
+    const pipeline = this.computePipeline!;
+    const w = input instanceof HTMLVideoElement ? input.videoWidth  : input.width;
+    const h = input instanceof HTMLVideoElement ? input.videoHeight : input.height;
+
+    // copyExternalImageToTexture does not accept HTMLVideoElement — draw first.
+    const staging = new OffscreenCanvas(w, h);
+    staging.getContext('2d')!.drawImage(input, 0, 0);
+
+    const inputTex = gpu.createTexture({
+      label: 'grade-in',
+      size: [w, h],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING |
+             GPUTextureUsage.COPY_DST       |
+             GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    gpu.queue.copyExternalImageToTexture({ source: staging }, { texture: inputTex }, [w, h]);
+
+    const outputTex = gpu.createTexture({
+      label: 'grade-out',
+      size: [w, h],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
+    });
+
+    // Pack ColorWheels → 80-byte Float32Array matching the WGSL Wheels struct:
+    // 4×vec4<f32> (lift/gamma/gain/offset) + 4×f32 (contrast/pivot/sat/hue)
+    const uniformData = new Float32Array(20);
+    uniformData.set([
+      wheels.lift.r,   wheels.lift.g,   wheels.lift.b,   wheels.lift.a,
+      wheels.gamma.r,  wheels.gamma.g,  wheels.gamma.b,  wheels.gamma.a,
+      wheels.gain.r,   wheels.gain.g,   wheels.gain.b,   wheels.gain.a,
+      wheels.offset.r, wheels.offset.g, wheels.offset.b, wheels.offset.a,
+      wheels.contrast, wheels.pivot, wheels.saturation, wheels.hue,
+    ]);
+    const uniformBuf = gpu.createBuffer({
+      label: 'wheels-uniform',
+      size: 80,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    gpu.queue.writeBuffer(uniformBuf, 0, uniformData);
+
+    const bindGroup = gpu.createBindGroup({
+      label: 'grade-bg',
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: inputTex.createView() },
+        { binding: 1, resource: outputTex.createView() },
+        { binding: 2, resource: { buffer: uniformBuf } },
+      ],
+    });
+
+    // bytesPerRow must be a multiple of 256 for copyTextureToBuffer.
+    const bytesPerRow = Math.ceil((w * 4) / 256) * 256;
+    const readbackBuf = gpu.createBuffer({
+      label: 'grade-readback',
+      size: bytesPerRow * h,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+
+    const encoder = gpu.createCommandEncoder({ label: 'grade-encoder' });
+    const pass = encoder.beginComputePass({ label: 'grade-pass' });
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(Math.ceil(w / 8), Math.ceil(h / 8));
+    pass.end();
+    encoder.copyTextureToBuffer(
+      { texture: outputTex },
+      { buffer: readbackBuf, bytesPerRow },
+      [w, h],
+    );
+    gpu.queue.submit([encoder.finish()]);
+
+    await readbackBuf.mapAsync(GPUMapMode.READ);
+    const raw = new Uint8Array(readbackBuf.getMappedRange());
+    const imgData = new ImageData(w, h);
+    for (let row = 0; row < h; row++) {
+      imgData.data.set(
+        raw.subarray(row * bytesPerRow, row * bytesPerRow + w * 4),
+        row * w * 4,
+      );
+    }
+    readbackBuf.unmap();
+
+    // Release per-frame GPU resources; the compute pipeline is cached on the
+    // class and must NOT be destroyed here.
+    inputTex.destroy();
+    outputTex.destroy();
+    uniformBuf.destroy();
+    readbackBuf.destroy();
+
+    const out = new OffscreenCanvas(w, h);
+    out.getContext('2d')!.putImageData(imgData, 0, 0);
+    return createImageBitmap(out);
   }
 
   private async processCPU(
@@ -610,6 +754,24 @@ export class ColorGradingEngine {
   // ============================================================
   // Export
   // ============================================================
+
+  // ============================================================
+  // Lifecycle
+  // ============================================================
+
+  /**
+   * Release GPU resources. Call when the engine will no longer be used.
+   * Failing to call destroy() leaks the GPUDevice and compute pipeline
+   * (flagged as a risk zone in render/CLAUDE.md).
+   */
+  destroy(): void {
+    // computePipeline has no explicit destroy() in WebGPU spec — dropping the
+    // reference is sufficient; the GPUDevice cleanup handles it.
+    this.computePipeline = null;
+    this.shaders.clear();
+    this.gpu?.destroy();
+    this.gpu = null;
+  }
 
   exportGrade(gradeId: string): string {
     const grade = this.grades.get(gradeId);

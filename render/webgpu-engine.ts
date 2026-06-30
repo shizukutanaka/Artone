@@ -127,10 +127,14 @@ export class WebGPURenderEngine {
   private deviceLost = false;
   private intentionalDestroy = false;
   private readonly contextListeners = new Set<(lost: boolean) => void>();
-  // Pre-allocated param buffers — reused every frame to avoid per-layer/per-effect
-  // Float32Array allocation at 60fps (render CLAUDE.md: resource creation in render loop 禁止).
+  // Pre-allocated CPU staging buffers — reused every frame (avoids Float32Array alloc per call).
   private readonly effectParamBuf    = new Float32Array(8);  // up to 8 numeric effect params
   private readonly compositeParamBuf = new Float32Array(4);  // [opacity, blendMode, 0, 0]
+  // Pre-allocated GPU uniform buffers — created once after device init, persistent across
+  // frames. Eliminates device.createBuffer() per effect/layer per frame (render CLAUDE.md:
+  // resource creation in render loop 禁止). Destroyed implicitly by device.destroy().
+  private _effectParamGPUBuf: GPUBuffer | null = null;    // 32 bytes UNIFORM|COPY_DST
+  private _compositeParamGPUBuf: GPUBuffer | null = null; // 16 bytes UNIFORM|COPY_DST
 
   /** Subscribe to device lost/recovered transitions (UI can show a banner). */
   onContextChange(listener: (lost: boolean) => void): () => void {
@@ -174,6 +178,8 @@ export class WebGPURenderEngine {
     this.pipelines.clear();
     this.shaders.clear();
     this.sampler = null;
+    this._effectParamGPUBuf = null;
+    this._compositeParamGPUBuf = null;
     this.device = null;
     const ok = await this.initialize(this.canvas);
     if (ok) {
@@ -220,6 +226,17 @@ export class WebGPURenderEngine {
 
       await this.compileShaders();
       await this.createPipelines();
+
+      // Pre-allocate persistent uniform buffers — one per param layout.
+      // These replace per-frame createBuffer() calls in applyEffect/compositeLayer.
+      this._effectParamGPUBuf = this.device.createBuffer({
+        size: 32,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+      });
+      this._compositeParamGPUBuf = this.device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+      });
 
       return true;
     } catch (e) {
@@ -605,11 +622,8 @@ export class WebGPURenderEngine {
       if (typeof v === 'number') paramData[i++] = v;
     }
 
-    const paramBuffer = this.device.createBuffer({
-      size: 32,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-    transient.push(paramBuffer);
+    // Use persistent uniform buffer (pre-allocated in init) — avoids createBuffer per frame.
+    const paramBuffer = this._effectParamGPUBuf!;
     this.device.queue.writeBuffer(paramBuffer, 0, paramData);
 
     const bindGroup = this.device.createBindGroup({
@@ -649,11 +663,8 @@ export class WebGPURenderEngine {
     paramData[1] = this.blendModeToInt(layer.blend);
     paramData[2] = 0;
     paramData[3] = 0;
-    const paramBuffer = this.device.createBuffer({
-      size: 16,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-    transient.push(paramBuffer);
+    // Use persistent uniform buffer (pre-allocated in init) — avoids createBuffer per frame.
+    const paramBuffer = this._compositeParamGPUBuf!;
     this.device.queue.writeBuffer(paramBuffer, 0, paramData);
 
     const bindGroup = this.device.createBindGroup({
@@ -735,6 +746,11 @@ export class WebGPURenderEngine {
     this.pipelines.clear();
     this.shaders.clear();
     this.sampler = null;
+    // Explicitly destroy pre-allocated param buffers before device.destroy().
+    this._effectParamGPUBuf?.destroy();
+    this._effectParamGPUBuf = null;
+    this._compositeParamGPUBuf?.destroy();
+    this._compositeParamGPUBuf = null;
     // Mark BEFORE destroy() so the device.lost handler treats the resulting
     // 'destroyed' resolution as intentional (no spurious recovery attempt).
     this.intentionalDestroy = true;

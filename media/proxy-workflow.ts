@@ -249,31 +249,34 @@ class ProxyEncoder {
     if (!ctx) throw new Error('Failed to get 2D context');
     setHighQualityScaling(ctx); // proxies downscale the source — use a good kernel
 
-    while (currentTime < duration) {
-      video.currentTime = currentTime;
-      await new Promise<void>((res) => {
-        video.onseeked = () => res();
-      });
+    try {
+      while (currentTime < duration) {
+        video.currentTime = currentTime;
+        await new Promise<void>((res) => {
+          video.onseeked = () => res();
+        });
 
-      ctx.drawImage(video, 0, 0, targetW, targetH);
-      const frame = new VideoFrame(canvas, {
-        timestamp: currentTime * 1_000_000,
-        duration: frameInterval * 1_000_000
-      });
+        ctx.drawImage(video, 0, 0, targetW, targetH);
+        const frame = new VideoFrame(canvas, {
+          timestamp: currentTime * 1_000_000,
+          duration: frameInterval * 1_000_000
+        });
 
-      try {
-        encoder.encode(frame, { keyFrame: frameCount % 60 === 0 });
-      } finally {
-        frame.close();
+        try {
+          encoder.encode(frame, { keyFrame: frameCount % 60 === 0 });
+        } finally {
+          frame.close();
+        }
+
+        frameCount++;
+        currentTime += frameInterval;
+        onProgress(frameCount / totalFrames);
       }
 
-      frameCount++;
-      currentTime += frameInterval;
-      onProgress(frameCount / totalFrames);
+      await encoder.flush();
+    } finally {
+      encoder.close();
     }
-
-    await encoder.flush();
-    encoder.close();
 
     return new Blob(chunks as BlobPart[], { type: 'video/mp4' });
   }

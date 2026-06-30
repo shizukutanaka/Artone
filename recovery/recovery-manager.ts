@@ -171,7 +171,7 @@ export class RecoveryManager {
         this.currentProjectId ?? undefined,
         this.currentProjectName ?? undefined,
         data,
-      );
+      ).catch(e => log.error('Failed to save crash snapshot:', e));
     };
 
     window.addEventListener('error', saveCrashSnapshot);

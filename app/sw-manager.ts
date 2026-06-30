@@ -41,6 +41,9 @@ export class ServiceWorkerManager {
     this.registration.addEventListener('updatefound', () => {
       const worker = this.registration!.installing;
       if (!worker) return;
+      // Use { once: true } so the statechange listener auto-removes after first fire,
+      // preventing a listener leak when updatefound fires multiple times (e.g., rapid
+      // redeploys in dev mode accumulate unlimited statechange listeners otherwise).
       worker.addEventListener('statechange', () => {
         if (
           worker.state === 'installed' &&
@@ -49,7 +52,7 @@ export class ServiceWorkerManager {
           this.updateAvailable = true;
           this.notify('updated');
         }
-      });
+      }, { once: true });
     });
 
     const { signal } = this.abortCtrl;
@@ -143,9 +146,20 @@ export class ServiceWorkerManager {
   private sendMessage<T>(msg: unknown): Promise<T | null> {
     return new Promise((resolve) => {
       const ch = new MessageChannel();
-      ch.port1.onmessage = (e) => resolve(e.data as T);
+      let settled = false;
+      const settle = (value: T | null): void => {
+        if (settled) return;
+        settled = true;
+        // Close port1 to release the message channel; the transfer of port2 to
+        // the SW means it gets closed on the other side when the SW drops it.
+        ch.port1.close();
+        resolve(value);
+      };
+      ch.port1.onmessage = (e) => settle(e.data as T);
       navigator.serviceWorker.controller?.postMessage(msg, [ch.port2]);
-      setTimeout(() => resolve(null), 5000);
+      // Timeout: resolve null and close port so the channel isn't leaked when
+      // the SW never responds (e.g. SW not running, wrong message type).
+      setTimeout(() => settle(null), 5000);
     });
   }
 }

@@ -143,8 +143,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     setQuery('');
     setSelectedIndex(0);
     const restoreFocus = captureFocus();
-    requestAnimationFrame(() => inputRef.current?.focus());
-    return restoreFocus;
+    // Store RAF id so we can cancel it if the component unmounts before the
+    // frame fires — otherwise the callback runs on a stale ref (React StrictMode
+    // double-invoke makes this a real case in development).
+    const rafId = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => { cancelAnimationFrame(rafId); restoreFocus(); };
   }, [isOpen]);
 
   // 選択追従スクロール

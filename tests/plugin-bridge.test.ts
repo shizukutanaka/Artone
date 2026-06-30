@@ -41,7 +41,14 @@ let instCounter = 0;
 function injectInstance(bridge: PluginBridge, descriptor = makeDescriptor()): PluginInstance {
   instCounter++;
   const parameters = new Map<string, number>();
-  for (const p of descriptor.parameters) parameters.set(p.id, p.defaultValue);
+  const paramById = new Map<string, (typeof descriptor.parameters)[0]>();
+  const paramIndexById = new Map<string, number>();
+  for (let i = 0; i < descriptor.parameters.length; i++) {
+    const p = descriptor.parameters[i];
+    parameters.set(p.id, p.defaultValue);
+    paramById.set(p.id, p);
+    paramIndexById.set(p.id, i);
+  }
   const instance: PluginInstance = {
     id: `inst-${instCounter}`,
     descriptor,
@@ -52,6 +59,8 @@ function injectInstance(bridge: PluginBridge, descriptor = makeDescriptor()): Pl
     presets: [],
     currentPreset: -1,
     bypassed: false,
+    paramById,
+    paramIndexById,
   };
   (bridge as unknown as { instances: Map<string, PluginInstance> }).instances.set(instance.id, instance);
   return instance;

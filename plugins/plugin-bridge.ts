@@ -48,7 +48,7 @@ interface ParameterFlags {
   programChange: boolean;
 }
 
-interface PluginInstance {
+export interface PluginInstance {
   id: string;
   descriptor: PluginDescriptor;
   wasmModule: WebAssembly.Module;

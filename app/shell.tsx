@@ -363,7 +363,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
       input.accept = 'video/*,audio/*,image/*';
       input.onchange = () => {
         const files = Array.from(input.files ?? []);
-        if (files.length > 0) actions.importFiles(files);
+        if (files.length > 0) actions.importFiles(files).catch(() => undefined);
       };
       input.click();
     },
@@ -494,7 +494,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
         </aside>
 
         {/* 中央 (プレビュー + タイムライン) — DropZone でファイルドロップ受付 */}
-        <DropZone onFilesDropped={(files) => actions.importFiles(files)}>
+        <DropZone onFilesDropped={(files) => { actions.importFiles(files).catch(() => undefined); }}>
           <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* プレビュー */}
           <div style={{

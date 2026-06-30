@@ -291,6 +291,14 @@ export class ColorGradingEngine {
   private shaders: Map<string, GPUShaderModule> = new Map();
   /** Cached compute pipeline — created once after GPU init, reused per frame. */
   private computePipeline: GPUComputePipeline | null = null;
+  // Per-frame canvas caches (lazy-grow on dimension change)
+  private _stagingCanvas: OffscreenCanvas | null = null;
+  private _outCanvas: OffscreenCanvas | null = null;
+  private _outCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _cpuCanvas: OffscreenCanvas | null = null;
+  private _cpuCtx: OffscreenCanvasRenderingContext2D | null = null;
+  /** Reusable 20-element uniform data buffer (80 bytes — ColorWheels struct). */
+  private readonly _uniformData = new Float32Array(20);
 
   constructor() {
     this.initGPU();
@@ -554,8 +562,11 @@ export class ColorGradingEngine {
     const h = input instanceof HTMLVideoElement ? input.videoHeight : input.height;
 
     // copyExternalImageToTexture does not accept HTMLVideoElement — draw first.
-    const staging = new OffscreenCanvas(w, h);
-    staging.getContext('2d')!.drawImage(input, 0, 0);
+    if (!this._stagingCanvas || this._stagingCanvas.width !== w || this._stagingCanvas.height !== h) {
+      this._stagingCanvas = new OffscreenCanvas(w, h);
+    }
+    this._stagingCanvas.getContext('2d')!.drawImage(input, 0, 0);
+    const staging = this._stagingCanvas;
 
     const inputTex = gpu.createTexture({
       label: 'grade-in',
@@ -576,7 +587,7 @@ export class ColorGradingEngine {
 
     // Pack ColorWheels → 80-byte Float32Array matching the WGSL Wheels struct:
     // 4×vec4<f32> (lift/gamma/gain/offset) + 4×f32 (contrast/pivot/sat/hue)
-    const uniformData = new Float32Array(20);
+    const uniformData = this._uniformData;
     uniformData.set([
       wheels.lift.r,   wheels.lift.g,   wheels.lift.b,   wheels.lift.a,
       wheels.gamma.r,  wheels.gamma.g,  wheels.gamma.b,  wheels.gamma.a,
@@ -640,9 +651,12 @@ export class ColorGradingEngine {
     uniformBuf.destroy();
     readbackBuf.destroy();
 
-    const out = new OffscreenCanvas(w, h);
-    out.getContext('2d')!.putImageData(imgData, 0, 0);
-    return createImageBitmap(out);
+    if (!this._outCanvas || this._outCanvas.width !== w || this._outCanvas.height !== h) {
+      this._outCanvas = new OffscreenCanvas(w, h);
+      this._outCtx = this._outCanvas.getContext('2d')!;
+    }
+    this._outCtx!.putImageData(imgData, 0, 0);
+    return createImageBitmap(this._outCanvas);
   }
 
   private async processCPU(
@@ -652,10 +666,14 @@ export class ColorGradingEngine {
     const w = input instanceof HTMLVideoElement ? input.videoWidth : input.width;
     const h = input instanceof HTMLVideoElement ? input.videoHeight : input.height;
     
-    const canvas = new OffscreenCanvas(w, h);
-    // willReadFrequently: this context exists to read pixels back via
-    // getImageData for CPU grading; avoids per-call GPU→CPU readback.
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    if (!this._cpuCanvas || this._cpuCanvas.width !== w || this._cpuCanvas.height !== h) {
+      this._cpuCanvas = new OffscreenCanvas(w, h);
+      // willReadFrequently: this context exists to read pixels back via
+      // getImageData for CPU grading; avoids per-call GPU→CPU readback.
+      this._cpuCtx = this._cpuCanvas.getContext('2d', { willReadFrequently: true })!;
+    }
+    const canvas = this._cpuCanvas;
+    const ctx = this._cpuCtx!;
     ctx.drawImage(input, 0, 0);
 
     const imgData = ctx.getImageData(0, 0, w, h);

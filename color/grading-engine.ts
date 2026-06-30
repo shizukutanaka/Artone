@@ -545,49 +545,63 @@ export class ColorGradingEngine {
   }
 
   private applyWheels(data: Uint8ClampedArray, w: ColorWheels): void {
+    // Hoist loop-invariant coefficients: for a 1920×1080 frame (≈2M pixels) this
+    // eliminates ~18M redundant additions/divisions inside the hot path.
+    const liftR = w.lift.r + w.lift.a;
+    const liftG = w.lift.g + w.lift.a;
+    const liftB = w.lift.b + w.lift.a;
+    const gammaR = 1 / Math.max(1 + w.gamma.r + w.gamma.a, 0.001);
+    const gammaG = 1 / Math.max(1 + w.gamma.g + w.gamma.a, 0.001);
+    const gammaB = 1 / Math.max(1 + w.gamma.b + w.gamma.a, 0.001);
+    const gainR  = 1 + w.gain.r + w.gain.a;
+    const gainG  = 1 + w.gain.g + w.gain.a;
+    const gainB  = 1 + w.gain.b + w.gain.a;
+    const offR   = w.offset.r + w.offset.a;
+    const offG   = w.offset.g + w.offset.a;
+    const offB   = w.offset.b + w.offset.a;
+    // Contrast rewritten as scale + bias to avoid per-channel pivot subtraction:
+    //   (v - pivot) * scale + pivot  =  v * scale + pivot * (1 - scale)
+    const contrastScale = 1 + w.contrast;
+    const contrastBias  = w.pivot * (1 - contrastScale);
+    const saturation    = w.saturation;
+
     for (let i = 0; i < data.length; i += 4) {
-      let r = data[i] / 255;
+      let r = data[i]     / 255;
       let g = data[i + 1] / 255;
       let b = data[i + 2] / 255;
 
       // Lift
-      const liftR = w.lift.r + w.lift.a;
-      const liftG = w.lift.g + w.lift.a;
-      const liftB = w.lift.b + w.lift.a;
       r += liftR * (1 - r);
       g += liftG * (1 - g);
       b += liftB * (1 - b);
 
       // Gamma
-      const gammaR = 1 / Math.max(1 + w.gamma.r + w.gamma.a, 0.001);
-      const gammaG = 1 / Math.max(1 + w.gamma.g + w.gamma.a, 0.001);
-      const gammaB = 1 / Math.max(1 + w.gamma.b + w.gamma.a, 0.001);
       r = Math.pow(Math.max(r, 0), gammaR);
       g = Math.pow(Math.max(g, 0), gammaG);
       b = Math.pow(Math.max(b, 0), gammaB);
 
       // Gain
-      r *= 1 + w.gain.r + w.gain.a;
-      g *= 1 + w.gain.g + w.gain.a;
-      b *= 1 + w.gain.b + w.gain.a;
+      r *= gainR;
+      g *= gainG;
+      b *= gainB;
 
       // Offset
-      r += w.offset.r + w.offset.a;
-      g += w.offset.g + w.offset.a;
-      b += w.offset.b + w.offset.a;
+      r += offR;
+      g += offG;
+      b += offB;
 
       // Contrast
-      r = (r - w.pivot) * (1 + w.contrast) + w.pivot;
-      g = (g - w.pivot) * (1 + w.contrast) + w.pivot;
-      b = (b - w.pivot) * (1 + w.contrast) + w.pivot;
+      r = r * contrastScale + contrastBias;
+      g = g * contrastScale + contrastBias;
+      b = b * contrastScale + contrastBias;
 
       // Saturation
       const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      r = luma + (r - luma) * w.saturation;
-      g = luma + (g - luma) * w.saturation;
-      b = luma + (b - luma) * w.saturation;
+      r = luma + (r - luma) * saturation;
+      g = luma + (g - luma) * saturation;
+      b = luma + (b - luma) * saturation;
 
-      data[i] = Math.max(0, Math.min(255, r * 255));
+      data[i]     = Math.max(0, Math.min(255, r * 255));
       data[i + 1] = Math.max(0, Math.min(255, g * 255));
       data[i + 2] = Math.max(0, Math.min(255, b * 255));
     }

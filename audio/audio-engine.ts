@@ -91,6 +91,10 @@ export class AudioEngine {
   private tracks: Map<string, AudioTrackState> = new Map();
   private masterGain: GainNode | null = null;
   private masterAnalyser: AnalyserNode | null = null;
+  // Pre-allocated buffers: avoids Float32Array construction on every 60 fps meter tick.
+  // Typed as Float32Array<ArrayBuffer> to match what Web Audio API typings expect.
+  private masterMeterBuf: Float32Array<ArrayBuffer> | null = null;
+  private masterFreqBuf: Float32Array<ArrayBuffer> | null = null;
 
   async init(): Promise<void> {
     this.ensureContext();
@@ -108,6 +112,9 @@ export class AudioEngine {
 
     this.masterGain.connect(this.masterAnalyser);
     this.masterAnalyser.connect(this.ctx.destination);
+
+    this.masterMeterBuf = new Float32Array(this.masterAnalyser.fftSize);
+    this.masterFreqBuf  = new Float32Array(this.masterAnalyser.frequencyBinCount);
 
     return this.ctx;
   }
@@ -148,6 +155,7 @@ export class AudioEngine {
       gain,
       pan,
       analyser,
+      meterBuf: new Float32Array(analyser.fftSize),
       effects: []
     };
     this.tracks.set(id, state);
@@ -241,7 +249,7 @@ export class AudioEngine {
     const state = this.tracks.get(trackId);
     if (!state) return { peak: -Infinity, rms: -Infinity };
 
-    const data = new Float32Array(state.analyser.fftSize);
+    const data = state.meterBuf;
     state.analyser.getFloatTimeDomainData(data);
 
     let peak = 0;
@@ -262,9 +270,9 @@ export class AudioEngine {
   }
 
   getMasterLevels(): { peak: number; rms: number } {
-    if (!this.masterAnalyser) return { peak: -Infinity, rms: -Infinity };
+    if (!this.masterAnalyser || !this.masterMeterBuf) return { peak: -Infinity, rms: -Infinity };
 
-    const data = new Float32Array(this.masterAnalyser.fftSize);
+    const data = this.masterMeterBuf;
     this.masterAnalyser.getFloatTimeDomainData(data);
 
     let peak = 0;
@@ -285,11 +293,10 @@ export class AudioEngine {
   }
 
   getFrequencyData(): Float32Array {
-    if (!this.masterAnalyser) return new Float32Array(0);
+    if (!this.masterAnalyser || !this.masterFreqBuf) return new Float32Array(0);
 
-    const data = new Float32Array(this.masterAnalyser.frequencyBinCount);
-    this.masterAnalyser.getFloatFrequencyData(data);
-    return data;
+    this.masterAnalyser.getFloatFrequencyData(this.masterFreqBuf);
+    return this.masterFreqBuf;
   }
 
   // ============================================================
@@ -424,6 +431,7 @@ export class AudioEngine {
     const length = Math.ceil(duration * sampleRate);
     
     const offline = new OfflineAudioContext(2, length, sampleRate);
+    const sources: AudioBufferSourceNode[] = [];
 
     for (const clip of clips) {
       const source = offline.createBufferSource();
@@ -435,9 +443,14 @@ export class AudioEngine {
       source.connect(gain);
       gain.connect(offline.destination);
       source.start(clip.start);
+      sources.push(source);
     }
 
-    return offline.startRendering();
+    const rendered = await offline.startRendering();
+    // Null source buffers after rendering to release the GC hold on AudioBuffer
+    // references that would otherwise linger past the OfflineAudioContext lifetime.
+    for (const src of sources) src.buffer = null;
+    return rendered;
   }
 
   // ============================================================
@@ -452,6 +465,8 @@ export class AudioEngine {
     // getters short-circuit to -Infinity instead of touching dead nodes.
     this.masterGain = null;
     this.masterAnalyser = null;
+    this.masterMeterBuf = null;
+    this.masterFreqBuf  = null;
   }
 }
 
@@ -465,6 +480,8 @@ interface AudioTrackState {
   gain: GainNode;
   pan: StereoPannerNode;
   analyser: AnalyserNode;
+  /** Pre-allocated time-domain buffer — reused on every getMeterLevels() call. */
+  meterBuf: Float32Array<ArrayBuffer>;
   effects: AudioNode[];
 }
 

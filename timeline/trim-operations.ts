@@ -56,7 +56,7 @@ export type MutableClip = {
  */
 export type TrimResult =
   | { readonly ok: true;  readonly clips: TrimClip[] }
-  | { readonly ok: false; readonly clips: readonly TrimClip[]; readonly reason: string };
+  | { readonly ok: false; readonly clips: TrimClip[]; readonly reason: string };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

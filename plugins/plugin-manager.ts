@@ -525,7 +525,7 @@ export class PluginManager {
             const result = fn(context);
             self.postMessage({ success: true, result });
           } catch (error) {
-            self.postMessage({ success: false, error: error.message });
+            self.postMessage({ success: false, error: error instanceof Error ? error.message : String(error) });
           }
         };
       `], { type: 'application/javascript' });

@@ -233,8 +233,20 @@ class ProxyEncoder {
     video.muted = true;
     video.crossOrigin = 'anonymous';
     await new Promise<void>((res, rej) => {
-      video.onloadedmetadata = () => res();
-      video.onerror = () => rej(new Error('Video load failed'));
+      const METADATA_TIMEOUT_MS = 30_000;
+      const timer = setTimeout(() => {
+        video.onloadedmetadata = null;
+        video.onerror = null;
+        rej(new Error(`Proxy encode: metadata load timeout after ${METADATA_TIMEOUT_MS}ms`));
+      }, METADATA_TIMEOUT_MS);
+      const settle = (fn: () => void) => () => {
+        clearTimeout(timer);
+        video.onloadedmetadata = null;
+        video.onerror = null;
+        fn();
+      };
+      video.onloadedmetadata = settle(res);
+      video.onerror = settle(() => rej(new Error('Video load failed')));
     });
 
     const duration = video.duration;
@@ -276,6 +288,11 @@ class ProxyEncoder {
       await encoder.flush();
     } finally {
       encoder.close();
+      // Release the network connection and allow the element to be GC'd immediately.
+      video.src = '';
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.onseeked = null;
     }
 
     return new Blob(chunks as BlobPart[], { type: 'video/mp4' });

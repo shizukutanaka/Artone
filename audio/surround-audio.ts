@@ -308,7 +308,7 @@ export class SurroundAudioEngine {
       let gain = Math.max(0, 1 - (distance / spreadFactor));
       
       // Apply power panning
-      gain = Math.pow(gain, 0.5);
+      gain = Math.sqrt(gain);
       
       // Special handling for LFE
       if (channel.label === 'LFE') {

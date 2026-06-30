@@ -27,6 +27,8 @@
  * # AI generated (reviewed)
  */
 
+const _DB_TO_LIN_MUL = Math.LN10 / 20;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Fade shape family. */
@@ -294,7 +296,7 @@ export function gainToDb(gain: number): number {
  * @param db  Level in decibels.
  */
 export function dbToGain(db: number): number {
-  return Math.pow(10, db / 20);
+  return Math.exp(db * _DB_TO_LIN_MUL);
 }
 
 /**

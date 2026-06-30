@@ -16,6 +16,8 @@
  * @version 1.0.0
  */
 
+const _DB_TO_LIN_MUL = Math.LN10 / 20;
+
 // ============================================================
 // Types
 // ============================================================
@@ -663,7 +665,7 @@ export function computeDuckingGain(
     // ダッキングへ入る (target<gDb) ときは attack、戻るときは release。
     const coeff = target < gDb ? attack : release;
     gDb = target + (gDb - target) * coeff;
-    gain[i] = Math.pow(10, gDb / 20);
+    gain[i] = Math.exp(gDb * _DB_TO_LIN_MUL);
   }
   return gain;
 }

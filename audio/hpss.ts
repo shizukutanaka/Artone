@@ -354,6 +354,7 @@ function wienerMasks(
   const pRe: Float64Array[] = [];
   const pIm: Float64Array[] = [];
   const EPS = 1e-10;
+  const useSq = p === 2;
 
   for (let f = 0; f < nFrames; f++) {
     const hrRow = new Float64Array(nBins);
@@ -361,8 +362,9 @@ function wienerMasks(
     const prRow = new Float64Array(nBins);
     const piRow = new Float64Array(nBins);
     for (let b = 0; b < nBins; b++) {
-      const hp = Math.pow(H[f][b], p);
-      const pp = Math.pow(P[f][b], p);
+      const h = H[f][b], pv = P[f][b];
+      const hp = useSq ? h * h : (h > 0 ? Math.exp(p * Math.log(h)) : 0);
+      const pp = useSq ? pv * pv : (pv > 0 ? Math.exp(p * Math.log(pv)) : 0);
       const denom = hp + pp + EPS;
       const mH = hp / denom;
       const mP = pp / denom;

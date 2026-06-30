@@ -250,6 +250,9 @@ export class ExportEngine {
   private audioEncoder: AudioEncoder | null = null;
   private abortController: AbortController | null = null;
   private listeners: Set<(job: ExportJob) => void> = new Set();
+  // Cached canvas for videoFrameToImageData() — recreated only on resolution change.
+  private _gifCanvas: OffscreenCanvas | null = null;
+  private _gifCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   // ============================================================
   // Job Management
@@ -510,6 +513,10 @@ export class ExportEngine {
       const totalFrames = Math.ceil(buffer.length / frameSize);
 
       const encodeAll = async () => {
+        // Pre-allocate once at maximum frame size; for f32-planar the WebCodecs
+        // AudioData constructor reads only numberOfFrames * channels samples from
+        // the start, so passing a larger buffer on the last (shorter) frame is safe.
+        const audioBuf = new Float32Array(frameSize * channels);
         for (let f = 0; f < totalFrames; f++) {
           // Back-pressure (see awaitEncoderQueueBelow rationale).
           await awaitEncoderQueueBelow(this.audioEncoder!);
@@ -519,7 +526,7 @@ export class ExportEngine {
           // REGRESSION fix: f32-planar requires all ch-0 samples first, then ch-1.
           // The previous write `data[i * channels + ch]` produced interleaved layout
           // which mismatches f32-planar → garbled audio in the WebCodecs pipeline.
-          const data = new Float32Array(length * channels);
+          const data = audioBuf; // reuse pre-allocated buffer
           for (let ch = 0; ch < channels; ch++) {
             const channelData = buffer.getChannelData(ch);
             for (let i = 0; i < length; i++) {
@@ -645,12 +652,18 @@ export class ExportEngine {
   }
 
   private async videoFrameToImageData(frame: VideoFrame): Promise<ImageData> {
-    const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-    // willReadFrequently: every GIF frame is read back via getImageData.
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) throw new Error('Failed to obtain 2D context from OffscreenCanvas');
-    ctx.drawImage(frame as unknown as CanvasImageSource, 0, 0);
-    return ctx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
+    const w = frame.displayWidth, h = frame.displayHeight;
+    // Reuse canvas when dimensions are unchanged (common for all frames in a clip).
+    // Recreate only on resolution change to avoid per-frame OffscreenCanvas alloc.
+    if (!this._gifCanvas || this._gifCanvas.width !== w || this._gifCanvas.height !== h) {
+      this._gifCanvas = new OffscreenCanvas(w, h);
+      // willReadFrequently: every GIF frame is read back via getImageData.
+      const ctx = this._gifCanvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw new Error('Failed to obtain 2D context from OffscreenCanvas');
+      this._gifCtx = ctx;
+    }
+    this._gifCtx!.drawImage(frame as unknown as CanvasImageSource, 0, 0);
+    return this._gifCtx!.getImageData(0, 0, w, h);
   }
 
   // ============================================================

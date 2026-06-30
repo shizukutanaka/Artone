@@ -723,25 +723,33 @@ export class VideoPipeline {
 // Built-in Frame Processors
 // ============================================================
 
+// Module-level canvas for grayscale — reused across frames (grayscale has no
+// configuration params so a single shared instance is sufficient).
+// new VideoFrame(canvas, …) snapshots pixel state synchronously, so the canvas
+// can be reused immediately after the call returns.
+let _grayscaleCanvas: OffscreenCanvas | null = null;
+let _grayscaleCtx: OffscreenCanvasRenderingContext2D | null = null;
+
 export const FrameProcessors = {
   // Grayscale conversion
   grayscale: async (frame: VideoFrame): Promise<VideoFrame> => {
-    const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-    // willReadFrequently: pixels are read back via getImageData below.
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-
-    ctx.drawImage(frame, 0, 0);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const w = frame.displayWidth, h = frame.displayHeight;
+    if (!_grayscaleCanvas || _grayscaleCanvas.width !== w || _grayscaleCanvas.height !== h) {
+      _grayscaleCanvas = new OffscreenCanvas(w, h);
+      // willReadFrequently: pixels are read back via getImageData below.
+      _grayscaleCtx = _grayscaleCanvas.getContext('2d', { willReadFrequently: true })!;
+    }
+    _grayscaleCtx!.drawImage(frame, 0, 0);
+    const imageData = _grayscaleCtx!.getImageData(0, 0, w, h);
     const data = imageData.data;
-    
+
     for (let i = 0; i < data.length; i += 4) {
       const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
       data[i] = data[i + 1] = data[i + 2] = gray;
     }
-    
-    ctx.putImageData(imageData, 0, 0);
-    
-    return new VideoFrame(canvas, { timestamp: frame.timestamp });
+
+    _grayscaleCtx!.putImageData(imageData, 0, 0);
+    return new VideoFrame(_grayscaleCanvas, { timestamp: frame.timestamp });
   },
 
   // Brightness/Contrast adjustment
@@ -830,44 +838,51 @@ export const FrameProcessors = {
 
   // Watermark
   watermark: (text: string, position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' = 'bottom-right') => {
+    // Lazy-init canvas per closure: created on the first frame, resized only when
+    // frame dimensions change. Text metrics and context state set once at init.
+    let canvas: OffscreenCanvas | null = null;
+    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    let metricsWidth = 0;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      const ctx = canvas.getContext('2d')!;
-      
-      ctx.drawImage(frame, 0, 0);
-      
-      ctx.font = '24px sans-serif';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.lineWidth = 2;
-      
-      const metrics = ctx.measureText(text);
+      const { displayWidth: w, displayHeight: h } = frame;
+      if (!canvas || canvas.width !== w || canvas.height !== h) {
+        canvas = new OffscreenCanvas(w, h);
+        ctx = canvas.getContext('2d')!;
+        ctx.font = '24px sans-serif';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.lineWidth = 2;
+        // measureText is computed once per resolution; text and font don't change.
+        metricsWidth = ctx.measureText(text).width;
+      }
+
+      ctx!.drawImage(frame, 0, 0);
+
       const padding = 20;
-      
       let x: number, y: number;
-      
+
       switch (position) {
         case 'top-left':
           x = padding;
           y = 24 + padding;
           break;
         case 'top-right':
-          x = frame.displayWidth - metrics.width - padding;
+          x = w - metricsWidth - padding;
           y = 24 + padding;
           break;
         case 'bottom-left':
           x = padding;
-          y = frame.displayHeight - padding;
+          y = h - padding;
           break;
         case 'bottom-right':
         default:
-          x = frame.displayWidth - metrics.width - padding;
-          y = frame.displayHeight - padding;
+          x = w - metricsWidth - padding;
+          y = h - padding;
       }
-      
-      ctx.strokeText(text, x, y);
-      ctx.fillText(text, x, y);
-      
+
+      ctx!.strokeText(text, x, y);
+      ctx!.fillText(text, x, y);
+
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   }

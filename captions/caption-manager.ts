@@ -249,6 +249,9 @@ export class CaptionManager {
   private tracks: Map<string, CaptionTrack> = new Map();
   private activeTrackId: string | null = null;
   private listeners: Set<() => void> = new Set();
+  // Cached canvas for burnInCaptions() — recreated only when frame dimensions change.
+  private _burnCanvas: OffscreenCanvas | null = null;
+  private _burnCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   // ============================================================
   // Track Management
@@ -650,7 +653,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     // Draw background
     if (style.backgroundOpacity > 0) {
       const padding = 10;
-      const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+      // Avoid lines.map() array allocation + spread; measureText N times in a loop.
+      let maxLineWidth = 0;
+      for (let li = 0; li < lines.length; li++) {
+        const w = ctx.measureText(lines[li]).width;
+        if (w > maxLineWidth) maxLineWidth = w;
+      }
       
       let bgX = x - padding;
       if (position.align === 'center') {
@@ -711,10 +719,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const width = videoFrame.displayWidth;
     const height = videoFrame.displayHeight;
 
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d')!;
+    if (!this._burnCanvas || this._burnCanvas.width !== width || this._burnCanvas.height !== height) {
+      this._burnCanvas = new OffscreenCanvas(width, height);
+      this._burnCtx = this._burnCanvas.getContext('2d')!;
+    }
+    const canvas = this._burnCanvas;
+    const ctx = this._burnCtx!;
 
-    // Draw video frame
+    // Draw video frame (overwrites canvas from previous call)
     ctx.drawImage(videoFrame, 0, 0);
 
     // Draw captions

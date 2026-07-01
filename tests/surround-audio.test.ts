@@ -126,6 +126,46 @@ describe('SurroundAudioEngine — format management', () => {
 });
 
 // ============================================================
+// updateRouting — downmix node lifecycle (leak regression)
+// ============================================================
+
+describe('SurroundAudioEngine — updateRouting downmix node lifecycle', () => {
+  it('REGRESSION: disconnects the previous downmix nodes on re-route (no AudioNode leak)', () => {
+    const ctx = new AudioContext();
+    // Constructor calls setFormat('5.1'), which routes into updateRouting()
+    // once; monitorFormat defaults to 'stereo', so this already exercises the
+    // stereo-downmix branch and creates transient leftGain/rightGain/
+    // leftSplit/rightSplit nodes.
+    const engine = new SurroundAudioEngine(ctx);
+    const createGainSpy = ctx.createGain as unknown as ReturnType<typeof vi.fn>;
+
+    type Internal = {
+      channelNodes: Map<string, { disconnect: ReturnType<typeof vi.fn> }>;
+      masterNode: { disconnect: ReturnType<typeof vi.fn> };
+    };
+    const internal = engine as unknown as Internal;
+    const persistent = new Set<unknown>([internal.masterNode, ...internal.channelNodes.values()]);
+
+    const createdSoFar = createGainSpy.mock.results.map((r) => r.value);
+    const downmixNodesFromFirstRoute = createdSoFar.filter((n) => !persistent.has(n));
+    // Sanity check: the downmix branch actually ran and created transient nodes.
+    expect(downmixNodesFromFirstRoute.length).toBeGreaterThan(0);
+    for (const n of downmixNodesFromFirstRoute as Array<{ disconnect: ReturnType<typeof vi.fn> }>) {
+      expect(n.disconnect).not.toHaveBeenCalled();
+    }
+
+    // Re-trigger updateRouting()'s downmix branch a second time.
+    engine.setMonitorFormat('stereo');
+
+    // Before the fix, updateRouting() only disconnected channelNodes, never
+    // the previous call's downmix-only nodes — they stayed connected forever.
+    for (const n of downmixNodesFromFirstRoute as Array<{ disconnect: ReturnType<typeof vi.fn> }>) {
+      expect(n.disconnect).toHaveBeenCalled();
+    }
+  });
+});
+
+// ============================================================
 // Channel control
 // ============================================================
 

@@ -57,6 +57,11 @@
     "paste": "붙여넣기",
     "selectAll": "모두 선택"
   },
+  "history": {
+    "opsCount": "{count}개 작업",
+    "clear": "지우기",
+    "empty": "기록 없음"
+  },
   "timeline": {
     "title": "타임라인",
     "play": "재생",
@@ -187,6 +192,7 @@
     "all": "전체",
     "empty": "미디어를 드롭하거나 가져오기",
     "noMatch": "결과 없음",
+    "itemsLabel": "항목",
     "status": {
       "pending": "대기 중",
       "proxy": "프록시",
@@ -379,6 +385,7 @@
     "placeholder": "명령어, 효과, 설정 검색...",
     "hint": "↑↓ 이동 · Enter 실행 · Esc 닫기",
     "count": "{count}개 결과",
+    "noResults": "결과를 찾을 수 없습니다",
     "cmd": {
       "cut": "잘라내기",
       "copy": "복사",

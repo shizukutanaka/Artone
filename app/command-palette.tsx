@@ -292,7 +292,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 ...ds.text('body'),
               }}
             >
-              見つかりません
+              {t('palette.noResults')}
             </div>
           )}
           {results.map((item, i) => (

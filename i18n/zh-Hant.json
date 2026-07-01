@@ -57,6 +57,11 @@
     "paste": "貼上",
     "selectAll": "全選"
   },
+  "history": {
+    "opsCount": "{count} 項操作",
+    "clear": "清除",
+    "empty": "無歷史記錄"
+  },
   "timeline": {
     "title": "時間軸",
     "play": "播放",
@@ -187,6 +192,7 @@
     "all": "全部",
     "empty": "拖放或匯入媒體",
     "noMatch": "無符合結果",
+    "itemsLabel": "項",
     "status": {
       "pending": "待處理",
       "proxy": "代理",
@@ -379,6 +385,7 @@
     "placeholder": "搜尋指令、效果、設定...",
     "hint": "↑↓ 導覽 · Enter 執行 · Esc 關閉",
     "count": "{count} 個結果",
+    "noResults": "找不到結果",
     "cmd": {
       "cut": "剪下",
       "copy": "複製",

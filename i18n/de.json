@@ -57,6 +57,11 @@
     "paste": "Einfügen",
     "selectAll": "Alles auswählen"
   },
+  "history": {
+    "opsCount": "{count} Vorgänge",
+    "clear": "Löschen",
+    "empty": "Kein Verlauf"
+  },
   "timeline": {
     "title": "Timeline",
     "play": "Wiedergabe",
@@ -187,6 +192,7 @@
     "all": "Alle",
     "empty": "Medien ablegen oder importieren",
     "noMatch": "Keine Treffer",
+    "itemsLabel": "Elemente",
     "status": {
       "pending": "Ausstehend",
       "proxy": "Proxy",
@@ -379,6 +385,7 @@
     "placeholder": "Befehle, Effekte, Einstellungen suchen...",
     "hint": "↑↓ Navigieren · Enter Ausführen · Esc Schließen",
     "count": "{count} Ergebnisse",
+    "noResults": "Keine Ergebnisse gefunden",
     "cmd": {
       "cut": "Ausschneiden",
       "copy": "Kopieren",

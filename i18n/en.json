@@ -57,6 +57,11 @@
     "paste": "Paste",
     "selectAll": "Select All"
   },
+  "history": {
+    "opsCount": "{count} operations",
+    "clear": "Clear",
+    "empty": "No history"
+  },
   "timeline": {
     "title": "Timeline",
     "play": "Play",
@@ -187,6 +192,7 @@
     "all": "All",
     "empty": "Drop or import media",
     "noMatch": "No matches",
+    "itemsLabel": "items",
     "status": {
       "pending": "Pending",
       "proxy": "Proxy",
@@ -321,6 +327,7 @@
     "placeholder": "Search commands, effects, settings...",
     "hint": "↑↓ Navigate · Enter Execute · Esc Close",
     "count": "{count} results",
+    "noResults": "No results found",
     "cmd": {
       "cut": "Cut",
       "copy": "Copy",

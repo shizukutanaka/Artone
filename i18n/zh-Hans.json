@@ -57,6 +57,11 @@
     "paste": "粘贴",
     "selectAll": "全选"
   },
+  "history": {
+    "opsCount": "{count} 项操作",
+    "clear": "清除",
+    "empty": "无历史记录"
+  },
   "timeline": {
     "title": "时间线",
     "play": "播放",
@@ -187,6 +192,7 @@
     "all": "全部",
     "empty": "拖放或导入媒体",
     "noMatch": "无匹配结果",
+    "itemsLabel": "项",
     "status": {
       "pending": "待处理",
       "proxy": "代理",
@@ -379,6 +385,7 @@
     "placeholder": "搜索命令、效果、设置...",
     "hint": "↑↓ 导航 · Enter 执行 · Esc 关闭",
     "count": "{count} 个结果",
+    "noResults": "未找到结果",
     "cmd": {
       "cut": "剪切",
       "copy": "复制",

@@ -57,6 +57,11 @@
     "paste": "Colar",
     "selectAll": "Selecionar tudo"
   },
+  "history": {
+    "opsCount": "{count} operações",
+    "clear": "Limpar",
+    "empty": "Sem histórico"
+  },
   "timeline": {
     "title": "Linha do tempo",
     "play": "Reproduzir",
@@ -187,6 +192,7 @@
     "all": "Tudo",
     "empty": "Solte ou importe mídia",
     "noMatch": "Sem correspondências",
+    "itemsLabel": "itens",
     "status": {
       "pending": "Pendente",
       "proxy": "Proxy",
@@ -379,6 +385,7 @@
     "placeholder": "Pesquisar comandos, efeitos, configurações...",
     "hint": "↑↓ Navegar · Enter Executar · Esc Fechar",
     "count": "{count} resultados",
+    "noResults": "Nenhum resultado encontrado",
     "cmd": {
       "cut": "Recortar",
       "copy": "Copiar",

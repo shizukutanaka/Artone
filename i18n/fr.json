@@ -57,6 +57,11 @@
     "paste": "Coller",
     "selectAll": "Tout sélectionner"
   },
+  "history": {
+    "opsCount": "{count} opérations",
+    "clear": "Effacer",
+    "empty": "Aucun historique"
+  },
   "timeline": {
     "title": "Timeline",
     "play": "Lecture",
@@ -187,6 +192,7 @@
     "all": "Tout",
     "empty": "Déposez ou importez des médias",
     "noMatch": "Aucun résultat",
+    "itemsLabel": "éléments",
     "status": {
       "pending": "En attente",
       "proxy": "Proxy",
@@ -379,6 +385,7 @@
     "placeholder": "Rechercher commandes, effets, paramètres...",
     "hint": "↑↓ Naviguer · Enter Exécuter · Esc Fermer",
     "count": "{count} résultats",
+    "noResults": "Aucun résultat trouvé",
     "cmd": {
       "cut": "Couper",
       "copy": "Copier",

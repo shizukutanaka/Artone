@@ -196,7 +196,7 @@ const ItemView: React.FC<{
             cursor: 'pointer',
             fontSize: 12
           }}
-          title="削除"
+          title={t('common.delete')}
         >
           ×
         </button>
@@ -275,7 +275,7 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = React.memo(({
             fontWeight: 600
           }}
         >
-          + インポート
+          + {t('media.import')}
         </button>
         <input
           ref={fileInputRef}
@@ -360,7 +360,7 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = React.memo(({
           fontFamily: 'ui-monospace, monospace'
         }}
       >
-        {filtered.length} / {items.length} アイテム ·{' '}
+        {filtered.length} / {items.length} {t('media.itemsLabel')} ·{' '}
         {formatSize(items.reduce((s, i) => s + i.size, 0))}
       </div>
     </div>

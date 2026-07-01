@@ -57,6 +57,11 @@
     "paste": "貼り付け",
     "selectAll": "すべて選択"
   },
+  "history": {
+    "opsCount": "{count} 操作",
+    "clear": "クリア",
+    "empty": "履歴なし"
+  },
   "timeline": {
     "title": "タイムライン",
     "play": "再生",
@@ -187,6 +192,7 @@
     "all": "全て",
     "empty": "メディアをドロップまたはインポート",
     "noMatch": "一致なし",
+    "itemsLabel": "アイテム",
     "status": {
       "pending": "待機中",
       "proxy": "プロキシ",
@@ -321,6 +327,7 @@
     "placeholder": "コマンド、エフェクト、設定を検索...",
     "hint": "↑↓ 移動 · Enter 実行 · Esc 閉じる",
     "count": "{count} 件",
+    "noResults": "見つかりません",
     "cmd": {
       "cut": "カット",
       "copy": "コピー",

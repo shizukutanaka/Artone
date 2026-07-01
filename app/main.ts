@@ -14,7 +14,7 @@ import { color } from './design-system';
 import { createLogger } from './logger';
 import { t } from '../i18n/i18n-manager';
 import { requestPersistentStorage } from './storage-persistence';
-import { MagneticTimeline, serializeTimelineState } from '../timeline/magnetic-timeline';
+import { MagneticTimeline, serializeTimelineState, deserializeTimelineState, type SerializedTimelineState } from '../timeline/magnetic-timeline';
 import { TextBasedEditor } from '../timeline/text-based-editing';
 import { MultiCamEditor } from '../timeline/multicam-editor';
 import { ColorGradingEngine } from '../color/grading-engine';
@@ -514,6 +514,15 @@ export class ArtoneApp {
         log.warn('Recovery: failed to reopen project', e);
       }
     }
+
+    // data.timeline is `unknown` (RecoveryData crosses an IndexedDB/JSON trust
+    // boundary) — deserializeTimelineState() is defensive against missing or
+    // malformed fields, so an untyped cast here is safe. Previously only
+    // data.playhead was restored and this call was missing entirely, silently
+    // discarding every recovered track/clip/selection.
+    this.timeline.loadState(
+      deserializeTimelineState(data.timeline as Partial<SerializedTimelineState> | null | undefined)
+    );
 
     if (typeof data.playhead === 'number') {
       this.playbackFrame = data.playhead;

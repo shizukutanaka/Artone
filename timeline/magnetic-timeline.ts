@@ -959,6 +959,25 @@ export class MagneticTimeline {
     return { ...this.state };
   }
 
+  /**
+   * Bulk-replace the entire timeline state — tracks, clips, playhead,
+   * in/out points, zoom, scroll position, and selection — in one atomic
+   * step. Used by crash recovery to load a full {@link deserializeTimelineState}
+   * snapshot back in, as opposed to {@link restoreClips} which only covers
+   * the clip store for undo. Triggers exactly one `notify()`.
+   */
+  loadState(newState: TimelineState): void {
+    this.state.tracks = new Map(newState.tracks);
+    this.state.clips = new Map(newState.clips);
+    this.state.playhead = newState.playhead;
+    this.state.inPoint = newState.inPoint;
+    this.state.outPoint = newState.outPoint;
+    this.state.zoom = newState.zoom;
+    this.state.scrollX = newState.scrollX;
+    this.state.selection = new Set(newState.selection);
+    this.notify();
+  }
+
   subscribe(listener: (state: TimelineState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

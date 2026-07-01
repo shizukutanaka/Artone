@@ -629,6 +629,30 @@ describe('serializeTimelineState / deserializeTimelineState', () => {
     const reparsed = JSON.parse(JSON.stringify(s));
     expect(reparsed.clips).toHaveLength(s.clips.length);
   });
+
+  it('REGRESSION: loadState() restores a full snapshot into a live instance (crash recovery path)', () => {
+    // Simulates app/main.ts's restoreFromRecovery(): serialize a "before crash"
+    // instance, JSON round-trip it (as IndexedDB would), then load it into a
+    // *fresh* instance the way a reloaded page would. Previously there was no
+    // loadState() at all, so restoreFromRecovery only ever restored playhead
+    // and silently discarded every track/clip/selection.
+    const clip = tl.addClip(clipSpec({ trackId: vId, startTime: 3, duration: 4 }));
+    tl.selectClip(clip.id);
+    tl.setPlayhead(7);
+    const snapshot = JSON.parse(JSON.stringify(serializeTimelineState(tl.getState())));
+
+    const fresh = new MagneticTimeline();
+    let notified = 0;
+    fresh.subscribe(() => { notified++; });
+    fresh.loadState(deserializeTimelineState(snapshot));
+
+    const restored = fresh.getState();
+    expect(restored.clips.get(clip.id)?.startTime).toBe(3);
+    expect(restored.tracks.size).toBe(tl.getState().tracks.size);
+    expect(restored.selection.has(clip.id)).toBe(true);
+    expect(restored.playhead).toBe(7);
+    expect(notified).toBe(1); // exactly one notify(), not one per field
+  });
 });
 
 // ─── Lift / Extract (three-point editing) ──────────────────────

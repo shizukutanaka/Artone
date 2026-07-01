@@ -86,6 +86,8 @@ function primedEngine() {
     context: unknown;
     sampler: unknown;
     pipelines: Map<string, unknown>;
+    _effectParamGPUBuf: unknown;
+    _compositeParamGPUBuf: unknown;
   };
   internal.device = mock.device;
   internal.context = makeContext();
@@ -94,7 +96,13 @@ function primedEngine() {
     ['composite', { getBindGroupLayout: vi.fn(() => ({})) }],
     ['blur', { getBindGroupLayout: vi.fn(() => ({})) }],
   ]);
-  return { engine, mock };
+  // Simulate what initialize() creates: persistent uniform buffers pre-allocated
+  // once per device. Tests bypass initialize() so these must be injected manually.
+  const effectBuf = { destroy: vi.fn() };
+  const compositeBuf = { destroy: vi.fn() };
+  internal._effectParamGPUBuf = effectBuf;
+  internal._compositeParamGPUBuf = compositeBuf;
+  return { engine, mock, effectBuf, compositeBuf };
 }
 
 function makeLayerTexture(width = 100, height = 100) {
@@ -232,42 +240,40 @@ describe('WebGPURenderEngine — renderFrame guards', () => {
 // ============================================================
 
 describe('WebGPURenderEngine — REGRESSION: frame-local GPU resources are destroyed', () => {
-  it('destroys the composite paramBuffer after submit', async () => {
+  // Persistent uniform buffers (_effectParamGPUBuf, _compositeParamGPUBuf) are
+  // pre-allocated once in initialize() and reused every frame — zero createBuffer
+  // calls during renderFrame(). Only intermediate effect OUTPUT textures are
+  // transient (one per enabled effect, destroyed after queue.submit()).
+
+  it('renders a layer reusing persistent composite paramBuffer — no per-frame buffer allocation', async () => {
     const { engine, mock } = primedEngine();
     await engine.renderFrame([makeLayer()]);
 
-    expect(mock.device.createBuffer).toHaveBeenCalledTimes(1); // composite paramBuffer
-    // Every created buffer must be destroyed
-    expect(mock.createdBuffers).toHaveLength(1);
-    expect(mock.createdBuffers[0].destroy).toHaveBeenCalledTimes(1);
+    // Persistent buffers are created in initialize(), not per frame.
+    expect(mock.device.createBuffer).not.toHaveBeenCalled();
+    expect(mock.createdBuffers).toHaveLength(0);
   });
 
-  it('destroys effect paramBuffer AND intermediate output texture', async () => {
+  it('effect creates intermediate output texture (destroyed after submit); persistent param buffer is reused', async () => {
     const { engine, mock } = primedEngine();
     await engine.renderFrame([makeLayer({ effects: [makeEffect('blur')] })]);
 
-    // 2 buffers: effect paramBuffer + composite paramBuffer
-    expect(mock.createdBuffers).toHaveLength(2);
-    for (const b of mock.createdBuffers) {
-      expect(b.destroy).toHaveBeenCalledTimes(1);
-    }
-
-    // 1 intermediate texture from applyEffect — must be destroyed
+    // No per-frame buffer allocation — _effectParamGPUBuf is reused via writeBuffer.
+    expect(mock.device.createBuffer).not.toHaveBeenCalled();
+    // 1 intermediate output texture created in applyEffect and destroyed after submit.
     expect(mock.createdTextures).toHaveLength(1);
     expect(mock.createdTextures[0].destroy).toHaveBeenCalledTimes(1);
   });
 
-  it('destroys resources for multiple effects in a chain', async () => {
+  it('chained effects each create one intermediate texture (all destroyed after submit)', async () => {
     const { engine, mock } = primedEngine();
     await engine.renderFrame([
       makeLayer({ effects: [makeEffect('blur'), makeEffect('blur')] }),
     ]);
 
-    // 2 effect buffers + 1 composite buffer = 3
-    expect(mock.createdBuffers).toHaveLength(3);
-    for (const b of mock.createdBuffers) expect(b.destroy).toHaveBeenCalledTimes(1);
-
-    // 2 intermediate textures
+    // Still no per-frame buffer allocation.
+    expect(mock.device.createBuffer).not.toHaveBeenCalled();
+    // 2 intermediate textures (one per effect), both destroyed after submit.
     expect(mock.createdTextures).toHaveLength(2);
     for (const t of mock.createdTextures) expect(t.destroy).toHaveBeenCalledTimes(1);
   });
@@ -278,13 +284,13 @@ describe('WebGPURenderEngine — REGRESSION: frame-local GPU resources are destr
     expect(mock.device.queue.submit).toHaveBeenCalledTimes(1);
   });
 
-  it('disabled effects do not create resources', async () => {
+  it('disabled effects do not create texture or buffer resources', async () => {
     const { engine, mock } = primedEngine();
     await engine.renderFrame([
       makeLayer({ effects: [{ type: 'blur', enabled: false, params: {} } as unknown as RenderEffect] }),
     ]);
-    // No effect resources; only the composite paramBuffer
-    expect(mock.createdBuffers).toHaveLength(1);
+    // Disabled effect skips applyEffect entirely — no textures, no new buffers.
+    expect(mock.device.createBuffer).not.toHaveBeenCalled();
     expect(mock.createdTextures).toHaveLength(0);
   });
 
@@ -294,8 +300,8 @@ describe('WebGPURenderEngine — REGRESSION: frame-local GPU resources are destr
     await engine.renderFrame([makeLayer({ effects: [makeEffect('sharpen')] })]);
     // No intermediate texture created for the missing pipeline
     expect(mock.createdTextures).toHaveLength(0);
-    // Only composite paramBuffer
-    expect(mock.createdBuffers).toHaveLength(1);
+    // No per-frame buffer allocation either
+    expect(mock.device.createBuffer).not.toHaveBeenCalled();
   });
 
   it('REGRESSION: unknown effect type does not destroy the original layer texture', async () => {
@@ -375,6 +381,13 @@ describe('WebGPURenderEngine — destroy()', () => {
     expect(mock.deviceDestroy).toHaveBeenCalledOnce();
     // After destroy, renderFrame becomes a no-op (device cleared)
     await expect(engine.renderFrame([makeLayer()])).resolves.toBeUndefined();
+  });
+
+  it('destroys pre-allocated persistent param buffers', () => {
+    const { engine, effectBuf, compositeBuf } = primedEngine();
+    engine.destroy();
+    expect(effectBuf.destroy).toHaveBeenCalledOnce();
+    expect(compositeBuf.destroy).toHaveBeenCalledOnce();
   });
 
   it('is safe to call without initialization', () => {

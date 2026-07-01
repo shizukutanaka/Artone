@@ -381,7 +381,12 @@ export class MagneticTimeline {
     if (!ids) return;
     for (const id of ids) {
       if (id === excludeClipId) continue;
-      const clip = this.state.clips.get(id)!;
+      // Use a guarded get: the trackIndexCache may be stale inside a batch
+      // (cache invalidation is deferred until _fireListeners() at endBatch()),
+      // so a clip deleted earlier in the same batch is still in `ids` but
+      // absent from state.clips.
+      const clip = this.state.clips.get(id);
+      if (!clip) continue;
       if (clip.startTime >= afterTime) {
         clip.startTime = Math.max(0, clip.startTime + delta);
       }

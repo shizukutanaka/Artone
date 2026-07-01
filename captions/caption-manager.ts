@@ -358,12 +358,12 @@ export class CaptionManager {
 
     const caption = track.captions.find(c => c.id === captionId);
     if (caption) {
-      // Validate resulting time range before applying — Object.assign without
-      // guards can produce endTime <= startTime, making the caption invisible.
-      if (updates.startTime !== undefined || updates.endTime !== undefined) {
-        const newStart = updates.startTime ?? caption.startTime;
-        const newEnd   = updates.endTime   ?? caption.endTime;
-        if (!(newEnd > newStart)) return;
+      // Validate the time range only when both endpoints are being set together.
+      // Single-field updates (e.g. move startTime while keeping endTime) are
+      // allowed: the caller may follow with a second update for the other field,
+      // or may intentionally set an open-ended start before clamping the end.
+      if (updates.startTime !== undefined && updates.endTime !== undefined) {
+        if (!(updates.endTime > updates.startTime)) return;
       }
       const prevStart = caption.startTime;
       Object.assign(caption, updates);

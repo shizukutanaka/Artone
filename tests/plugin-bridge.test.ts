@@ -688,7 +688,7 @@ describe('PluginBridge — scanPlugins', () => {
   it('fetches the directory index and registers every descriptor', async () => {
     const bridge = makeBridge();
     const descs = [makeDescriptor({ id: 'a:1' }), makeDescriptor({ id: 'b:2' })];
-    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => descs }) as unknown as Response));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => descs }) as unknown as Response));
     try {
       const result = await bridge.scanPlugins('/plugins');
       expect(result).toHaveLength(2);
@@ -701,7 +701,7 @@ describe('PluginBridge — scanPlugins', () => {
 
   it('requests <directory>/index.json', async () => {
     const bridge = makeBridge();
-    const fetchSpy = vi.fn(async () => ({ json: async () => [] }) as unknown as Response);
+    const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => [] }) as unknown as Response);
     vi.stubGlobal('fetch', fetchSpy);
     try {
       await bridge.scanPlugins('/my/plugins');
@@ -721,7 +721,7 @@ describe('PluginBridge — loadFactoryPresets', () => {
     const bridge = makeBridge();
     const inst = injectInstance(bridge);
     const presets = [{ name: 'Warm', parameters: { gain: 3 } }];
-    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => presets }) as unknown as Response));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => presets }) as unknown as Response));
     try {
       await (bridge as unknown as BridgePrivate).loadFactoryPresets(inst);
       expect(inst.presets).toEqual(presets);
@@ -756,9 +756,9 @@ describe('PluginBridge — loadPlugin', () => {
     bridge.registerPlugin(makeDescriptor({ id: 'wasm:1', wasmUrl: '/plugins/x.wasm' }));
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('.wasm')) {
-        return { arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
+        return { ok: true, arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
       }
-      return { json: async () => [] } as unknown as Response; // presets sidecar
+      return { ok: true, json: async () => [] } as unknown as Response; // presets sidecar
     }));
     try {
       const instanceId = await bridge.loadPlugin('wasm:1');
@@ -787,9 +787,9 @@ describe('PluginBridge — loadPlugin', () => {
     const presets = [{ name: 'Default', parameters: { gain: 6 } }];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('.wasm')) {
-        return { arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
+        return { ok: true, arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
       }
-      return { json: async () => presets } as unknown as Response;
+      return { ok: true, json: async () => presets } as unknown as Response;
     }));
     try {
       const instanceId = await bridge.loadPlugin('wasm:2');

@@ -16,6 +16,7 @@ import {
   SUPPORTED_CODECS,
   checkCodecSupport,
   getBestCodec,
+  VideoEncoderStream,
 } from '../core/webcodecs-pipeline';
 
 function fakeFrame(w = 64, h = 48, timestamp = 1000): VideoFrame {
@@ -325,6 +326,38 @@ describe('VideoPipeline — batch decode/encode completion & cleanup', () => {
     const p = configuredEncoder();
     await expect(p.encodeFrames([fakeFrame()])).rejects.toThrow('encode fail');
     expect(instances[0].state).toBe('closed');
+  });
+});
+
+// ============================================================
+// VideoEncoderStream — transform() frame lifecycle
+// ============================================================
+
+describe('VideoEncoderStream — transform() frame lifecycle', () => {
+  it('REGRESSION: closes the frame even when encoder.encode() throws synchronously', async () => {
+    class ThrowingEncoder {
+      constructor(_init: { output: (c: unknown) => void; error: (e: Error) => void }) {}
+      configure(): void {}
+      encode(): void { throw new Error('encode failed'); }
+      async flush(): Promise<void> {}
+      close(): void {}
+    }
+    vi.stubGlobal('VideoEncoder', ThrowingEncoder);
+
+    const stream = new VideoEncoderStream({
+      codec: 'avc1.42001E', width: 64, height: 48, bitrate: 1_000_000,
+    } as unknown as VideoEncoderConfig);
+    // A TransformStream's readable side has highWaterMark 0 by default, so
+    // writable-side backpressure never clears — and transform() never even
+    // runs — unless something reads from stream.readable.
+    stream.readable.getReader().read().catch(() => { /* expected to reject too */ });
+    const writer = stream.writable.getWriter();
+    const frame = fakeFrame();
+
+    await expect(writer.write(frame)).rejects.toThrow('encode failed');
+    // Without the try/finally fix, encode() throwing skips frame.close()
+    // entirely and the VideoFrame leaks.
+    expect(frame.close).toHaveBeenCalled();
   });
 });
 

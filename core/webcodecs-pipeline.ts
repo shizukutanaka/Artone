@@ -227,8 +227,14 @@ export class VideoEncoderStream extends TransformStream<VideoFrame, EncodedChunk
 
       transform: (frame, _controller) => {
         const isKeyFrame = frameCount % keyFrameInterval === 0;
-        encoder.encode(frame, { keyFrame: isKeyFrame });
-        frame.close();
+        try {
+          encoder.encode(frame, { keyFrame: isKeyFrame });
+        } finally {
+          // encoder.encode() can throw synchronously (e.g. encoder in
+          // 'closed' state) — without finally, frame.close() never runs
+          // and the VideoFrame leaks per core/CLAUDE.md's use-after-close rule.
+          frame.close();
+        }
         frameCount++;
       },
 

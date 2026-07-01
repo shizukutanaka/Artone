@@ -4,6 +4,14 @@
 - WASM プラグインは **必ず** サンドボックス内で実行
 - ホスト API は明示的 import のみ提供 (ambient access 禁止)
 - `eval` / `Function` コンストラクタ禁止
+  - 例外 (reviewed): `plugin-manager.ts` の `executeSandboxed()` は JS ソース
+    プラグイン (`installPlugin(manifest, code: string)`) を実行するため、
+    専用 Worker 内で一度だけ `Function` を使いコンパイルする。直後に
+    `lockdownSandboxGlobals()` が同一 Worker 内で `eval`/`Function`/`fetch`/
+    `importScripts` 等を封鎖してからプラグイン本体を実行するため、
+    プラグインコード自身がこのパターンを再利用したり ambient なネット
+    ワーク/コードロード能力へ到達することはできない。メインスレッドでは
+    使用しない。詳細はコード内コメント参照。
 - ネットワークアクセスはプラグイン manifest で宣言必須
 
 ## 権限モデル

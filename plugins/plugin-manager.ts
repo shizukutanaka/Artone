@@ -513,6 +513,19 @@ export class PluginManager {
 
   private async executeSandboxed<T>(code: string, context: Record<string, unknown>): Promise<T> {
     return new Promise((resolve, reject) => {
+      // SECURITY EXCEPTION (reviewed) — plugins/CLAUDE.md's "厳守事項" bans
+      // eval/Function outright, but a JS-source plugin (installPlugin's
+      // `code: string`) cannot run at all without turning that string into a
+      // callable once. This is the one call in the codebase permitted to do
+      // so, and only under these constraints:
+      //   1. It runs inside a dedicated, single-purpose Worker — never on the
+      //      main thread — so it has no access to window/DOM/document.
+      //   2. lockdownSandboxGlobals() executes immediately after, before the
+      //      plugin body runs, denying eval/Function/fetch/importScripts/etc.
+      //      so the compiled plugin function itself cannot re-invoke this
+      //      pattern or reach ambient network/code-loading capabilities.
+      //   3. The worker is terminated on completion or after a 5s timeout
+      //      (below), bounding both lifetime and blast radius.
       // The lockdown runs INSIDE the worker, after the plugin function is built
       // (the host needs Function to compile it once) but BEFORE it executes, so
       // untrusted code cannot reach ambient network/code-loading capabilities.

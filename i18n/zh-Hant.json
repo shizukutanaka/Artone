@@ -193,6 +193,8 @@
     "empty": "拖放或匯入媒體",
     "noMatch": "無符合結果",
     "itemsLabel": "項",
+    "sidebarClose": "關閉媒體面板",
+    "sidebarOpen": "開啟媒體面板",
     "status": {
       "pending": "待處理",
       "proxy": "代理",

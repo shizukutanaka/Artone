@@ -193,6 +193,8 @@
     "empty": "Suelta o importa medios",
     "noMatch": "Sin resultados",
     "itemsLabel": "elementos",
+    "sidebarClose": "Cerrar panel de medios",
+    "sidebarOpen": "Abrir panel de medios",
     "status": {
       "pending": "Pendiente",
       "proxy": "Proxy",

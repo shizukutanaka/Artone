@@ -193,6 +193,8 @@
     "empty": "미디어를 드롭하거나 가져오기",
     "noMatch": "결과 없음",
     "itemsLabel": "항목",
+    "sidebarClose": "미디어 패널 닫기",
+    "sidebarOpen": "미디어 패널 열기",
     "status": {
       "pending": "대기 중",
       "proxy": "프록시",

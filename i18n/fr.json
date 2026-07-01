@@ -193,6 +193,8 @@
     "empty": "Déposez ou importez des médias",
     "noMatch": "Aucun résultat",
     "itemsLabel": "éléments",
+    "sidebarClose": "Fermer le panneau média",
+    "sidebarOpen": "Ouvrir le panneau média",
     "status": {
       "pending": "En attente",
       "proxy": "Proxy",

@@ -452,6 +452,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
           </span>
           <button
             onClick={() => actions.togglePlayPause()}
+            aria-label={engine.isPlaying ? t('timeline.pause') : t('timeline.play')}
             style={{
               ...ds.button('primary'), width: 36, height: 36,
               borderRadius: radius.full, padding: 0,
@@ -484,7 +485,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               flexShrink: 0,
             }}>
               <span style={ds.text('title')}>{t('media.title')}</span>
-              <button onClick={() => setSidebarOpen(false)} style={ds.button('ghost')}>◁</button>
+              <button onClick={() => setSidebarOpen(false)} aria-label={t('media.sidebarClose')} style={ds.button('ghost')}>◁</button>
             </div>
             <div style={{ flex: 1, overflow: 'hidden' }}>
               <MediaBrowser
@@ -514,7 +515,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               {engine.isReady ? t('preview.webgpu') : '...'}
             </div>
             {!sidebarOpen && (
-              <button onClick={() => setSidebarOpen(true)}
+              <button onClick={() => setSidebarOpen(true)} aria-label={t('media.sidebarOpen')}
                 style={{ ...ds.button('ghost'), position: 'absolute', left: space[2], top: space[2] }}>▷</button>
             )}
           </div>
@@ -555,7 +556,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               flexShrink: 0,
             }}>
               <span style={ds.text('title')}>{panelTitle(activePanel)}</span>
-              <button onClick={() => setActivePanel(null)} style={ds.button('ghost')}>✕</button>
+              <button onClick={() => setActivePanel(null)} aria-label={t('common.close')} style={ds.button('ghost')}>✕</button>
             </div>
             <div style={{ flex: 1, overflow: 'auto', padding: space[3] }}>
               {activePanel === 'scopes' && (
@@ -604,6 +605,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
             </div>
             <button
               onClick={() => actions.clearError?.()}
+              aria-label={t('common.close')}
               style={{ ...ds.button('ghost'), flexShrink: 0, fontSize: 16 }}
             >✕</button>
           </div>

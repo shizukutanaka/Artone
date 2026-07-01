@@ -193,6 +193,8 @@
     "empty": "Medien ablegen oder importieren",
     "noMatch": "Keine Treffer",
     "itemsLabel": "Elemente",
+    "sidebarClose": "Medienbereich schließen",
+    "sidebarOpen": "Medienbereich öffnen",
     "status": {
       "pending": "Ausstehend",
       "proxy": "Proxy",

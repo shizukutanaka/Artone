@@ -193,6 +193,8 @@
     "empty": "メディアをドロップまたはインポート",
     "noMatch": "一致なし",
     "itemsLabel": "アイテム",
+    "sidebarClose": "メディアパネルを閉じる",
+    "sidebarOpen": "メディアパネルを開く",
     "status": {
       "pending": "待機中",
       "proxy": "プロキシ",

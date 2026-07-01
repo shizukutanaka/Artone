@@ -193,6 +193,8 @@
     "empty": "Solte ou importe mídia",
     "noMatch": "Sem correspondências",
     "itemsLabel": "itens",
+    "sidebarClose": "Fechar painel de mídia",
+    "sidebarOpen": "Abrir painel de mídia",
     "status": {
       "pending": "Pendente",
       "proxy": "Proxy",

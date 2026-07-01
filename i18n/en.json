@@ -193,6 +193,8 @@
     "empty": "Drop or import media",
     "noMatch": "No matches",
     "itemsLabel": "items",
+    "sidebarClose": "Close media panel",
+    "sidebarOpen": "Open media panel",
     "status": {
       "pending": "Pending",
       "proxy": "Proxy",

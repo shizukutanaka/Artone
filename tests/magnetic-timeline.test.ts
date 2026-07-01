@@ -96,6 +96,15 @@ describe('MagneticTimeline — addClip', () => {
     tl.addClip(clipSpec({ trackId: vid }));
     expect(spy).toHaveBeenCalledOnce();
   });
+
+  it('REGRESSION: ripple does not move a locked clip', () => {
+    const locked = tl.addClip(clipSpec({ trackId: vid, startTime: 10, duration: 5, locked: true }));
+    // Insert a 4-second clip at time 5, which would ripple anything at/after 5.
+    tl.addClip(clipSpec({ trackId: vid, startTime: 5, duration: 4 }));
+    const after = tl.getState().clips.get(locked.id)!;
+    expect(after.startTime).toBe(10); // unchanged — the pure trim-operations.ts
+    // helpers already skip `locked` clips; shiftClipsAfter previously did not.
+  });
 });
 
 describe('MagneticTimeline — insertClip', () => {

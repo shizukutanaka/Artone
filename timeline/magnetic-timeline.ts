@@ -386,7 +386,7 @@ export class MagneticTimeline {
       // so a clip deleted earlier in the same batch is still in `ids` but
       // absent from state.clips.
       const clip = this.state.clips.get(id);
-      if (!clip) continue;
+      if (!clip || clip.locked) continue;
       if (clip.startTime >= afterTime) {
         clip.startTime = Math.max(0, clip.startTime + delta);
       }

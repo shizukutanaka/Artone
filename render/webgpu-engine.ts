@@ -199,6 +199,12 @@ export class WebGPURenderEngine {
       return false;
     }
 
+    // Reset in case this instance is being reused after a prior destroy()
+    // (destroy()->initialize(), rather than always constructing a fresh
+    // instance) — otherwise watchDeviceLost()'s guard below stays permanently
+    // tripped and a real device-lost event is never recovered.
+    this.intentionalDestroy = false;
+
     try {
       const adapter = await navigator.gpu.requestAdapter({
         powerPreference: this.config.preferLowPower ? 'low-power' : 'high-performance'

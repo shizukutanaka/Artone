@@ -215,6 +215,25 @@ describe('WebGPURenderEngine — initialize fallback contract', () => {
       restoreNavigator();
     }
   });
+
+  it('REGRESSION: resets intentionalDestroy so a reused instance can recover from a later real device loss', async () => {
+    // A prior destroy() sets intentionalDestroy=true (see the destroy()->
+    // initialize() reuse pattern render-backend.ts's fresh-instance path
+    // avoids, but which this engine class doesn't itself forbid). Without a
+    // reset, watchDeviceLost()'s guard stays permanently tripped and a real
+    // device-lost event after reinitialization is silently ignored forever.
+    const engine = new WebGPURenderEngine();
+    (engine as unknown as { intentionalDestroy: boolean }).intentionalDestroy = true;
+    vi.stubGlobal('navigator', {
+      gpu: { requestAdapter: async () => null, getPreferredCanvasFormat: () => 'bgra8unorm' },
+    });
+    try {
+      await engine.initialize(canvas);
+      expect((engine as unknown as { intentionalDestroy: boolean }).intentionalDestroy).toBe(false);
+    } finally {
+      restoreNavigator();
+    }
+  });
 });
 
 // ============================================================

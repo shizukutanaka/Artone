@@ -13,6 +13,9 @@
  */
 
 import { applyLUTToBuffer, applyCurvesToBuffer, buildCurve } from './lut-apply';
+import { createLogger } from '../app/logger';
+
+const log = createLogger('GradingEngine');
 
 // ============================================================
 // Types
@@ -482,12 +485,22 @@ export class ColorGradingEngine {
 
       const vals = line.split(/\s+/).map(parseFloat);
       if (vals.length >= 3 && !vals.some(isNaN)) {
-        data.push(vals[0], vals[1], vals[2], 1.0);
+        // Stride-3 RGB, matching the reader in lut-apply.ts's trilinear():
+        // an extra 4th value here would misalign every cell past index 0.
+        data.push(vals[0], vals[1], vals[2]);
       }
     }
 
     // Guard: parseInt(undefined) = NaN when the size token is missing.
     if (size === 0 || isNaN(size)) return null;
+
+    // Reject truncated/incomplete LUTs (same rationale as lut-manager.ts's
+    // parseCube): a size N cube needs exactly N^3 RGB triples, or every cell
+    // after the truncation point trilinear-interpolates against stale/zero data.
+    if (data.length < size * size * size * 3) {
+      log.error(`Malformed .cube: declared size ${size} needs ${size ** 3} entries, got ${Math.floor(data.length / 3)}`);
+      return null;
+    }
 
     const lut: LUTData = {
       name: file.name.replace(/\.cube$/i, ''),

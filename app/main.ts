@@ -16,6 +16,7 @@ import { t } from '../i18n/i18n-manager';
 import { requestPersistentStorage } from './storage-persistence';
 import { MagneticTimeline, serializeTimelineState, deserializeTimelineState, type SerializedTimelineState } from '../timeline/magnetic-timeline';
 import { TextBasedEditor } from '../timeline/text-based-editing';
+import { MarkerManager } from '../timeline/marker-manager';
 import { MultiCamEditor } from '../timeline/multicam-editor';
 import { ColorGradingEngine } from '../color/grading-engine';
 import { AudioEngine } from '../audio/audio-engine';
@@ -119,6 +120,7 @@ export class ArtoneApp {
   public keyframes: KeyframeAnimator;
   public motionGfx: MotionGraphicsEngine;
   public captions: CaptionManager;
+  public markers: MarkerManager;
   public shortcuts: ShortcutManager;
 
   // State
@@ -175,6 +177,7 @@ export class ArtoneApp {
     this.keyframes = new KeyframeAnimator();
     this.motionGfx = new MotionGraphicsEngine();
     this.captions = new CaptionManager();
+    this.markers = new MarkerManager();
     this.shortcuts = new ShortcutManager();
   }
 
@@ -471,8 +474,11 @@ export class ArtoneApp {
       timeline: serializeTimelineState(state),
       clips: [...state.clips.values()],
       tracks: [...state.tracks.values()],
+      // No effect state source exists yet: Clip carries no effects field and
+      // no effect registry is wired into the app, so there is nothing to
+      // capture here (tracked as a separate integration gap).
       effects: [],
-      markers: [],
+      markers: this.markers.getAllMarkers(),
       playhead: this.playbackFrame,
       selection: [...state.selection],
       historyPosition: this.history.getPosition(),
@@ -523,6 +529,15 @@ export class ArtoneApp {
     this.timeline.loadState(
       deserializeTimelineState(data.timeline as Partial<SerializedTimelineState> | null | undefined)
     );
+
+    // importJSON() validates the payload is an array and normalizes each
+    // entry's tags/metadata (defensive against corrupt snapshots). Restore
+    // happens on a freshly constructed MarkerManager, so its additive
+    // semantics are correct here; regenerated marker ids are acceptable
+    // because nothing external references marker ids across a reload.
+    if (Array.isArray(data.markers) && data.markers.length > 0) {
+      this.markers.importJSON(JSON.stringify(data.markers));
+    }
 
     if (typeof data.playhead === 'number') {
       this.playbackFrame = data.playhead;

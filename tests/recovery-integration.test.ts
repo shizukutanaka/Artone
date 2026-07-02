@@ -22,6 +22,7 @@ import {
   deserializeTimelineState,
   type SerializedTimelineState,
 } from '../timeline/magnetic-timeline';
+import { MarkerManager } from '../timeline/marker-manager';
 import { RecoveryManager, type RecoveryData } from '../recovery/recovery-manager';
 
 let dbCounter = 0;
@@ -31,14 +32,19 @@ function makeManager(): RecoveryManager {
 }
 
 /** Mirror of ArtoneApp.buildRecoveryData — kept in lockstep with main.ts. */
-function buildRecoveryData(tl: MagneticTimeline, playhead: number, historyPosition: number): RecoveryData {
+function buildRecoveryData(
+  tl: MagneticTimeline,
+  playhead: number,
+  historyPosition: number,
+  markers: MarkerManager = new MarkerManager(),
+): RecoveryData {
   const state = tl.getState();
   return {
     timeline: serializeTimelineState(state),
     clips: [...state.clips.values()],
     tracks: [...state.tracks.values()],
     effects: [],
-    markers: [],
+    markers: markers.getAllMarkers(),
     playhead,
     selection: [...state.selection],
     historyPosition,
@@ -149,5 +155,38 @@ describe('Recovery integration — timeline survives the IndexedDB round-trip', 
     // The serialized form preserves them.
     const safe = serializeTimelineState(tl.getState());
     expect(safe.clips).toHaveLength(1);
+  });
+
+  it('REGRESSION: markers survive the snapshot round-trip (previously hardcoded to [])', async () => {
+    const markers = new MarkerManager();
+    markers.addMarker(3, 'chapter', { name: 'Intro' });
+    markers.addMarker(12, 'todo', { name: 'Fix color', notes: 'shot too warm' });
+
+    await mgr.saveSnapshot('manual', 'proj', 'Proj', buildRecoveryData(tl, 0, 0, markers));
+    const snap = await mgr.getLatestSnapshot('proj');
+    expect(snap).not.toBeNull();
+
+    // Rehydrate on a fresh MarkerManager the way restoreFromRecovery does.
+    const restored = new MarkerManager();
+    const data = snap!.data as RecoveryData;
+    expect(Array.isArray(data.markers)).toBe(true);
+    const count = restored.importJSON(JSON.stringify(data.markers));
+    expect(count).toBe(2);
+
+    const all = restored.getAllMarkers();
+    expect(all.map((m) => m.time)).toEqual([3, 12]);
+    expect(all.map((m) => m.name)).toEqual(['Intro', 'Fix color']);
+    expect(all.map((m) => m.type)).toEqual(['chapter', 'todo']);
+    expect(all[1].notes).toBe('shot too warm');
+  });
+
+  it('restore path tolerates empty or malformed marker payloads (trust boundary)', () => {
+    const restored = new MarkerManager();
+    // Empty array → no-op. restoreFromRecovery additionally guards with
+    // Array.isArray before calling importJSON, so a corrupt non-array
+    // payload never reaches it; importJSON itself also rejects non-arrays.
+    expect(restored.importJSON('[]')).toBe(0);
+    expect(restored.importJSON('"corrupt"')).toBe(0);
+    expect(restored.getAllMarkers()).toHaveLength(0);
   });
 });

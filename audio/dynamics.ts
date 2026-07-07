@@ -1,8 +1,10 @@
 /**
  * Dynamics processing — compressor / limiter / gate / expander
  *
- * Pure TypeScript, no Web Audio API. Implements the standard feed-forward
- * RMS-detection compressor architecture used in professional audio tools.
+ * Pure TypeScript, no Web Audio API. Implements a standard feed-forward
+ * peak-detection compressor architecture (full-wave rectify — faster,
+ * more transient-sensitive ballistics than RMS detection; see
+ * applyCompressor's detector comment) used in professional audio tools.
  * All parameters match Web Audio API DynamicsCompressorNode conventions
  * for interoperability.
  *
@@ -61,8 +63,10 @@ export interface DynamicsResult {
 
 /**
  * Processes a mono Float32Array through an analog-style compressor.
- * Uses feed-forward RMS level detection with smooth attack/release
- * (Giannoulis 2012 — the "smooth branching" gain computer).
+ * Uses feed-forward peak (full-wave rectified) level detection with smooth
+ * attack/release (Giannoulis 2012 — the "smooth branching" gain computer).
+ * Peak detection reacts to instantaneous level rather than average energy,
+ * so ballistics are faster/more transient-sensitive than an RMS detector.
  */
 export function applyCompressor(
   input: Float32Array,

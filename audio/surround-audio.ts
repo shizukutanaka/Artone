@@ -124,15 +124,17 @@ const DOWNMIX_51_TO_STEREO: Record<ChannelLabel, [number, number]> = {
 /**
  * 各チャンネルラベルに対応する DownmixConfig のカテゴリゲインを返す。
  * L/R は基準 (1.0)、C は centerGain、サラウンド/ハイトは surroundGain、LFE は lfeGain。
- * config 未指定時は 1.0。
+ * config 未指定時は L/R/C/サラウンドは 1.0。LFE は ITU-R BS.775 準拠の Lo/Ro
+ * ダウンミックスがデフォルトで LFE を除外するため 0 (config.lfeGain で明示的に
+ * 上書き可能 — 一部の非標準実装は LFE をステレオへ折り込む)。
  */
 export function downmixGainForLabel(label: ChannelLabel, config?: Partial<DownmixConfig>): number {
-  if (!config) return 1;
+  if (!config) return label === 'LFE' ? 0 : 1;
   switch (label) {
     case 'C':
       return config.centerGain ?? 1;
     case 'LFE':
-      return config.lfeGain ?? 1;
+      return config.lfeGain ?? 0;
     case 'Ls': case 'Rs': case 'Lrs': case 'Rrs':
     case 'Ltf': case 'Rtf': case 'Ltr': case 'Rtr':
       return config.surroundGain ?? 1;
@@ -386,6 +388,10 @@ export class SurroundAudioEngine {
       rightGain.connect(this.masterNode);
 
       for (const [label, node] of this.channelNodes) {
+        // ITU-R BS.775 Lo/Ro stereo downmix excludes LFE by default (unlike
+        // the offline path via createDownmix(), this live-monitoring routing
+        // has no DownmixConfig to opt back in, so LFE is always excluded).
+        if (label === 'LFE') continue;
         const matrix = DOWNMIX_51_TO_STEREO[label as ChannelLabel];
         if (matrix) {
           const leftSplit = this.audioContext.createGain();

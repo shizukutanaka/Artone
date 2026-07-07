@@ -72,9 +72,11 @@ describe('downmixGainForLabel()', () => {
     }
   });
 
-  it('returns 1.0 for all labels when config is undefined', () => {
+  it('returns 1.0 for all labels except LFE when config is undefined', () => {
+    // LFE defaults to excluded (0), matching the ITU-R BS.775 Lo/Ro stereo
+    // downmix standard, which does not fold LFE into L/R by default.
     expect(downmixGainForLabel('C')).toBe(1);
-    expect(downmixGainForLabel('LFE')).toBe(1);
+    expect(downmixGainForLabel('LFE')).toBe(0);
     expect(downmixGainForLabel('Ls')).toBe(1);
   });
 
@@ -84,8 +86,22 @@ describe('downmixGainForLabel()', () => {
     const c = { centerGain: 0.1 };
     expect(downmixGainForLabel('L', c)).toBe(1);
     expect(downmixGainForLabel('Ls', c)).toBe(1); // surroundGain undefined → 1
-    expect(downmixGainForLabel('LFE', c)).toBe(1); // lfeGain undefined → 1
+    expect(downmixGainForLabel('LFE', c)).toBe(0); // lfeGain undefined → 0 (ITU-R BS.775 default)
     expect(downmixGainForLabel('C', c)).toBe(0.1);
+  });
+
+  it('REGRESSION: LFE is excluded from stereo downmix by default (ITU-R BS.775)', () => {
+    // Before fix: LFE defaulted to full inclusion (gain 1, same as L/R),
+    // adding low-frequency energy to every stereo downmix/monitor that
+    // ITU-R BS.775's Lo/Ro standard says should not be there.
+    expect(downmixGainForLabel('LFE')).toBe(0);
+    expect(downmixGainForLabel('LFE', {})).toBe(0);
+    expect(downmixGainForLabel('LFE', { centerGain: 0.5 })).toBe(0);
+  });
+
+  it('LFE can still be explicitly included via lfeGain (non-standard opt-in)', () => {
+    expect(downmixGainForLabel('LFE', { lfeGain: 1 })).toBe(1);
+    expect(downmixGainForLabel('LFE', { lfeGain: 0.5 })).toBe(0.5);
   });
 });
 
@@ -162,6 +178,22 @@ describe('SurroundAudioEngine — updateRouting downmix node lifecycle', () => {
     for (const n of downmixNodesFromFirstRoute as Array<{ disconnect: ReturnType<typeof vi.fn> }>) {
       expect(n.disconnect).toHaveBeenCalled();
     }
+  });
+
+  it('REGRESSION: live stereo-monitor downmix excludes LFE (ITU-R BS.775)', () => {
+    // Before fix: this path used the raw DOWNMIX_51_TO_STEREO matrix for
+    // every channel including LFE (0.707/0.707), with no config knob to
+    // exclude it — LFE always bled into the live stereo monitor mix.
+    const ctx = new AudioContext();
+    const engine = new SurroundAudioEngine(ctx); // 5.1: L,R,C,LFE,Ls,Rs (6 channels)
+
+    type Internal = { downmixNodes: unknown[] };
+    const internal = engine as unknown as Internal;
+
+    // leftGain+rightGain (2, shared) + leftSplit+rightSplit per non-LFE
+    // channel (5 channels × 2 = 10) = 12. Before the fix this was 14
+    // (LFE included as a 6th routed channel).
+    expect(internal.downmixNodes).toHaveLength(12);
   });
 });
 

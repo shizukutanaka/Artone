@@ -1298,6 +1298,136 @@ describe('MagneticTimeline — trimClipStartCommand / trimClipEndCommand (undoab
   });
 });
 
+// ─── Roll / Slip / Slide (trim-operations.ts wiring) ───────────────────────
+//
+// rollTrim/slipClip/slideClip were fully implemented and unit-tested in
+// timeline/trim-operations.ts but never imported by MagneticTimeline — the
+// only production consumer of structural clip edits — so none of the three
+// was reachable from the app. This exposes them as Command-Pattern methods
+// following the same shape as trimClipStartCommand/trimClipEndCommand.
+// UI wiring (keybindings/drag gestures) is intentionally out of scope here.
+
+describe('MagneticTimeline — rollTrimCommand (undoable)', () => {
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find((t) => t.name === 'V1')!.id;
+  });
+
+  function add(start: number, dur: number, mediaIn = 0) {
+    return tl.addClip(clipSpec({ trackId: vId, startTime: start, duration: dur, mediaIn, mediaOut: mediaIn + dur }));
+  }
+
+  it('returns null for unknown clip ids', () => {
+    const a = add(0, 10);
+    expect(tl.rollTrimCommand('ghost', a.id, 2)).toBeNull();
+    expect(tl.rollTrimCommand(a.id, 'ghost', 2)).toBeNull();
+  });
+
+  it('returns null when either clip is locked', () => {
+    const a = add(0, 10);
+    const locked = tl.addClip(clipSpec({ trackId: vId, locked: true, startTime: 10, duration: 10 }));
+    expect(tl.rollTrimCommand(a.id, locked.id, 2)).toBeNull();
+  });
+
+  it('returns null when the roll would zero out a duration', () => {
+    const a = add(0, 10);
+    const b = add(10, 5);
+    expect(tl.rollTrimCommand(a.id, b.id, 5)).toBeNull(); // b would reach 0
+  });
+
+  it('execute/undo/redo round-trip: A extends, B shortens, no ripple beyond the edit point', () => {
+    const a = add(0, 10);
+    const b = add(10, 5);
+    const cmd = tl.rollTrimCommand(a.id, b.id, 2)!;
+    cmd.execute();
+    expect(tl.getState().clips.get(a.id)!.duration).toBe(12);
+    expect(tl.getState().clips.get(a.id)!.startTime).toBe(0); // unchanged
+    expect(tl.getState().clips.get(b.id)!.startTime).toBe(12);
+    expect(tl.getState().clips.get(b.id)!.duration).toBe(3);
+    cmd.undo();
+    expect(tl.getState().clips.get(a.id)!.duration).toBe(10);
+    expect(tl.getState().clips.get(b.id)!.startTime).toBe(10);
+    expect(tl.getState().clips.get(b.id)!.duration).toBe(5);
+    cmd.redo();
+    expect(tl.getState().clips.get(a.id)!.duration).toBe(12);
+    expect(tl.getState().clips.get(b.id)!.duration).toBe(3);
+  });
+});
+
+describe('MagneticTimeline — slipClipCommand (undoable)', () => {
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find((t) => t.name === 'V1')!.id;
+  });
+
+  it('returns null for unknown clip id', () => {
+    expect(tl.slipClipCommand('ghost', 2)).toBeNull();
+  });
+
+  it('returns null when the slip would push mediaIn negative', () => {
+    const c = tl.addClip(clipSpec({ trackId: vId, startTime: 0, duration: 5, mediaIn: 0, mediaOut: 5 }));
+    expect(tl.slipClipCommand(c.id, -1)).toBeNull();
+  });
+
+  it('execute/undo/redo round-trip: mediaIn/mediaOut shift, timeline position unchanged', () => {
+    const c = tl.addClip(clipSpec({ trackId: vId, startTime: 3, duration: 5, mediaIn: 10, mediaOut: 15 }));
+    const cmd = tl.slipClipCommand(c.id, 2)!;
+    cmd.execute();
+    expect(tl.getState().clips.get(c.id)!.mediaIn).toBe(12);
+    expect(tl.getState().clips.get(c.id)!.mediaOut).toBe(17);
+    expect(tl.getState().clips.get(c.id)!.startTime).toBe(3); // unchanged
+    expect(tl.getState().clips.get(c.id)!.duration).toBe(5); // unchanged
+    cmd.undo();
+    expect(tl.getState().clips.get(c.id)!.mediaIn).toBe(10);
+    expect(tl.getState().clips.get(c.id)!.mediaOut).toBe(15);
+    cmd.redo();
+    expect(tl.getState().clips.get(c.id)!.mediaIn).toBe(12);
+  });
+});
+
+describe('MagneticTimeline — slideClipCommand (undoable)', () => {
+  let tl: MagneticTimeline;
+  let vId: string;
+
+  beforeEach(() => {
+    tl = new MagneticTimeline();
+    vId = [...tl.getState().tracks.values()].find((t) => t.name === 'V1')!.id;
+  });
+
+  function add(start: number, dur: number) {
+    return tl.addClip(clipSpec({ trackId: vId, startTime: start, duration: dur, mediaIn: 0, mediaOut: dur }));
+  }
+
+  it('returns null for unknown clip id', () => {
+    expect(tl.slideClipCommand('ghost', 2)).toBeNull();
+  });
+
+  it('execute/undo/redo round-trip: clip moves, neighbours absorb the shift', () => {
+    const left = add(0, 10);
+    const mid = add(10, 5);
+    const right = add(15, 10);
+    const cmd = tl.slideClipCommand(mid.id, 2)!;
+    cmd.execute();
+    expect(tl.getState().clips.get(mid.id)!.startTime).toBe(12);
+    expect(tl.getState().clips.get(left.id)!.duration).toBe(12); // absorbed +2
+    expect(tl.getState().clips.get(right.id)!.startTime).toBe(17);
+    expect(tl.getState().clips.get(right.id)!.duration).toBe(8); // absorbed -2
+    cmd.undo();
+    expect(tl.getState().clips.get(mid.id)!.startTime).toBe(10);
+    expect(tl.getState().clips.get(left.id)!.duration).toBe(10);
+    expect(tl.getState().clips.get(right.id)!.startTime).toBe(15);
+    expect(tl.getState().clips.get(right.id)!.duration).toBe(10);
+    cmd.redo();
+    expect(tl.getState().clips.get(mid.id)!.startTime).toBe(12);
+  });
+});
+
 // ─── §3.8: Atomic command / batch-notify (notification-storm fix) ──
 
 describe('MagneticTimeline — atomic notify: one Command → one notification', () => {

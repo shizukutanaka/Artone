@@ -13,3 +13,4 @@
 - nested-sequences.ts
 - range-edit.ts
 - text-based-editing.ts
+- trim-operations.ts

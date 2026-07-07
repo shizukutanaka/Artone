@@ -13,6 +13,7 @@
 
 import { IntervalIndex } from './interval-index';
 import { liftRange, extractRange, captureRangeEditUndo, type RangeEditResult } from './range-edit';
+import { rollTrim, slipClip, slideClip } from './trim-operations';
 import { CommandFactory, type Command } from '../undo/history-manager';
 
 // ============================================================
@@ -674,6 +675,89 @@ export class MagneticTimeline {
     if (!clip || clip.locked) return null;
     if (newEnd <= clip.startTime) return null; // would zero-out
     return this.structuralCommand('clip.trimEnd', 'Trim clip end', () => this.trimClipEnd(clipId, newEnd));
+  }
+
+  /**
+   * Roll the edit point between `clipAId` (left) and `clipBId` (right) by
+   * `delta` seconds — A's out-point and B's in-point move by the same
+   * amount, no other clip is affected. No-op if either clip doesn't exist,
+   * is locked, or the roll would zero out a duration or cross a media bound.
+   */
+  applyRollTrim(clipAId: string, clipBId: string, delta: number): boolean {
+    const clipA = this.state.clips.get(clipAId);
+    if (!clipA) return false;
+    const result = rollTrim(this.getTrackClips(clipA.trackId), clipAId, clipBId, delta);
+    if (!result.ok) return false;
+    for (const c of result.clips) this.state.clips.set(c.id, c as Clip);
+    this.notify();
+    return true;
+  }
+
+  /**
+   * Slip the media content of `clipId` by `delta` seconds without moving it
+   * on the timeline (adjusts `mediaIn`/`mediaOut` only). No-op if the clip
+   * doesn't exist, is locked, or the slip would push `mediaIn` negative or
+   * cross `mediaOut`.
+   */
+  applySlipClip(clipId: string, delta: number): boolean {
+    const clip = this.state.clips.get(clipId);
+    if (!clip) return false;
+    const result = slipClip(this.getTrackClips(clip.trackId), clipId, delta);
+    if (!result.ok) return false;
+    for (const c of result.clips) this.state.clips.set(c.id, c as Clip);
+    this.notify();
+    return true;
+  }
+
+  /**
+   * Slide `clipId` left/right by `delta` seconds: its own media content is
+   * unchanged, while the adjacent clip(s) absorb the shift on the shared
+   * edge. No-op if the clip doesn't exist, is locked, or an adjacent clip
+   * would zero out or cross a media bound.
+   */
+  applySlideClip(clipId: string, delta: number): boolean {
+    const clip = this.state.clips.get(clipId);
+    if (!clip) return false;
+    const result = slideClip(this.getTrackClips(clip.trackId), clipId, delta);
+    if (!result.ok) return false;
+    for (const c of result.clips) this.state.clips.set(c.id, c as Clip);
+    this.notify();
+    return true;
+  }
+
+  /**
+   * Build an **undoable** command that rolls the edit point between
+   * `clipAId` and `clipBId` by `delta` seconds. Returns null when the roll
+   * is invalid (see {@link applyRollTrim}).
+   */
+  rollTrimCommand(clipAId: string, clipBId: string, delta: number): Command | null {
+    const clipA = this.state.clips.get(clipAId);
+    if (!clipA) return null;
+    if (!rollTrim(this.getTrackClips(clipA.trackId), clipAId, clipBId, delta).ok) return null;
+    return this.structuralCommand('clip.rollTrim', 'Roll trim', () => { this.applyRollTrim(clipAId, clipBId, delta); });
+  }
+
+  /**
+   * Build an **undoable** command that slips `clipId`'s media content by
+   * `delta` seconds. Returns null when the slip is invalid (see
+   * {@link applySlipClip}).
+   */
+  slipClipCommand(clipId: string, delta: number): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip) return null;
+    if (!slipClip(this.getTrackClips(clip.trackId), clipId, delta).ok) return null;
+    return this.structuralCommand('clip.slip', 'Slip clip', () => { this.applySlipClip(clipId, delta); });
+  }
+
+  /**
+   * Build an **undoable** command that slides `clipId` by `delta` seconds.
+   * Returns null when the slide is invalid (see {@link applySlideClip}).
+   */
+  slideClipCommand(clipId: string, delta: number): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip) return null;
+    if (!slideClip(this.getTrackClips(clip.trackId), clipId, delta).ok) return null;
+    return this.structuralCommand('clip.slide', 'Slide clip', () => { this.applySlideClip(clipId, delta); });
   }
 
   // ============================================================

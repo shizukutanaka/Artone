@@ -402,12 +402,39 @@ export const ToastContainer: React.FC<{ toasts: Toast[]; onDismiss: (id: string)
   toasts,
   onDismiss
 }) => {
+  // Keyed by toast id so this effect re-running (e.g. because a second toast
+  // arrived) doesn't reset an already-ticking toast's remaining time. Before
+  // this fix every re-run tore down ALL timers and restarted them at full
+  // duration, so a toast arriving before an earlier one's timer fired kept
+  // pushing every pending toast's dismissal further out.
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
   useEffect(() => {
-    const timers = toasts
-      .filter((t) => t.duration !== 0)
-      .map((t) => setTimeout(() => onDismiss(t.id), t.duration ?? 4000));
-    return () => timers.forEach(clearTimeout);
+    const timers = timersRef.current;
+    const currentIds = new Set(toasts.map((t) => t.id));
+
+    for (const t of toasts) {
+      if (t.duration === 0 || timers.has(t.id)) continue;
+      timers.set(t.id, setTimeout(() => {
+        timers.delete(t.id);
+        onDismiss(t.id);
+      }, t.duration ?? 4000));
+    }
+
+    // Drop timers for toasts no longer present (e.g. dismissed by a close
+    // button) so they don't fire a stale onDismiss later.
+    for (const [id, timer] of timers) {
+      if (!currentIds.has(id)) {
+        clearTimeout(timer);
+        timers.delete(id);
+      }
+    }
   }, [toasts, onDismiss]);
+
+  // Clear any still-pending timers on unmount.
+  useEffect(() => () => {
+    for (const timer of timersRef.current.values()) clearTimeout(timer);
+  }, []);
 
   return (
     <div

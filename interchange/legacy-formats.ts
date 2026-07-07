@@ -309,7 +309,19 @@ export class FCPXMLExporter {
 
     for (const track of tl.videoTracks) {
       // Spread to avoid mutating the original clips array as a side effect of export.
+      let cursor = 0;
       for (const clip of [...track.clips].sort((a, b) => a.startFrame - b.startFrame)) {
+        // A <spine> is FCP's primary storyline and expects contiguous items;
+        // absolute offsets alone (no <gap> filler) round-trip fine through
+        // FCPXMLImporter below (it reads each clip's own offset directly,
+        // ignoring gaps entirely), but a real Final Cut Pro import treats a
+        // hole between items as ambiguous/misplaced. Fill it explicitly,
+        // matching OTIOExporter.toOTIOTrack's gap-filling (otio.ts).
+        if (clip.startFrame > cursor) {
+          const gapOffset = `${cursor}/${ratio}s`;
+          const gapDuration = `${clip.startFrame - cursor}/${ratio}s`;
+          xml.push(`            <gap name="Gap" offset="${gapOffset}" duration="${gapDuration}"/>`);
+        }
         const refId = mediaMap.get(clip.mediaUrl) ?? 'r2';
         const offset = `${clip.startFrame}/${ratio}s`;
         const start = `${clip.sourceInFrame}/${ratio}s`;
@@ -317,6 +329,7 @@ export class FCPXMLExporter {
         xml.push(
           `            <clip name="${escapeXML(clip.name)}" offset="${offset}" start="${start}" duration="${duration}" ref="${refId}"/>`
         );
+        cursor = clip.startFrame + clip.durationFrames;
       }
     }
 

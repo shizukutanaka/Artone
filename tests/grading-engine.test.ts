@@ -392,6 +392,49 @@ describe('ColorGradingEngine — applyWheels (CPU path)', () => {
     expect(data[1]).toBeCloseTo(151, -1);
     expect(data[2]).toBeCloseTo(151, -1);
   });
+
+  // REGRESSION: applyWheels (the CPU path — used whenever GPU is
+  // unavailable, or the grade has curves/a LUT/multiple nodes) never read
+  // wheels.hue at all, so a hue-wheel adjustment silently vanished as soon
+  // as the WGSL single-node fast path didn't apply, even though the GPU
+  // shader correctly rotates hue via rgb2hsl/hsl2rgb.
+  it('REGRESSION: hue=120 rotates pure red to pure green (matches GPU shader math)', () => {
+    const data = pixel(255, 0, 0);
+    const w = defaultWheels();
+    w.hue = 120;
+    applyWheels(engine, data, w);
+    expect(data[0]).toBeCloseTo(0, -1);
+    expect(data[1]).toBeCloseTo(255, -1);
+    expect(data[2]).toBeCloseTo(0, -1);
+  });
+
+  it('REGRESSION: hue=240 rotates pure red to pure blue', () => {
+    const data = pixel(255, 0, 0);
+    const w = defaultWheels();
+    w.hue = 240;
+    applyWheels(engine, data, w);
+    expect(data[0]).toBeCloseTo(0, -1);
+    expect(data[1]).toBeCloseTo(0, -1);
+    expect(data[2]).toBeCloseTo(255, -1);
+  });
+
+  it('hue rotation of an achromatic (gray) pixel is a no-op', () => {
+    const data = pixel(128, 128, 128);
+    const w = defaultWheels();
+    w.hue = 90;
+    applyWheels(engine, data, w);
+    expect(data[0]).toBeCloseTo(128, -1);
+    expect(data[1]).toBeCloseTo(128, -1);
+    expect(data[2]).toBeCloseTo(128, -1);
+  });
+
+  it('hue=0 (default) leaves color unchanged (fast-path skip)', () => {
+    const data = pixel(200, 100, 50);
+    applyWheels(engine, data, defaultWheels());
+    expect(data[0]).toBeCloseTo(200, -1);
+    expect(data[1]).toBeCloseTo(100, -1);
+    expect(data[2]).toBeCloseTo(50, -1);
+  });
 });
 
 // ─── loadCubeLUT ────────────────────────────────────────────────

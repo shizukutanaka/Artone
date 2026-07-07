@@ -741,11 +741,13 @@ export class ColorGradingEngine {
     const contrastScale = 1 + w.contrast;
     const contrastBias  = w.pivot * (1 - contrastScale);
     const saturation    = w.saturation;
+    const hueShift      = w.hue / 360;
     // Loop-invariant identity checks hoisted before the pixel loop.
     // V8 constant-folds these const booleans and eliminates the branch inside
     // the loop, so we pay zero per-pixel cost for the common "no adjustment" case.
     const noGamma = gammaR === 1 && gammaG === 1 && gammaB === 1;
     const noSat   = saturation === 1;
+    const noHue   = Math.abs(w.hue) <= 0.001; // matches the WGSL shader's threshold
 
     for (let i = 0; i < data.length; i += 4) {
       let r = data[i]     / 255;
@@ -787,6 +789,41 @@ export class ColorGradingEngine {
         r = luma + (r - luma) * saturation;
         g = luma + (g - luma) * saturation;
         b = luma + (b - luma) * saturation;
+      }
+
+      // Hue shift — mirrors the WGSL shader's rgb2hsl → rotate → hsl2rgb,
+      // which this CPU path (taken whenever GPU is unavailable, or the grade
+      // has curves/a LUT/multiple nodes) previously never applied at all,
+      // silently dropping any hue-wheel adjustment.
+      if (!noHue) {
+        const mx = Math.max(r, g, b);
+        const mn = Math.min(r, g, b);
+        const d = mx - mn;
+        if (d >= 0.00001) {
+          const l = (mx + mn) * 0.5;
+          const s = d / (1 - Math.abs(2 * l - 1));
+          let h: number;
+          if (mx === r)      h = ((g - b) / d) % 6;
+          else if (mx === g) h = (b - r) / d + 2;
+          else               h = (r - g) / d + 4;
+          h /= 6;
+          if (h < 0) h += 1;
+          h += hueShift;
+          h -= Math.floor(h); // fract
+
+          const C = (1 - Math.abs(2 * l - 1)) * s;
+          const h2 = h * 6;
+          const X = C * (1 - Math.abs((h2 % 2) - 1));
+          const m = l - C * 0.5;
+          if (h2 < 1)      { r = C + m; g = X + m; b = 0 + m; }
+          else if (h2 < 2) { r = X + m; g = C + m; b = 0 + m; }
+          else if (h2 < 3) { r = 0 + m; g = C + m; b = X + m; }
+          else if (h2 < 4) { r = 0 + m; g = X + m; b = C + m; }
+          else if (h2 < 5) { r = X + m; g = 0 + m; b = C + m; }
+          else             { r = C + m; g = 0 + m; b = X + m; }
+        }
+        // d < 0.00001 (achromatic): rotating a gray pixel's hue is a no-op,
+        // matching the shader's early return from rgb2hsl.
       }
 
       data[i]     = Math.max(0, Math.min(255, r * 255));

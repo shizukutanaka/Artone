@@ -455,8 +455,17 @@ export class Vectorscope {
   }
 
   /**
-   * Skin-tone mode: highlights the I-line angular sector [15°,35°] in Cb/Cr space.
-   * Uses cross-product sector test to replace Math.atan2() per pixel.
+   * Skin-tone mode: highlights the flesh-tone angular sector [110°,150°] in
+   * Cb/Cr space. Uses cross-product sector test to replace Math.atan2() per pixel.
+   *
+   * With this file's (u,v) = (Cb-like, Cr-like) convention, real skin tones
+   * plot around 118°-144° (verified directly from the formula below, not
+   * [15°,35°] as a previous version of this comment/test claimed):
+   *   (224,160,128) light skin → u=-23.3, v=33.5  → atan2(v,u) ≈ 125°
+   *   (200,150,100) mid skin   → u=-30.7, v=27.3  → atan2(v,u) ≈ 138°
+   *   (92,51,38)    dark skin  → u=-11.2, v=21.1  → atan2(v,u) ≈ 118°
+   *   (255,219,172) pale skin  → u=-27.6, v=20.2  → atan2(v,u) ≈ 144°
+   * [15°,35°] instead selects blue-magenta/violet hues, never skin.
    *
    * Accumulates all pixels into two density maps (total + skin-tone), then renders
    * a single putImageData instead of up to 50 K per-pixel fillRect calls per frame.
@@ -468,8 +477,8 @@ export class Vectorscope {
     sampleStep: number,
   ): void {
     const { width, height, scale, brightness } = this.config;
-    const COS15 = 0.9659, SIN15 = 0.2588;
-    const COS35 = 0.8192, SIN35 = 0.5736;
+    const COS110 = -0.3420, SIN110 = 0.9397;
+    const COS150 = -0.8660, SIN150 = 0.5;
     const rScale = radius * scale / 128;
 
     const { scopeDensity, skinDensity } = this;
@@ -484,7 +493,7 @@ export class Vectorscope {
       if (px >= 0 && px < width && py >= 0 && py < height) {
         const idx = py * width + px;
         scopeDensity[idx]++;
-        if (COS15 * v - SIN15 * u >= 0 && COS35 * v - SIN35 * u <= 0) {
+        if (COS110 * v - SIN110 * u >= 0 && COS150 * v - SIN150 * u <= 0) {
           skinDensity[idx]++;
         }
       }
@@ -650,7 +659,10 @@ export class Vectorscope {
       this.ctx.lineWidth = 2;
       this.ctx.setLineDash([5, 5]);
       
-      const skinAngle = (25 * Math.PI) / 180; // ~25 degrees
+      // Centered on the [110°,150°] skin-tone sector tested in
+      // renderSkinToneMode/getStats — was 25°, which points at the wrong
+      // side of the scope entirely (see that method's docstring).
+      const skinAngle = (130 * Math.PI) / 180; // ~130 degrees
       this.ctx.beginPath();
       this.ctx.moveTo(cx, cy);
       this.ctx.lineTo(cx + Math.cos(skinAngle) * r, cy - Math.sin(skinAngle) * r);
@@ -898,14 +910,17 @@ export class HistogramScope {
     let shadowClip = 0, highlightClip = 0;
     let skinToneCount = 0;
     
-    // Precomputed angular sector boundary for skin tone [15°, 35°] in Cb/Cr space.
+    // Precomputed angular sector boundary for skin tone [110°, 150°] in Cb/Cr
+    // space (see renderSkinToneMode's docstring for the worked examples that
+    // verify real skin tones plot around 118°-144° in this (u,v) convention —
+    // [15°,35°] instead selected blue-magenta/violet hues, never skin).
     // Cross-product sector test replaces per-pixel Math.atan2 (expensive trig call).
-    // A point (u,v) is in [15°,35°] when cross(dir15,(u,v))>=0 AND cross(dir35,(u,v))<=0.
+    // A point (u,v) is in [110°,150°] when cross(dir110,(u,v))>=0 AND cross(dir150,(u,v))<=0.
     // cross((ax,ay),(bx,by)) = ax*by - ay*bx
-    // dir15 = (cos15°, sin15°) = (0.9659, 0.2588)  →  0.9659*v - 0.2588*u >= 0
-    // dir35 = (cos35°, sin35°) = (0.8192, 0.5736)  →  0.8192*v - 0.5736*u <= 0
-    const COS15 = 0.9659, SIN15 = 0.2588;
-    const COS35 = 0.8192, SIN35 = 0.5736;
+    // dir110 = (cos110°, sin110°) = (-0.3420, 0.9397)  →  -0.3420*v - 0.9397*u >= 0
+    // dir150 = (cos150°, sin150°) = (-0.8660, 0.5)     →  -0.8660*v - 0.5*u    <= 0
+    const COS110 = -0.3420, SIN110 = 0.9397;
+    const COS150 = -0.8660, SIN150 = 0.5;
 
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
@@ -933,11 +948,11 @@ export class HistogramScope {
       if (r <= 5 || g <= 5 || b <= 5) shadowClip++;
       if (r >= 250 || g >= 250 || b >= 250) highlightClip++;
 
-      // Skin tone: angular sector [15°,35°] in Cb/Cr, luma guard [50,200].
+      // Skin tone: angular sector [110°,150°] in Cb/Cr, luma guard [50,200].
       if (y > 50 && y < 200) {
         const u = -0.1146 * r - 0.3854 * g + 0.5   * b;
         const v =  0.5    * r - 0.4542 * g - 0.0458 * b;
-        if (COS15 * v - SIN15 * u >= 0 && COS35 * v - SIN35 * u <= 0) {
+        if (COS110 * v - SIN110 * u >= 0 && COS150 * v - SIN150 * u <= 0) {
           skinToneCount++;
         }
       }

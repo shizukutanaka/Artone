@@ -164,15 +164,32 @@ describe('HistogramScope.getStats()', () => {
   it('skinTonePercentage is 0 for mid-gray image', () => {
     const img = solidImageData(4, 4, 128, 128, 128);
     const stats = scope.getStats(img);
-    // Gray has u≈0 v≈0 → angle near 0 or undefined; 15-35 deg skin range not hit
+    // Gray has u≈0, v≈0 — near the vectorscope origin, outside any hue sector.
     expect(stats.skinTonePercentage).toBe(0);
   });
 
-  it('skinTonePercentage is in [0, 100]', () => {
-    const img = solidImageData(4, 4, 200, 150, 100);
-    const stats = scope.getStats(img);
-    expect(stats.skinTonePercentage).toBeGreaterThanOrEqual(0);
-    expect(stats.skinTonePercentage).toBeLessThanOrEqual(100);
+  it('REGRESSION: skinTonePercentage actually detects real skin tones (was always ~0)', () => {
+    // Before fix: the angular sector was [15°,35°], but these skin colors'
+    // (Cb,Cr) angle is ~118°-144° — the sector selected blue-magenta/violet
+    // hues instead, so skinTonePercentage was always 0 regardless of input.
+    for (const [r, g, b] of [
+      [224, 160, 128], // light skin, ~125°, y=171
+      [200, 150, 100], // mid skin, ~138°, y=156
+      [92, 51, 38],    // dark skin, ~118°, y=58
+      [200, 172, 135], // pale skin, ~144°, y=175
+    ]) {
+      const img = solidImageData(4, 4, r, g, b);
+      const stats = scope.getStats(img);
+      expect(stats.skinTonePercentage).toBe(100);
+    }
+  });
+
+  it('does not flag clearly non-skin hues (green/blue/cyan) as skin', () => {
+    for (const [r, g, b] of [[0, 255, 0], [0, 0, 255], [0, 255, 255]]) {
+      const img = solidImageData(4, 4, r, g, b);
+      const stats = scope.getStats(img);
+      expect(stats.skinTonePercentage).toBe(0);
+    }
   });
 
   it('returns finite neutral stats for an empty frame (no NaN from 0/0)', () => {

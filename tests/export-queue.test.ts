@@ -256,6 +256,33 @@ describe('failure and retry', () => {
     expect(job.result).toBe('ok');
     expect(job.retries).toBe(1);
   });
+
+  it('REGRESSION: drain() does not resolve during the retry backoff gap', async () => {
+    // Before fix: drain() resolved as soon as pending.length===0 && active.size===0,
+    // which is also true in the gap between a failed attempt's `finally` (removes
+    // the job from `active`) and its scheduleRetry() setTimeout firing (re-adds it
+    // to `pending`) — so with only one job in the queue, drain() could resolve
+    // before the job actually retried or reached a final status.
+    const q = createExportQueue<string>({ retryDelay: 30 });
+    let attempt = 0;
+    const job = q.enqueue(async () => {
+      attempt++;
+      if (attempt < 2) throw new Error('transient');
+      return 'ok';
+    }, { maxRetries: 2 });
+
+    await q.drain();
+    expect(job.status).toBe('completed');
+    expect(job.result).toBe('ok');
+  });
+
+  it('REGRESSION: drain() waits out retries even when the job ultimately fails', async () => {
+    const q = createExportQueue({ retryDelay: 30 });
+    const job = q.enqueue(async () => { throw new Error('boom'); }, { maxRetries: 2 });
+    await q.drain();
+    expect(job.status).toBe('failed');
+    expect(job.retries).toBe(2);
+  });
 });
 
 // ─── pause / resume ──────────────────────────────────────────────────────────

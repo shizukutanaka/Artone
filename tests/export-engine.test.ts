@@ -12,6 +12,29 @@ import {
   type ExportConfig,
   type ExportJob,
 } from '../export/export-engine';
+import { muxMP4 } from '../export/mp4-muxer';
+import { muxWebM, type VideoChunkRef, type AudioChunkRef } from '../export/webm-muxer';
+
+vi.mock('../export/mp4-muxer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../export/mp4-muxer')>();
+  return { ...actual, muxMP4: vi.fn(actual.muxMP4) };
+});
+vi.mock('../export/webm-muxer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../export/webm-muxer')>();
+  return { ...actual, muxWebM: vi.fn(actual.muxWebM) };
+});
+
+/** Access ExportEngine's private mux()/lastAudio* for white-box muxing tests. */
+type ExportEnginePrivate = {
+  lastAudioSampleRate: number;
+  lastAudioChannels: number;
+  mux(
+    videoChunks: VideoChunkRef[],
+    audioChunks: AudioChunkRef[] | null,
+    config: ExportConfig,
+    duration: number
+  ): Promise<Blob>;
+};
 
 // ============================================================
 // EXPORT_PRESETS
@@ -440,6 +463,72 @@ describe('REGRESSION: encodeAudio planar layout', () => {
 
     // Confirm the two are different (ensures the test actually caught the distinction)
     expect(Array.from(planar)).not.toEqual(Array.from(interleaved));
+  });
+});
+
+describe('REGRESSION: mux() declares the real audio sample rate/channels, not a hardcoded 48kHz/stereo', () => {
+  const videoChunks: VideoChunkRef[] = [
+    { data: new Uint8Array(8).fill(1), timestampUs: 0, durationUs: 33333, isKeyframe: true },
+  ];
+  const audioChunks: AudioChunkRef[] = [
+    { data: new Uint8Array(4).fill(2), timestampUs: 0 },
+  ];
+
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('MP4: uses the sample rate/channels encodeAudio() actually configured (e.g. 44.1kHz mono)', async () => {
+    const engine = new ExportEngine();
+    const priv = engine as unknown as ExportEnginePrivate;
+    // Simulate what encodeAudio() sets for a 44.1kHz mono source.
+    priv.lastAudioSampleRate = 44100;
+    priv.lastAudioChannels = 1;
+
+    const config: ExportConfig = {
+      format: 'mp4', codec: 'avc1.640028', width: 320, height: 240, fps: 30,
+      bitrate: 1_000_000, audioBitrate: 128_000, quality: 'high', hardwareAcceleration: false,
+    };
+    await priv.mux(videoChunks, audioChunks, config, 1);
+
+    expect(muxMP4).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      { sampleRate: 44100, channels: 1 },
+      expect.anything(),
+    );
+  });
+
+  it('WebM: uses the sample rate/channels encodeAudio() actually configured (e.g. 44.1kHz mono)', async () => {
+    const engine = new ExportEngine();
+    const priv = engine as unknown as ExportEnginePrivate;
+    priv.lastAudioSampleRate = 44100;
+    priv.lastAudioChannels = 1;
+
+    const config: ExportConfig = {
+      format: 'webm', codec: 'vp09.00.10.08', width: 320, height: 240, fps: 30,
+      bitrate: 1_000_000, audioBitrate: 128_000, quality: 'high', hardwareAcceleration: false,
+    };
+    await priv.mux(videoChunks, audioChunks, config, 1);
+
+    expect(muxWebM).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      expect.objectContaining({ sampleRate: 44100, channels: 1 }),
+      expect.anything(),
+    );
+  });
+
+  it('defaults to 48kHz/stereo when no audio was ever encoded (no encodeAudio call yet)', async () => {
+    const engine = new ExportEngine();
+    const priv = engine as unknown as ExportEnginePrivate;
+    const config: ExportConfig = {
+      format: 'mp4', codec: 'avc1.640028', width: 320, height: 240, fps: 30,
+      bitrate: 1_000_000, audioBitrate: 128_000, quality: 'high', hardwareAcceleration: false,
+    };
+    await priv.mux(videoChunks, audioChunks, config, 1);
+
+    expect(muxMP4).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      { sampleRate: 48000, channels: 2 },
+      expect.anything(),
+    );
   });
 });
 

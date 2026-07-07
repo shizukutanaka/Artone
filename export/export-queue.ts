@@ -158,6 +158,9 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
   let pending: QueueJob<T>[] = [];
   const active = new Set<string>();
   let paused = false;
+  // Jobs whose retry setTimeout hasn't fired yet — neither pending nor active,
+  // but not finished either. drain() must not resolve while this is nonzero.
+  let scheduledRetries = 0;
 
   // ─── internal helpers ────────────────────────────────────────────────────
 
@@ -178,12 +181,20 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
   }
 
   function scheduleRetry(job: QueueJob<T>, attemptNumber: number): void {
+    // Caller (runJob's finally) already incremented scheduledRetries before
+    // notifying listeners, so drain() can't observe a false "all done" state.
     const delay = retryDelay * Math.pow(2, attemptNumber - 1);
     setTimeout(() => {
+      scheduledRetries--;
       // Guard: cancel() may have been called during the retry delay. Without
       // this check the job would be resurrected in the pending queue even though
       // the caller already received cancel()→true.
-      if (job.status === 'cancelled') return;
+      if (job.status === 'cancelled') {
+        // scheduledRetries just dropped — let drain() re-check even though
+        // this job itself isn't going anywhere.
+        notify(job);
+        return;
+      }
       // status is already 'pending' (set in runJob finally before notify)
       pending.push(job);
       sortPending();
@@ -256,6 +267,11 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
       if (needsRetry) {
         job.status = 'pending';
         job.progress = 0;
+        // Must increment BEFORE notify() below: drain()'s listener re-checks
+        // its empty condition synchronously on that same notify() call, and
+        // the job hasn't reached `pending` yet (scheduleRetry's setTimeout
+        // hasn't fired) — without this, drain() could resolve right here.
+        scheduledRetries++;
       }
       // active.delete MUST precede notify so drain() can observe an empty active set
       notify(job);
@@ -368,12 +384,12 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
   }
 
   function drain(): Promise<void> {
-    if (pending.length === 0 && active.size === 0) {
+    if (pending.length === 0 && active.size === 0 && scheduledRetries === 0) {
       return Promise.resolve();
     }
     return new Promise<void>((resolve) => {
       const unsub = onStatusChange(() => {
-        if (pending.length === 0 && active.size === 0) {
+        if (pending.length === 0 && active.size === 0 && scheduledRetries === 0) {
           unsub();
           resolve();
         }

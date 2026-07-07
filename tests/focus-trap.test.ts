@@ -60,6 +60,36 @@ describe('getFocusableElements', () => {
     root.innerHTML = `<div>text</div><span>more</span>`;
     expect(getFocusableElements(root)).toEqual([]);
   });
+
+  it('REGRESSION: excludes elements hidden via inline display:none', () => {
+    // Before fix: the documented visibility check was never implemented —
+    // getFocusableElements() unconditionally included every matched node.
+    root.innerHTML = `
+      <button id="a">A</button>
+      <button id="b" style="display:none">B</button>
+    `;
+    expect(getFocusableElements(root).map((e) => e.id)).toEqual(['a']);
+  });
+
+  it('REGRESSION: excludes elements hidden via a CSS class rule', () => {
+    const style = document.createElement('style');
+    style.textContent = '.is-hidden { display: none; }';
+    document.head.appendChild(style);
+    root.innerHTML = `
+      <button id="a">A</button>
+      <button id="b" class="is-hidden">B</button>
+    `;
+    try {
+      expect(getFocusableElements(root).map((e) => e.id)).toEqual(['a']);
+    } finally {
+      style.remove();
+    }
+  });
+
+  it('keeps position:fixed elements focusable (e.g. a fixed-position modal)', () => {
+    root.innerHTML = `<button id="a" style="position:fixed">A</button>`;
+    expect(getFocusableElements(root).map((e) => e.id)).toEqual(['a']);
+  });
 });
 
 describe('trapTabKey', () => {

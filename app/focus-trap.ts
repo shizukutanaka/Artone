@@ -25,16 +25,18 @@ const FOCUSABLE_SELECTOR = [
 
 /**
  * `container` 内のフォーカス可能要素を Tab 順 (DOM 順) で返す。
- * 非表示要素 (`hidden` 属性 / `display:none` 由来の offsetParent=null) は除外。
+ * 非表示要素 (`disabled` / `aria-hidden="true"` / `display:none`) は除外。
  */
 export function getFocusableElements(container: HTMLElement): HTMLElement[] {
   const nodes = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
   return nodes.filter((el) => {
     if (el.hasAttribute('disabled')) return false;
     if (el.getAttribute('aria-hidden') === 'true') return false;
-    // offsetParent is null for display:none (but also for position:fixed — modals
-    // are usually fixed, so only treat it as hidden when there is no layout box AND
-    // no client rects). jsdom returns 0 rects; guard so tests still see elements.
+    // Computed `display` reflects inline style and CSS-class rules alike, and
+    // (unlike offsetParent/getClientRects) doesn't depend on layout having run
+    // — so it works the same in jsdom as in a real browser. A fixed-position
+    // modal keeps a normal `display` value, so it is never excluded here.
+    if (getComputedStyle(el).display === 'none') return false;
     return true;
   });
 }

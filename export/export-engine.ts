@@ -256,6 +256,11 @@ export class ExportEngine {
   private jobs: Map<string, ExportJob> = new Map();
   private encoder: VideoEncoder | null = null;
   private audioEncoder: AudioEncoder | null = null;
+  // Actual sample rate/channel count used by the most recent encodeAudio()
+  // call, so mux() can declare matching container metadata instead of
+  // assuming every source is 48kHz stereo.
+  private lastAudioSampleRate = 48000;
+  private lastAudioChannels = 2;
   private abortController: AbortController | null = null;
   private listeners: Set<(job: ExportJob) => void> = new Set();
   // Cached canvas for videoFrameToImageData() — recreated only on resolution change.
@@ -499,6 +504,8 @@ export class ExportEngine {
     const chunks: AudioChunkRef[] = [];
     const sampleRate = buffer.sampleRate;
     const channels = Math.min(buffer.numberOfChannels, 2);
+    this.lastAudioSampleRate = sampleRate;
+    this.lastAudioChannels = channels;
 
     // Check AAC support
     const support = await AudioEncoder.isConfigSupported({
@@ -599,8 +606,8 @@ export class ExportEngine {
       const hasAudio = audioChunks && audioChunks.length > 0;
       const audioTrack = hasAudio ? {
         codecId: toWebMAudioCodecId('mp4a.40.2'),
-        sampleRate: 48000,
-        channels: 2,
+        sampleRate: this.lastAudioSampleRate,
+        channels: this.lastAudioChannels,
       } : undefined;
       const webmBytes = muxWebM(
         videoTrack,
@@ -614,7 +621,7 @@ export class ExportEngine {
     // MP4: full ISOBMFF container with moov + mdat (H.264 includes avcC/AVCC conversion)
     const mp4Track = { codec: config.codec, width: config.width, height: config.height, fps: config.fps };
     const mp4AudioTrack = (audioChunks && audioChunks.length > 0)
-      ? { sampleRate: 48000, channels: 2 }
+      ? { sampleRate: this.lastAudioSampleRate, channels: this.lastAudioChannels }
       : undefined;
     const mp4Bytes = muxMP4(
       mp4Track,

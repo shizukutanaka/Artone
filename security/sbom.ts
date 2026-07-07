@@ -18,6 +18,8 @@ export interface Component {
   purl?: string; // package URL
   license: string | null;
   supplier?: string;
+  /** `value` is hex-encoded (the only producer, generate.ts's normalizeHash,
+   *  already converts npm's base64 integrity value to hex). */
   hash?: { algorithm: string; value: string };
   homepage?: string;
   description?: string;
@@ -326,9 +328,13 @@ export class SBOMGenerator {
       lines.push(`PackageLicenseConcluded: ${c.license ?? 'NOASSERTION'}`);
       lines.push(`PackageLicenseDeclared: ${c.license ?? 'NOASSERTION'}`);
       lines.push(`PackageDownloadLocation: ${c.homepage ?? 'NOASSERTION'}`);
-      if (c.hash) {
+      if (c.hash && /^[0-9a-f]+$/i.test(c.hash.value)) {
         // SPDX 仕様: PackageChecksum: <ALGO>: <hex>
-        // npm integrity は base64 なので hex 変換
+        // c.hash.value is already hex (generate.ts's normalizeHash converts
+        // npm's base64 integrity value once, at construction time) — do not
+        // re-decode it here. Re-running it through a base64→hex conversion
+        // silently produced a corrupt checksum, since hex digits happen to
+        // also be valid base64 characters (no throw, just wrong bytes).
         const algoMap: Record<string, string> = {
           sha1: 'SHA1',
           sha256: 'SHA256',
@@ -337,36 +343,12 @@ export class SBOMGenerator {
           md5: 'MD5',
         };
         const spdxAlgo = algoMap[c.hash.algorithm.toLowerCase()] ?? c.hash.algorithm.toUpperCase();
-        const hexValue = base64ToHex(c.hash.value);
-        if (hexValue) {
-          lines.push(`PackageChecksum: ${spdxAlgo}: ${hexValue}`);
-        }
+        lines.push(`PackageChecksum: ${spdxAlgo}: ${c.hash.value.toLowerCase()}`);
       }
       lines.push('');
     }
 
     return lines.join('\n');
-  }
-}
-
-/**
- * Base64 → 16進文字列。Node Buffer / atob 両対応。
- * SPDX 仕様準拠の checksum 出力に必要。
- */
-function base64ToHex(b64: string): string | null {
-  try {
-    if (typeof Buffer !== 'undefined') {
-      return Buffer.from(b64, 'base64').toString('hex');
-    }
-    // ブラウザ fallback
-    const bin = atob(b64);
-    let hex = '';
-    for (let i = 0; i < bin.length; i++) {
-      hex += bin.charCodeAt(i).toString(16).padStart(2, '0');
-    }
-    return hex;
-  } catch {
-    return null;
   }
 }
 

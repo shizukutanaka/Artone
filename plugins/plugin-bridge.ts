@@ -579,38 +579,35 @@ export class PluginBridge {
     this.uiCleanups.set(instanceId, uiController);
 
     if (instance.descriptor.uiUrl) {
-      // Determine expected message origin for cross-origin security checks.
-      // Relative URLs (e.g. /plugins/ui.html) resolve to the same origin as
-      // the host app; absolute URLs specify their own origin. '*' is never used
-      // to prevent parameter leakage to or injection from unrelated origins.
-      let expectedOrigin: string;
-      try {
-        expectedOrigin = new URL(instance.descriptor.uiUrl).origin;
-      } catch {
-        // Relative URL — plugin UI is served from the same origin
-        expectedOrigin = window.location.origin;
-      }
-
       // Load custom UI
       const iframe = document.createElement('iframe');
       iframe.src = instance.descriptor.uiUrl;
       iframe.style.cssText = 'width:100%;height:400px;border:none;';
+      // Contain the plugin-supplied page: no top-level navigation, no popups,
+      // no same-origin DOM access to the host. 'allow-same-origin' is
+      // deliberately omitted — combined with 'allow-scripts' for content that
+      // may share the host's origin, it would let the plugin reach back into
+      // the host page and effectively remove the sandbox.
+      iframe.setAttribute('sandbox', 'allow-scripts');
 
       iframe.onload = () => {
-        // Target the exact expected origin so parameters are never sent to an
-        // unintended origin if the iframe navigated away.
+        // Sandboxing without 'allow-same-origin' gives the framed document an
+        // opaque origin, so 'null' is the only targetOrigin that can reach it
+        // (a concrete origin string never matches an opaque one).
         iframe.contentWindow?.postMessage({
           type: 'init',
           parameters: Object.fromEntries(instance.parameters)
-        }, expectedOrigin);
+        }, 'null');
       };
 
       // Use signal so this listener is removed when unloadPlugin() or a
       // subsequent openPluginUI() call aborts uiController — preventing leaks
       // that previously accumulated one permanent listener per open call.
       window.addEventListener('message', (e) => {
-        // Reject messages from origins other than the plugin's own UI origin.
-        if (e.origin !== expectedOrigin) return;
+        // Match by window identity rather than origin string: the sandboxed
+        // iframe has an opaque origin, so this is the only reliable way to
+        // confirm a message actually came from this exact iframe.
+        if (e.source !== iframe.contentWindow) return;
         if (e.data.type === 'parameterChange' && e.data.instanceId === instanceId) {
           this.setParameter(instanceId, e.data.parameterId, e.data.value);
         }

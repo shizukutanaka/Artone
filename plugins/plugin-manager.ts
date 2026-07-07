@@ -279,6 +279,8 @@ const BUILTIN_TRANSITIONS: TransitionPlugin[] = [
  * (`fetch`/`XMLHttpRequest`/`WebSocket`) requires an explicit manifest grant,
  * remote code loading (`importScripts`) and dynamic eval (`eval`/`Function`)
  * are forbidden. This denies them by default inside the sandbox worker.
+ * `Worker` is denied too — nested workers get a fresh, unrestricted global
+ * scope, so allowing it would let a plugin trivially escape this lockdown.
  *
  * Defense-in-depth, not a perfect capability jail: it raises the bar for a
  * malicious plugin running in the worker. MUST stay closure-free — it is
@@ -293,6 +295,7 @@ export function lockdownSandboxGlobals(scope: Record<string, unknown>): void {
     'importScripts',                                        // remote code loading
     'eval', 'Function',                                     // dynamic code eval
     'indexedDB', 'caches',                                  // persistence
+    'Worker', 'Notification',                               // nested unrestricted scope / ambient UI
   ];
   for (const name of denied) {
     try {

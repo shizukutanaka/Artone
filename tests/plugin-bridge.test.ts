@@ -872,8 +872,6 @@ describe('PluginBridge — UI listener cleanup', () => {
   it('REGRESSION: re-opening plugin UI does not double-fire message listener', async () => {
     // Before fix: each openPluginUI call with uiUrl added a permanent message
     // listener that was never removed, so N opens → N handlers fired per message.
-    // Use a relative URL so the catch branch sets expectedOrigin = window.location.origin,
-    // matching the origin we use in dispatchEvent below. ('about:blank' has origin "null".)
     const desc = makeDescriptor({ uiUrl: '/plugin-ui.html' });
     const bridge = makeBridge();
     const inst = injectInstance(bridge, desc);
@@ -890,14 +888,49 @@ describe('PluginBridge — UI listener cleanup', () => {
     await bridge.openPluginUI(inst.id, container);
     await bridge.openPluginUI(inst.id, container);
 
-    // Dispatch a parameterChange message from the expected origin
+    // Messages are matched by source window identity (the iframe is sandboxed
+    // to an opaque origin, so origin-string matching can't be used).
+    const iframe = container.querySelector('iframe')!;
     const msg = new MessageEvent('message', {
-      origin: window.location.origin,
+      source: iframe.contentWindow,
       data: { type: 'parameterChange', instanceId: inst.id, parameterId: 'gain', value: 5 },
     });
     window.dispatchEvent(msg);
 
     // After fix: exactly 1 handler fires (the second open replaced the first)
     expect(callCount).toBe(1);
+  });
+
+  it('sandboxes the plugin UI iframe (allow-scripts only, no allow-same-origin)', async () => {
+    const bridge = makeBridge();
+    const desc = makeDescriptor({ uiUrl: '/plugin-ui.html' });
+    const inst = injectInstance(bridge, desc);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const iframe = container.querySelector('iframe')!;
+    const sandbox = iframe.getAttribute('sandbox') ?? '';
+    expect(sandbox.split(/\s+/)).toContain('allow-scripts');
+    expect(sandbox).not.toContain('allow-same-origin');
+    expect(sandbox).not.toContain('allow-top-navigation');
+    expect(sandbox).not.toContain('allow-popups');
+  });
+
+  it('ignores parameterChange messages not sourced from the plugin iframe', async () => {
+    const bridge = makeBridge();
+    const desc = makeDescriptor({ uiUrl: '/plugin-ui.html' });
+    const inst = injectInstance(bridge, desc);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+
+    const before = bridge.getParameter(inst.id, 'gain');
+    // `iframe.contentWindow` is null in jsdom, so a message with no `source`
+    // set (which also defaults to null there) can't distinguish "from the
+    // iframe" from "from nowhere" in this environment. Use an unambiguously
+    // different, non-null source instead — e.g. `window` itself.
+    window.dispatchEvent(new MessageEvent('message', {
+      source: window,
+      data: { type: 'parameterChange', instanceId: inst.id, parameterId: 'gain', value: 5 },
+    }));
+    expect(bridge.getParameter(inst.id, 'gain')).toBe(before);
   });
 });

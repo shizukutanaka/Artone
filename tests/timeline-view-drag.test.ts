@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeClipDrag,
   clipDragModeForX,
+  computeRulerClickTime,
   CLIP_EDGE_PX,
   MIN_CLIP_DURATION,
   type ClipDragState,
@@ -173,5 +174,33 @@ describe('clipDragModeForX', () => {
     // original inline if/else-if order.
     expect(clipDragModeForX(0, 4)).toBe('resize-l');
     expect(clipDragModeForX(3, 4)).toBe('resize-l'); // 3 < 6 → resize-l before resize-r
+  });
+});
+
+// ─── computeRulerClickTime (ruler click → playhead seconds) ───────────────────
+
+describe('computeRulerClickTime', () => {
+  const PPS = 100;
+
+  it('REGRESSION: does not double-correct for scroll/header offset', () => {
+    // Before fix: handleRulerClick added `+ scrollX - HEADER_W` on top of
+    // rect.left, which already accounts for both — clicking exactly at the
+    // ruler's left edge (rectLeft) must land at time 0, not at a negative
+    // offset masked by the Math.max(0, ...) clamp.
+    expect(computeRulerClickTime(500, 500, PPS)).toBe(0);
+  });
+
+  it('click 5 seconds in (500px at 100px/s) from the ruler origin', () => {
+    expect(computeRulerClickTime(1000, 500, PPS)).toBe(5);
+  });
+
+  it('clamps to 0 when clicking left of the ruler origin', () => {
+    expect(computeRulerClickTime(400, 500, PPS)).toBe(0);
+  });
+
+  it('result is independent of viewport position — only the click-to-rect delta matters', () => {
+    // Same 5s click, but the whole ruler (and click) shifted 300px right —
+    // e.g. a wider left panel or different scroll position.
+    expect(computeRulerClickTime(1300, 800, PPS)).toBe(5);
   });
 });

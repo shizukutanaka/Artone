@@ -8,7 +8,7 @@
  */
 
 import { color } from './design-system';
-import React, { useRef, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useCallback, useMemo } from 'react';
 
 
 // ============================================================
@@ -114,6 +114,20 @@ export function clipDragModeForX(offsetX: number, width: number): ClipDragMode {
   if (offsetX < CLIP_EDGE_PX) return 'resize-l';
   if (offsetX > width - CLIP_EDGE_PX) return 'resize-r';
   return 'move';
+}
+
+/**
+ * Convert a ruler click's viewport X to a playhead time in seconds.
+ *
+ * `rectLeft` (from the ruler element's `getBoundingClientRect().left`)
+ * already reflects both the track area's header offset and the current
+ * scroll position — the ruler div is an ordinary (non-horizontally-sticky)
+ * child of the scrolling container, positioned the same way clips are
+ * (`left: clip.start * pxPerSecond` inside the same `marginLeft: HEADER_W`
+ * track div). No further correction should be applied.
+ */
+export function computeRulerClickTime(clientX: number, rectLeft: number, pxPerSecond: number): number {
+  return Math.max(0, (clientX - rectLeft) / pxPerSecond);
 }
 
 export interface TimelineViewProps {
@@ -331,7 +345,6 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   onZoomChange
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scrollX, setScrollX] = useState(0);
   const HEADER_W = 120;
 
   // Memoize layout derived from tracks — these don't change on every playhead
@@ -395,10 +408,9 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   const handleRulerClick = useCallback(
     (e: React.MouseEvent) => {
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-      const x = e.clientX - rect.left + scrollX - HEADER_W;
-      onPlayheadChange(Math.max(0, x / pxPerSecond));
+      onPlayheadChange(computeRulerClickTime(e.clientX, rect.left, pxPerSecond));
     },
-    [pxPerSecond, scrollX, onPlayheadChange]
+    [pxPerSecond, onPlayheadChange]
   );
 
   const trackPositions = useMemo(() => {
@@ -428,7 +440,6 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
         userSelect: 'none'
       }}
       onWheel={handleWheel}
-      onScroll={(e) => setScrollX((e.currentTarget as HTMLDivElement).scrollLeft)}
     >
       {/* Ruler */}
       <div

@@ -37,7 +37,7 @@ function tierFromLevel(level: ExperienceLevel): FeatureTier {
 type EngineActions = ReturnType<typeof useEngine>['actions'];
 
 /** Global keyboard shortcut dispatcher. Extracted to keep EditorUI complexity low. */
-function buildKeydownHandler(
+export function buildKeydownHandler(
   actions: EngineActions,
   setCmdOpen: React.Dispatch<React.SetStateAction<boolean>>,
 ): (e: KeyboardEvent) => void {
@@ -52,10 +52,13 @@ function buildKeydownHandler(
     } else if (e.key === ' ') {
       e.preventDefault();
       actions.togglePlayPause();
-    } else if (mod && e.key === 'z' && !e.shiftKey) {
+    } else if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+      // `e.key` is the shifted character while Shift is held ('Z', not 'z'),
+      // so redo (Cmd/Ctrl+Shift+Z) never matched `e.key === 'z'' below —
+      // lowercase both sides so undo/redo are keyed only on Shift.
       e.preventDefault();
       actions.undo();
-    } else if (mod && e.key === 'z' && e.shiftKey) {
+    } else if (mod && e.key.toLowerCase() === 'z' && e.shiftKey) {
       e.preventDefault();
       actions.redo();
     } else if (mod && e.key === 's') {

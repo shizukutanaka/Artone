@@ -560,6 +560,12 @@ export class ArtoneApp {
     // auto-save — both depend on the IndexedDB connection being live.
     try { await this.recovery.init(); } catch (e) { errors.push({ module: 'recovery-init', error: e }); }
     try { await this.checkRecovery(); } catch (e) { errors.push({ module: 'recovery', error: e }); }
+    // Missing here meant the ShortcutManager's document keydown listener was
+    // live (its constructor wires it unconditionally) but `callbacks` stayed
+    // empty forever — every J/K/L, split, in/out-point, marker, zoom, etc.
+    // shortcut silently did nothing in the shipping React app (entry.tsx →
+    // EngineProvider → ArtoneApp.initialize(), never the legacy init() path).
+    try { this.setupKeyboardShortcuts(); } catch (e) { errors.push({ module: 'shortcuts', error: e }); }
     try { this.setupAutoSave(); this.setupCrashRecovery(); } catch (e) { errors.push({ module: 'autosave', error: e }); }
     if (errors.length > 0) {
       log.warn(`headless init: ${errors.length} error(s)`);

@@ -352,7 +352,12 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
   useEffect(() => {
     const cmd = engine.lastCommand;
     if (!cmd) return;
-    dispatchAppCommand(cmd.cmd.name, cmd.cmd.payload, setActivePanel, actions.importFiles);
+    // Route through handleImport (not the raw engine action) so files
+    // imported via the shortcut/menu "showImport" command also appear in
+    // the media browser and get an auto-placed timeline clip — previously
+    // this silently imported into the engine only, looking like a no-op.
+    dispatchAppCommand(cmd.cmd.name, cmd.cmd.payload, setActivePanel,
+      (files) => { handleImport(files).catch(() => undefined); });
   }, [engine.lastCommand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // コマンドパレット — エンジンの実アクションを渡す
@@ -371,7 +376,9 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
       input.accept = 'video/*,audio/*,image/*';
       input.onchange = () => {
         const files = Array.from(input.files ?? []);
-        if (files.length > 0) actions.importFiles(files).catch(() => undefined);
+        // handleImport (not the raw engine action) so palette-imported files
+        // also land in the media browser / get an auto-placed clip.
+        if (files.length > 0) handleImport(files).catch(() => undefined);
       };
       input.click();
     },
@@ -384,7 +391,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     toggleTheme: () => {},
     showShortcuts: () => {},
     about: () => {},
-  }), [actions]);
+  }), [actions, handleImport]);
 
   const sidebarWidth = sidebarOpen ? 280 : 0;
 
@@ -503,7 +510,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
         </aside>
 
         {/* 中央 (プレビュー + タイムライン) — DropZone でファイルドロップ受付 */}
-        <DropZone onFilesDropped={(files) => { actions.importFiles(files).catch(() => undefined); }}>
+        <DropZone onFilesDropped={(files) => { handleImport(files).catch(() => undefined); }}>
           <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* プレビュー */}
           <div style={{

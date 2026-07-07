@@ -358,12 +358,16 @@ export function nonLocalMeans(
  * Estimate the noise level (σ) of an RGBA image using the Laplacian residual
  * method (Immerkaer 1996).
  *
- * Applies a 3×3 Laplacian kernel to each color channel. The standard deviation
- * of the residual is proportional to the noise standard deviation:
+ * Applies the full 3×3 Immerkaer Laplacian kernel to each color channel:
  *
- *   σ_noise ≈ σ_laplacian * sqrt(π/2) / sqrt(36) / sqrt(0.5)  (exact scale factor)
+ *   [ 1  -2   1 ]
+ *   [-2   4  -2 ]
+ *   [ 1  -2   1 ]
  *
- * The constant `0.36368` is derived from the Laplacian kernel normalization.
+ * (sum of squared coefficients = 36 = 6²) to each color channel. The standard
+ * deviation of the residual is proportional to the noise standard deviation:
+ *
+ *   σ_noise ≈ σ_laplacian * sqrt(π/2) / 6  (Immerkaer 1996, eq. for this kernel)
  *
  * @param src    Source RGBA data.
  * @param width  Image width.
@@ -375,9 +379,6 @@ export function estimateNoise(
   width:  number,
   height: number,
 ): NoiseEstimateResult {
-  // Laplacian kernel (normalized): center=4, neighbours=-1
-  // ∇²I = 4*I(x,y) - I(x-1,y) - I(x+1,y) - I(x,y-1) - I(x,y+1)
-  // Scale factor from Immerkaer 1996 formula
   const N = (width - 2) * (height - 2);
   // Images smaller than 3×3 have no interior pixels; N≤0 makes scaleFactor=Infinity
   // and channelSums stays 0, producing 0*Infinity=NaN.
@@ -394,7 +395,18 @@ export function estimateNoise(
         const r  = src[( y    * width + x + 1) * 4 + ch];
         const u  = src[((y-1) * width + x)     * 4 + ch];
         const d  = src[((y+1) * width + x)     * 4 + ch];
-        const lap = Math.abs(4 * c - l - r - u - d);
+        // REGRESSION fix: the 5-tap "plus" Laplacian (4c-l-r-u-d, sum of
+        // squared coefficients = 20) was used with the 9-tap kernel's
+        // normalization constant (6 = sqrt(36)), systematically
+        // underestimating sigma by a factor of sqrt(20)/6 ≈ 0.745. Reading
+        // the 4 diagonal neighbors restores the true Immerkaer 3×3 kernel,
+        // whose coefficients (center=4, edges=-2, corners=1) do sum-of-
+        // squares to exactly 36, matching the existing scaleFactor.
+        const ul = src[((y-1) * width + x - 1) * 4 + ch];
+        const ur = src[((y-1) * width + x + 1) * 4 + ch];
+        const dl = src[((y+1) * width + x - 1) * 4 + ch];
+        const dr = src[((y+1) * width + x + 1) * 4 + ch];
+        const lap = Math.abs(4 * c - 2 * (l + r + u + d) + (ul + ur + dl + dr));
         channelSums[ch] += lap;
       }
     }

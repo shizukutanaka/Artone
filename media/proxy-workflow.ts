@@ -189,14 +189,19 @@ class ProxyStorage {
 // Proxy Encoder (WebCodecs)
 // ============================================================
 
+export interface ProxyEncodeOptions {
+  sourceUrl: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  preset: ProxyPreset;
+  onProgress: (p: number) => void;
+  /** Aborting stops the per-frame encode loop as soon as the current frame finishes. */
+  signal?: AbortSignal;
+}
+
 class ProxyEncoder {
-  async encode(
-    sourceUrl: string,
-    sourceW: number,
-    sourceH: number,
-    preset: ProxyPreset,
-    onProgress: (p: number) => void
-  ): Promise<Blob> {
+  async encode(opts: ProxyEncodeOptions): Promise<Blob> {
+    const { sourceUrl, sourceWidth: sourceW, sourceHeight: sourceH, preset, onProgress, signal } = opts;
     const targetW = Math.round((sourceW * preset.scale) / 2) * 2;
     const targetH = Math.round((sourceH * preset.scale) / 2) * 2;
 
@@ -263,6 +268,11 @@ class ProxyEncoder {
 
     try {
       while (currentTime < duration) {
+        // Cancellation used to be bookkeeping-only: cancel() dropped the job
+        // from `active` immediately, but this loop kept running to completion
+        // in the background regardless, still burning CPU/GPU and letting
+        // processQueue() start a new job on top of it (exceeding maxConcurrent).
+        if (signal?.aborted) break;
         video.currentTime = currentTime;
         await new Promise<void>((res) => {
           video.onseeked = () => res();
@@ -309,6 +319,7 @@ export class ProxyWorkflow {
   private encoder: ProxyEncoder;
   private queue: ProxyJob[] = [];
   private active = new Map<string, ProxyJob>();
+  private controllers = new Map<string, AbortController>();
   private listeners = new Set<(job: ProxyJob) => void>();
   private mappingCache = new Map<string, ProxyMapping>();
   /** Cache of proxyId → Blob URL so resolveUrl() never creates duplicate URLs. */
@@ -390,21 +401,24 @@ export class ProxyWorkflow {
   }
 
   private async runJob(job: ProxyJob): Promise<void> {
+    const controller = new AbortController();
+    this.controllers.set(job.id, controller);
     try {
       job.status = 'processing';
       job.startedAt = Date.now();
       this.notifyListeners(job);
 
-      const blob = await this.encoder.encode(
-        job.sourceUrl,
-        job.sourceWidth,
-        job.sourceHeight,
-        job.preset,
-        (p) => {
+      const blob = await this.encoder.encode({
+        sourceUrl: job.sourceUrl,
+        sourceWidth: job.sourceWidth,
+        sourceHeight: job.sourceHeight,
+        preset: job.preset,
+        onProgress: (p) => {
           job.progress = p;
           this.notifyListeners(job);
-        }
-      );
+        },
+        signal: controller.signal,
+      });
 
       const mapping: ProxyMapping = {
         sourceId: job.sourceId,
@@ -433,6 +447,7 @@ export class ProxyWorkflow {
       this.notifyListeners(job);
     } finally {
       this.active.delete(job.id);
+      this.controllers.delete(job.id);
       this.processQueue();
     }
   }
@@ -450,6 +465,12 @@ export class ProxyWorkflow {
     if (active) {
       active.status = 'cancelled';
       this.active.delete(jobId);
+      // Actually stop the in-flight encode loop, not just the bookkeeping —
+      // otherwise it kept consuming CPU/GPU in the background until it ran
+      // to completion on its own, and a new job could start on top of it,
+      // exceeding maxConcurrent.
+      this.controllers.get(jobId)?.abort();
+      this.controllers.delete(jobId);
       this.notifyListeners(active);
       return true;
     }

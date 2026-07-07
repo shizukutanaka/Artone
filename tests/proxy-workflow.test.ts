@@ -216,8 +216,8 @@ describe('ProxyWorkflow — REGRESSION: runJob respects cancelled status', () =>
     };
     internals(pw).encoder = {
       encode: vi.fn().mockImplementation(
-        async (_url: string, _w: number, _h: number, _p: unknown, onProgress: (n: number) => void) => {
-          onProgress(1);
+        async (opts: { onProgress: (n: number) => void }) => {
+          opts.onProgress(1);
           return fakeBlob;
         }
       ),
@@ -283,6 +283,73 @@ describe('ProxyWorkflow — REGRESSION: runJob respects cancelled status', () =>
 
     expect(job.status).toBe('failed');
     expect(job.error).toBe('GPU error');
+  });
+});
+
+// ============================================================
+// REGRESSION: cancel() actually aborts the in-flight encode
+// ============================================================
+
+type InternalPWWithControllers = InternalPW & { controllers: Map<string, AbortController> };
+
+describe('ProxyWorkflow — REGRESSION: cancel() aborts the in-flight encode signal', () => {
+  it('aborts the AbortSignal passed to encoder.encode() for an active job', async () => {
+    // Before fix: cancel() only removed the job from `active` — the encoder's
+    // per-frame loop had no cancellation signal at all and kept running to
+    // completion in the background regardless.
+    const pw = new ProxyWorkflow();
+    const job = makeJob();
+
+    let capturedSignal: AbortSignal | undefined;
+    let resolveEncode!: (blob: Blob) => void;
+    const encodePromise = new Promise<Blob>((resolve) => { resolveEncode = resolve; });
+
+    internals(pw).storage = {
+      init: vi.fn(),
+      save: vi.fn().mockResolvedValue(undefined),
+      findBySourceId: vi.fn().mockResolvedValue([]),
+    };
+    internals(pw).encoder = {
+      encode: vi.fn().mockImplementation(async (opts: { signal?: AbortSignal }) => {
+        capturedSignal = opts.signal;
+        return encodePromise;
+      }),
+    };
+    internals(pw).initialized = true;
+    internals(pw).active.set(job.id, job);
+
+    const runPromise = internals(pw).runJob(job);
+    // Let runJob reach the `await this.encoder.encode(...)` point so the
+    // AbortController is created and its signal captured.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal!.aborted).toBe(false);
+
+    expect(pw.cancel(job.id)).toBe(true);
+    expect(capturedSignal!.aborted).toBe(true);
+
+    resolveEncode(new Blob(['bytes'], { type: 'video/mp4' }));
+    await runPromise;
+
+    // cancel() already removed the job from active — runJob's existing
+    // cancel-race guard must still keep 'cancelled', not overwrite it.
+    expect(job.status).toBe('cancelled');
+  });
+
+  it('does not leak an AbortController for the job once it settles', async () => {
+    const pw = new ProxyWorkflow();
+    const job = makeJob();
+
+    internals(pw).storage = { init: vi.fn(), save: vi.fn().mockResolvedValue(undefined), findBySourceId: vi.fn().mockResolvedValue([]) };
+    internals(pw).encoder = { encode: vi.fn().mockResolvedValue(new Blob(['b'], { type: 'video/mp4' })) };
+    internals(pw).initialized = true;
+    internals(pw).active.set(job.id, job);
+
+    await internals(pw).runJob(job);
+
+    expect((pw as unknown as InternalPWWithControllers).controllers.has(job.id)).toBe(false);
   });
 });
 

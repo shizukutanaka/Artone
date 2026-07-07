@@ -68,6 +68,24 @@ export function buildKeydownHandler(
   };
 }
 
+/**
+ * Apply an Inspector clip-selection edit back onto the timeline clip it
+ * describes. Only the fields with a real backing property on TimelineClip
+ * (name/start/duration) are propagated — Inspector's other ClipSelection
+ * fields (speed/opacity/position/scale/rotation) are presentational only
+ * for now (TimelineClip has no transform properties to write them back to).
+ * Returns the same array reference when there's nothing to apply, so callers
+ * can pass this straight to a setState updater without an extra no-op render.
+ */
+export function applyClipSelectionEdit(clips: TimelineClip[], next: Selection): TimelineClip[] {
+  if (next.type !== 'clip') return clips;
+  return clips.map((c) =>
+    c.id === next.id
+      ? { ...c, name: next.name, start: next.startTime, duration: next.duration }
+      : c
+  );
+}
+
 /** Routes app.emit commands to UI state. Extracted to keep EditorUI complexity low. */
 function dispatchAppCommand(
   name: string,
@@ -256,6 +274,15 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
       }
       return prev;
     });
+  }, []);
+
+  // Inspector edits used to mutate only the local `selection` object — never
+  // the actual clip, so name/start/duration changes silently had no effect
+  // on the timeline. applyClipSelectionEdit propagates the fields that have
+  // a real backing property on TimelineClip.
+  const handleSelectionChange = useCallback((next: Selection) => {
+    setSelection(next);
+    setTimelineClips((prev) => applyClipSelectionEdit(prev, next));
   }, []);
 
   /** Probe a video/audio File for its duration via a temporary media element. */
@@ -581,7 +608,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
                 />
               )}
               {activePanel === 'inspector' && (
-                <Inspector selection={selection} onChange={setSelection} />
+                <Inspector selection={selection} onChange={handleSelectionChange} />
               )}
               {activePanel === 'export' && (
                 <ExportPanel onExport={actions.exportProject} />

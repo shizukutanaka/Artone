@@ -292,6 +292,40 @@ describe('HistoryManager — goToPosition', () => {
     hm.goToPosition(99);
     expect(cell.value).toBe(before);
   });
+
+  it('PERF: emits exactly one notification regardless of how many steps are jumped', () => {
+    const hm = makeManager();
+    const cell = { value: 0 };
+    // Build a 10-entry history
+    for (let i = 0; i < 10; i++) hm.execute(counterCmd(cell));
+    expect(cell.value).toBe(10);
+
+    const cb = vi.fn();
+    hm.subscribe(cb);
+
+    // Jump 10 positions back — must fire exactly one listener call, not 10
+    hm.goToPosition(-1);
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cell.value).toBe(0);
+
+    cb.mockClear();
+
+    // Jump 10 positions forward — again exactly one call
+    hm.goToPosition(9);
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cell.value).toBe(10);
+  });
+
+  it('no notification when already at target position', () => {
+    const hm = makeManager();
+    const cell = { value: 0 };
+    hm.execute(counterCmd(cell));
+
+    const cb = vi.fn();
+    hm.subscribe(cb);
+    hm.goToPosition(0); // already there
+    expect(cb).not.toHaveBeenCalled();
+  });
 });
 
 // ============================================================
@@ -446,5 +480,53 @@ describe('HistoryPanelUI — XSS prevention', () => {
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img');
     expect(html).toContain('&quot;');
+  });
+});
+
+// ============================================================
+// CommandFactory.structural — generic reversible command
+// ============================================================
+
+describe('CommandFactory.structural', () => {
+  it('execute runs apply, undo runs revert, redo runs apply again', () => {
+    const log: string[] = [];
+    const cmd = CommandFactory.structural(
+      'clip.lift',
+      'Lift range',
+      () => log.push('apply'),
+      () => log.push('revert'),
+    );
+    cmd.execute();
+    cmd.undo();
+    cmd.redo();
+    expect(log).toEqual(['apply', 'revert', 'apply']);
+  });
+
+  it('carries its type and description', () => {
+    const cmd = CommandFactory.structural('clip.extract', 'Extract range', () => {}, () => {});
+    expect(cmd.type).toBe('clip.extract');
+    expect(cmd.description).toBe('Extract range');
+  });
+
+  it('is undoable through HistoryManager (state restored)', () => {
+    const store = new Map<string, number>([['a', 1]]);
+    const h = new HistoryManager({ autoPersist: false });
+    const cmd = CommandFactory.structural(
+      'clip.lift',
+      'Lift',
+      () => store.set('a', 2),
+      () => store.set('a', 1),
+    );
+    h.execute(cmd);
+    expect(store.get('a')).toBe(2);
+    h.undo();
+    expect(store.get('a')).toBe(1);
+    h.redo();
+    expect(store.get('a')).toBe(2);
+  });
+
+  it('exposes a default opaque delta keyed by type', () => {
+    const cmd = CommandFactory.structural('clip.lift', 'Lift', () => {}, () => {});
+    expect(cmd.getDelta().path).toEqual(['clip.lift']);
   });
 });

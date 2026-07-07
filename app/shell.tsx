@@ -11,7 +11,7 @@
  * @version 3.2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ds, color, space, radius, motion, z, type FeatureTier, CSS_VARIABLES, typography } from './design-system';
 import { FirstRunExperience, type FirstRunResult, type ExperienceLevel } from './first-run';
 import { CommandPalette, createDefaultCommands, type PaletteItem } from './command-palette';
@@ -260,8 +260,13 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     return new Promise((resolve) => {
       const el = document.createElement(file.type.startsWith('audio') ? 'audio' : 'video');
       el.preload = 'metadata';
-      el.onloadedmetadata = () => { resolve(el.duration || 30); };
-      el.onerror = () => resolve(30);
+      const cleanup = () => {
+        el.onloadedmetadata = null;
+        el.onerror = null;
+        el.src = ''; // stop any in-progress buffering and drop the src reference
+      };
+      el.onloadedmetadata = () => { const dur = el.duration || 30; cleanup(); resolve(dur); };
+      el.onerror = () => { cleanup(); resolve(30); };
       el.src = objectUrl;
     });
   }, []);
@@ -303,12 +308,35 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     }
   }, [actions, probeFileDuration]);
 
+  // Stable MediaBrowser callbacks so the (memoized) browser does not re-render on
+  // every engine tick (e.g. the playhead advancing during playback). Functional
+  // setState keeps these dependency-free and referentially stable.
+  const handleMediaImport = useCallback((files: File[]) => {
+    handleImport(files).catch(() => undefined);
+  }, [handleImport]);
+
+  const handleMediaSelect = useCallback((item: MediaItem) => {
+    setSelectedMediaId(item.id);
+  }, []);
+
+  const handleMediaDelete = useCallback((id: string) => {
+    setMediaItems((prev) => {
+      // Release the blob URL created at import time; otherwise it leaks until
+      // document unload (revoke is a no-op if already released, so StrictMode
+      // double-invoke is safe).
+      const removed = prev.find((m) => m.id === id);
+      if (removed) URL.revokeObjectURL(removed.url);
+      return prev.filter((m) => m.id !== id);
+    });
+    setSelectedMediaId((cur) => (cur === id ? undefined : cur));
+  }, []);
+
   // First-Run で選択されたファイルをインポート
   useEffect(() => {
     if (engine.isReady && pendingFiles.length > 0) {
       handleImport(pendingFiles).catch(() => undefined);
     }
-  }, [engine.isReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [engine.isReady, pendingFiles, handleImport]);
 
   // グローバルショートカット
   useEffect(() => {
@@ -325,7 +353,10 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
   }, [engine.lastCommand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // コマンドパレット — エンジンの実アクションを渡す
-  const commands: PaletteItem[] = createDefaultCommands({
+  // useMemo prevents recreating the commands array (and all its closures) on every
+  // render. actions is stable (engine-context useMemo), so this only rebuilds when
+  // the engine reinitializes (rare).
+  const commands = useMemo<PaletteItem[]>(() => createDefaultCommands({
     play: () => actions.togglePlayPause(),
     save: () => { actions.save(); },
     undo: () => actions.undo(),
@@ -337,7 +368,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
       input.accept = 'video/*,audio/*,image/*';
       input.onchange = () => {
         const files = Array.from(input.files ?? []);
-        if (files.length > 0) actions.importFiles(files);
+        if (files.length > 0) actions.importFiles(files).catch(() => undefined);
       };
       input.click();
     },
@@ -350,7 +381,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     toggleTheme: () => {},
     showShortcuts: () => {},
     about: () => {},
-  });
+  }), [actions]);
 
   const sidebarWidth = sidebarOpen ? 280 : 0;
 
@@ -421,6 +452,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
           </span>
           <button
             onClick={() => actions.togglePlayPause()}
+            aria-label={engine.isPlaying ? t('timeline.pause') : t('timeline.play')}
             style={{
               ...ds.button('primary'), width: 36, height: 36,
               borderRadius: radius.full, padding: 0,
@@ -453,32 +485,22 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               flexShrink: 0,
             }}>
               <span style={ds.text('title')}>{t('media.title')}</span>
-              <button onClick={() => setSidebarOpen(false)} style={ds.button('ghost')}>◁</button>
+              <button onClick={() => setSidebarOpen(false)} aria-label={t('media.sidebarClose')} style={ds.button('ghost')}>◁</button>
             </div>
             <div style={{ flex: 1, overflow: 'hidden' }}>
               <MediaBrowser
                 items={mediaItems}
                 selectedId={selectedMediaId}
-                onImport={(files) => { handleImport(files).catch(() => undefined); }}
-                onSelect={(item) => setSelectedMediaId(item.id)}
-                onDelete={(id) => {
-                  setMediaItems((prev) => {
-                    // Release the blob URL created at import time; otherwise it
-                    // leaks until document unload (revoke is a no-op if already
-                    // released, so StrictMode double-invoke is safe).
-                    const removed = prev.find((m) => m.id === id);
-                    if (removed) URL.revokeObjectURL(removed.url);
-                    return prev.filter((m) => m.id !== id);
-                  });
-                  if (selectedMediaId === id) setSelectedMediaId(undefined);
-                }}
+                onImport={handleMediaImport}
+                onSelect={handleMediaSelect}
+                onDelete={handleMediaDelete}
               />
             </div>
           </>}
         </aside>
 
         {/* 中央 (プレビュー + タイムライン) — DropZone でファイルドロップ受付 */}
-        <DropZone onFilesDropped={(files) => actions.importFiles(files)}>
+        <DropZone onFilesDropped={(files) => { actions.importFiles(files).catch(() => undefined); }}>
           <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* プレビュー */}
           <div style={{
@@ -493,7 +515,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               {engine.isReady ? t('preview.webgpu') : '...'}
             </div>
             {!sidebarOpen && (
-              <button onClick={() => setSidebarOpen(true)}
+              <button onClick={() => setSidebarOpen(true)} aria-label={t('media.sidebarOpen')}
                 style={{ ...ds.button('ghost'), position: 'absolute', left: space[2], top: space[2] }}>▷</button>
             )}
           </div>
@@ -534,7 +556,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               flexShrink: 0,
             }}>
               <span style={ds.text('title')}>{panelTitle(activePanel)}</span>
-              <button onClick={() => setActivePanel(null)} style={ds.button('ghost')}>✕</button>
+              <button onClick={() => setActivePanel(null)} aria-label={t('common.close')} style={ds.button('ghost')}>✕</button>
             </div>
             <div style={{ flex: 1, overflow: 'auto', padding: space[3] }}>
               {activePanel === 'scopes' && (
@@ -583,6 +605,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
             </div>
             <button
               onClick={() => actions.clearError?.()}
+              aria-label={t('common.close')}
               style={{ ...ds.button('ghost'), flexShrink: 0, fontSize: 16 }}
             >✕</button>
           </div>

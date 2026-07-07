@@ -300,4 +300,7 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+main().catch((err) => {
+  console.error('[Artone] Fatal error:', err instanceof Error ? err.message : err);
+  process.exit(1);
+});

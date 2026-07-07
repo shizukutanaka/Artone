@@ -285,3 +285,54 @@ describe('FrameCache — clear', () => {
     expect(stats.bytes).toBe(0);
   });
 });
+
+// ============================================================
+// Access-order LRU (O(1) findOldest via Map insertion order)
+// ============================================================
+
+describe('FrameCache — access-order eviction', () => {
+  it('a re-accessed hot frame is NOT the one demoted (access order, not FIFO)', () => {
+    // maxHot=2: put 1,2 then access 1 (now MRU), then put 3 → oldest is 2.
+    const cache = new FrameCache({ maxHotFrames: 2 });
+    cache.put(1, fakeFrame(), SIZE);
+    cache.put(2, fakeFrame(), SIZE);
+
+    expect(cache.get(1)).not.toBeNull(); // touch 1 → moves it to MRU end
+
+    cache.put(3, fakeFrame(), SIZE);     // hot over cap → demote LRU == 2
+    // 1 and 3 stay hot; 2 was demoted to warm.
+    expect(cache.get(1)).not.toBeNull();
+    expect(cache.get(3)).not.toBeNull();
+    expect(cache.getStats().warm).toBe(1);
+  });
+
+  it('evicts strictly in least-recently-used order across many frames', () => {
+    // maxHot=3, maxWarm=0 so demotion from hot immediately evicts (closes).
+    // sinkFrames: [] so index 0 lives in hot (not the un-evictable sink tier).
+    const cache = new FrameCache({ maxHotFrames: 3, maxWarmFrames: 0, sinkFrames: [] });
+    const frames = new Map<number, ReturnType<typeof fakeFrame>>();
+    for (let i = 0; i < 3; i++) { const f = fakeFrame(); frames.set(i, f); cache.put(i, f, SIZE); }
+
+    // Access order now: 0,1,2 (LRU→MRU). Touch 0 so it becomes MRU: 1,2,0.
+    cache.get(0);
+
+    // Insert 3 → evicts LRU == 1. Insert 4 → evicts LRU == 2.
+    cache.put(3, fakeFrame(), SIZE);
+    cache.put(4, fakeFrame(), SIZE);
+
+    expect((frames.get(1)!.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((frames.get(2)!.close as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    // 0 was re-accessed → survived; 3,4 are newest.
+    expect((frames.get(0)!.close as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  it('eviction order is independent of how many frames must be scanned (O(1) oldest)', () => {
+    // Correctness check that scales: fill far past the cap; the surviving hot set
+    // must be exactly the most-recently-put indices.
+    const cache = new FrameCache({ maxHotFrames: 5, maxWarmFrames: 0, sinkFrames: [] });
+    for (let i = 0; i < 100; i++) cache.put(i, fakeFrame(), SIZE);
+    // Only the last 5 puts (95..99) should remain reachable in hot.
+    for (let i = 0; i < 95; i++) expect(cache.get(i)).toBeNull();
+    for (let i = 95; i < 100; i++) expect(cache.get(i)).not.toBeNull();
+  });
+});

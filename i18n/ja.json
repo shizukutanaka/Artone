@@ -57,6 +57,11 @@
     "paste": "貼り付け",
     "selectAll": "すべて選択"
   },
+  "history": {
+    "opsCount": "{count} 操作",
+    "clear": "クリア",
+    "empty": "履歴なし"
+  },
   "timeline": {
     "title": "タイムライン",
     "play": "再生",
@@ -187,6 +192,9 @@
     "all": "全て",
     "empty": "メディアをドロップまたはインポート",
     "noMatch": "一致なし",
+    "itemsLabel": "アイテム",
+    "sidebarClose": "メディアパネルを閉じる",
+    "sidebarOpen": "メディアパネルを開く",
     "status": {
       "pending": "待機中",
       "proxy": "プロキシ",
@@ -280,6 +288,8 @@
       "setInPoint": "インポイント設定",
       "setOutPoint": "アウトポイント設定",
       "clearInOut": "イン/アウトクリア",
+      "lift": "リフト",
+      "extract": "抽出",
       "zoomIn": "拡大",
       "zoomOut": "縮小",
       "zoomFit": "全体表示",
@@ -319,6 +329,7 @@
     "placeholder": "コマンド、エフェクト、設定を検索...",
     "hint": "↑↓ 移動 · Enter 実行 · Esc 閉じる",
     "count": "{count} 件",
+    "noResults": "見つかりません",
     "cmd": {
       "cut": "カット",
       "copy": "コピー",
@@ -387,7 +398,10 @@
       "scale": "スケール",
       "rotation": "回転",
       "alpha": "α",
-      "enabled": "有効"
+      "enabled": "有効",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {

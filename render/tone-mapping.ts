@@ -7,6 +7,21 @@
  * # AI generated (reviewed)
  */
 
+// 256-entry sRGB EOTF LUT: exact lookup for 8-bit input bytes → linear
+const _SRGB_EOTF_LUT = new Float32Array(256);
+for (let v = 0; v < 256; v++) {
+  const n = v / 255;
+  _SRGB_EOTF_LUT[v] = n <= 0.04045 ? n / 12.92 : Math.pow((n + 0.055) / 1.055, 2.4);
+}
+
+// 4097-entry sRGB OETF LUT: quantized linear [0,4096/4096] → output byte (0-255)
+const _SRGB_OETF_BYTE_LUT = new Uint8Array(4097);
+for (let i = 0; i <= 4096; i++) {
+  const x = i / 4096;
+  const v = x <= 0.0031308 ? x * 12.92 : 1.055 * Math.pow(x, 1 / 2.4) - 0.055;
+  _SRGB_OETF_BYTE_LUT[i] = Math.round(v > 1 ? 255 : v < 0 ? 0 : v * 255);
+}
+
 /** サポートするトーンマッピングアルゴリズム。 */
 export type ToneMappingAlgo =
   | 'linear'
@@ -148,11 +163,6 @@ export function uchimura(
 
 function clamp01(v: number): number { return Math.min(1, Math.max(0, v)); }
 
-/** sRGB EOTF: エンコード済み [0,1] → 線形 [0,1] */
-function srgbEOTF(v: number): number {
-  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-}
-
 /** sRGB OETF: 線形 [0,1] → エンコード済み [0,1] */
 function srgbOETF(v: number): number {
   const x = clamp01(v);
@@ -211,14 +221,17 @@ export function createToneMapper(algo: ToneMappingAlgo, opts?: ToneMappingOption
   }
 
   function applyToUint8Buffer(buf: Uint8ClampedArray): void {
-    // Process complete RGBA quads; always re-encode as sRGB regardless of enc option
+    // Process complete RGBA quads; always re-encode as sRGB regardless of enc option.
+    // Uses module-level LUTs to avoid Math.pow per pixel:
+    //   _SRGB_EOTF_LUT: exact 256-entry byte→linear table
+    //   _SRGB_OETF_BYTE_LUT: 4097-entry quantized linear→output-byte table
     for (let i = 0; i + 4 <= buf.length; i += 4) {
-      const r = srgbEOTF(buf[i]     / 255);
-      const g = srgbEOTF(buf[i + 1] / 255);
-      const b = srgbEOTF(buf[i + 2] / 255);
-      buf[i]     = Math.round(srgbOETF(applyOp(r * exposure)) * 255);
-      buf[i + 1] = Math.round(srgbOETF(applyOp(g * exposure)) * 255);
-      buf[i + 2] = Math.round(srgbOETF(applyOp(b * exposure)) * 255);
+      const r = _SRGB_EOTF_LUT[buf[i]];
+      const g = _SRGB_EOTF_LUT[buf[i + 1]];
+      const b = _SRGB_EOTF_LUT[buf[i + 2]];
+      buf[i]     = _SRGB_OETF_BYTE_LUT[(clamp01(applyOp(r * exposure)) * 4096 + 0.5) | 0];
+      buf[i + 1] = _SRGB_OETF_BYTE_LUT[(clamp01(applyOp(g * exposure)) * 4096 + 0.5) | 0];
+      buf[i + 2] = _SRGB_OETF_BYTE_LUT[(clamp01(applyOp(b * exposure)) * 4096 + 0.5) | 0];
       // buf[i + 3] alpha is intentionally preserved
     }
   }

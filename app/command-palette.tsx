@@ -13,7 +13,7 @@
  * 呼び出し: Cmd+K (Mac) / Ctrl+K (Win/Linux)
  */
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue } from 'react';
 import { ds, color, space, radius, motion, shadow, z, type FeatureTier } from './design-system';
 import { t } from '../i18n/i18n-manager';
 import { trapTabKey, captureFocus } from './focus-trap';
@@ -41,7 +41,7 @@ interface CommandPaletteProps {
 
 // === ファジー検索 ===
 
-function fuzzyMatch(query: string, text: string): { match: boolean; score: number } {
+export function fuzzyMatch(query: string, text: string): { match: boolean; score: number } {
   if (!query) return { match: true, score: 0 };
   const q = query.toLowerCase();
   const t = text.toLowerCase();
@@ -70,7 +70,7 @@ function fuzzyMatch(query: string, text: string): { match: boolean; score: numbe
   return { match: false, score: 0 };
 }
 
-function searchItems(
+export function searchItems(
   items: PaletteItem[],
   query: string,
   currentTier: FeatureTier
@@ -120,10 +120,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const listRef = useRef<HTMLDivElement>(null);
   const paletteRef = useRef<HTMLDivElement>(null);
 
+  // Defer search computation so keyboard input stays responsive under heavy item lists.
+  // Input updates synchronously; results update at lower priority (no input lag).
+  const deferredQuery = useDeferredValue(query);
+  const isPending = query !== deferredQuery;
+
   const results = useMemo(
-    () => searchItems(items, query, currentTier),
-    [items, query, currentTier]
+    () => searchItems(items, deferredQuery, currentTier),
+    [items, deferredQuery, currentTier]
   );
+
+  // Reset the highlight to the top result whenever the result set changes (e.g.
+  // typing narrows it). Without this, a stale selectedIndex can exceed
+  // results.length, leaving no visible selection and making Enter a no-op.
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [results]);
 
   // フォーカス: 開いたら入力にフォーカスし、閉じたら元の要素へ戻す (WCAG AAA)
   useEffect(() => {
@@ -131,8 +143,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     setQuery('');
     setSelectedIndex(0);
     const restoreFocus = captureFocus();
-    requestAnimationFrame(() => inputRef.current?.focus());
-    return restoreFocus;
+    // Store RAF id so we can cancel it if the component unmounts before the
+    // frame fires — otherwise the callback runs on a stale ref (React StrictMode
+    // double-invoke makes this a real case in development).
+    const rafId = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => { cancelAnimationFrame(rafId); restoreFocus(); };
   }, [isOpen]);
 
   // 選択追従スクロール
@@ -148,7 +163,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     (e: React.KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
+        // Guard: when results is empty, results.length - 1 = -1; clamp via max(0, ...)
+        setSelectedIndex((i) => Math.min(i + 1, Math.max(0, results.length - 1)));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedIndex((i) => Math.max(i - 1, 0));
@@ -239,11 +255,35 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               fontSize: 16,
             }}
           />
+          {/* Subtle spinner while deferred search catches up to typed query */}
+          {isPending && (
+            <span
+              aria-hidden="true"
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: '50%',
+                border: `2px solid ${color.textTertiary}`,
+                borderTopColor: 'transparent',
+                flexShrink: 0,
+                animation: 'spin 0.6s linear infinite',
+              }}
+            />
+          )}
         </div>
 
-        {/* 結果リスト */}
-        <div ref={listRef} style={{ maxHeight: 400, overflowY: 'auto', padding: `${space[1]}px 0` }}>
-          {results.length === 0 && query && (
+        {/* 結果リスト — dim while deferred query lags behind typed query */}
+        <div
+          ref={listRef}
+          style={{
+            maxHeight: 400,
+            overflowY: 'auto',
+            padding: `${space[1]}px 0`,
+            opacity: isPending ? 0.6 : 1,
+            transition: `opacity ${motion.fast} ${motion.easeOut}`,
+          }}
+        >
+          {results.length === 0 && deferredQuery && !isPending && (
             <div
               style={{
                 padding: `${space[6]}px ${space[4]}px`,
@@ -252,7 +292,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 ...ds.text('body'),
               }}
             >
-              見つかりません
+              {t('palette.noResults')}
             </div>
           )}
           {results.map((item, i) => (
@@ -337,6 +377,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         @keyframes slideDown {
           from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
           to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </>

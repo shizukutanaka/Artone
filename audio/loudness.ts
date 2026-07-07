@@ -16,6 +16,8 @@
  * @version 1.0.0
  */
 
+const _DB_TO_LIN_MUL = Math.LN10 / 20;
+
 // ============================================================
 // Types
 // ============================================================
@@ -466,6 +468,7 @@ export function createLoudnessMeter(sampleRate = 48000): LoudnessMeter {
   let numChannels = 0;
   let chStates: KWChannelState[] = [];
   let tpCarry: Float32Array[] = []; // recent raw samples per channel for inter-sample peak
+  let tpJoinBufs: Float32Array[] = []; // pre-allocated join buffers (carry ++ data) per channel
 
   // Channel-weighted sum of squared K-weighted samples for the in-progress block.
   let curSum = 0;
@@ -480,6 +483,8 @@ export function createLoudnessMeter(sampleRate = 48000): LoudnessMeter {
     numChannels = n;
     chStates = Array.from({ length: n }, () => ({ s1a: 0, s2a: 0, s1b: 0, s2b: 0 }));
     tpCarry = Array.from({ length: n }, () => new Float32Array(0));
+    // Pre-alloc join buffers sized for tpTaps carry + 1024-sample max block; grown lazily if needed.
+    tpJoinBufs = Array.from({ length: n }, () => new Float32Array(tpTaps + 1024));
   }
 
   /** One K-weighted sample (stage1 → stage2), updating per-channel state in place. */
@@ -496,22 +501,30 @@ export function createLoudnessMeter(sampleRate = 48000): LoudnessMeter {
   /** Streaming inter-sample (true) peak with a bounded per-channel carry. */
   function updateTruePeak(ch: number, data: Float32Array): void {
     const carry = tpCarry[ch];
-    const joined = new Float32Array(carry.length + data.length);
+    const totalLen = carry.length + data.length;
+    // Grow pre-alloc join buffer only on first call or unexpectedly large blocks (rare).
+    if (tpJoinBufs[ch].length < totalLen) {
+      tpJoinBufs[ch] = new Float32Array(totalLen + tpTaps);
+    }
+    const joined = tpJoinBufs[ch];
     joined.set(carry, 0);
     joined.set(data, carry.length);
     for (let phase = 0; phase < TRUE_PEAK_KERNELS.length; phase++) {
       const ker = TRUE_PEAK_KERNELS[phase];
       // Only evaluate pairs with full kernel context; re-evaluating the carry
       // overlap is harmless because we track a running max (idempotent).
-      for (let i = tpHalf - 1; i + tpHalf <= joined.length - 1; i++) {
+      // Use totalLen (not joined.length) to avoid processing pre-alloc padding zeros.
+      for (let i = tpHalf - 1; i + tpHalf <= totalLen - 1; i++) {
         let acc = 0;
         for (let t = 0; t < tpTaps; t++) acc += joined[i + (t - tpHalf + 1)] * ker[t];
         const v = acc < 0 ? -acc : acc;
         if (v > truePeakAbs) truePeakAbs = v;
       }
     }
-    const keep = Math.min(joined.length, tpTaps);
-    tpCarry[ch] = joined.slice(joined.length - keep);
+    // Update carry without slice() allocation: resize only when keep changes (at most once).
+    const keep = Math.min(totalLen, tpTaps);
+    if (tpCarry[ch].length !== keep) tpCarry[ch] = new Float32Array(keep);
+    tpCarry[ch].set(joined.subarray(totalLen - keep, totalLen));
   }
 
   function process(channels: Float32Array[]): void {
@@ -607,6 +620,7 @@ export function createLoudnessMeter(sampleRate = 48000): LoudnessMeter {
     numChannels = 0;
     chStates = [];
     tpCarry = [];
+    tpJoinBufs = [];
     curSum = 0;
     curCount = 0;
     baseEnergies.length = 0;
@@ -663,7 +677,7 @@ export function computeDuckingGain(
     // ダッキングへ入る (target<gDb) ときは attack、戻るときは release。
     const coeff = target < gDb ? attack : release;
     gDb = target + (gDb - target) * coeff;
-    gain[i] = Math.pow(10, gDb / 20);
+    gain[i] = Math.exp(gDb * _DB_TO_LIN_MUL);
   }
   return gain;
 }

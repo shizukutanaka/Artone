@@ -12,6 +12,9 @@
  * Pike: シンプルなAPI
  */
 import { color } from '../app/design-system';
+import { createLogger } from '../app/logger';
+
+const log = createLogger('HistoryManager');
 
 // ============================================================
 // Types
@@ -542,19 +545,19 @@ export class CommandFactory {
       type: 'composite',
       timestamp: Date.now(),
       description: `${commands.length} operations`,
-      
+
       execute() {
         commands.forEach(cmd => cmd.execute());
       },
-      
+
       undo() {
         [...commands].reverse().forEach(cmd => cmd.undo());
       },
-      
+
       redo() {
         commands.forEach(cmd => cmd.redo());
       },
-      
+
       getDelta() {
         return {
           before: commands.map(c => c.getDelta().before),
@@ -562,6 +565,34 @@ export class CommandFactory {
           path: ['composite']
         };
       }
+    };
+  }
+
+  /**
+   * Generic reversible command for structural edits (e.g. Lift / Extract) that
+   * add, remove and split multiple clips at once and cannot be expressed as a
+   * single-field delta. The caller supplies idempotent `apply` and `revert`
+   * closures; `execute`/`redo` run `apply`, `undo` runs `revert`.
+   *
+   * `delta` is an opaque description for inspection/persistence (the edit is not
+   * a simple before/after field change).
+   */
+  static structural(
+    type: string,
+    description: string,
+    apply: () => void,
+    revert: () => void,
+    delta: CommandDelta = { before: null, after: null, path: [type] }
+  ): Command {
+    return {
+      id: `${type}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      type,
+      timestamp: Date.now(),
+      description,
+      execute() { apply(); },
+      undo() { revert(); },
+      redo() { apply(); },
+      getDelta() { return delta; },
     };
   }
 }
@@ -626,7 +657,7 @@ export class HistoryManager {
   // ----- 永続化 -----
   private async saveToDB(): Promise<void> {
     if (!this.db) return;
-    
+
     const state: HistoryState = {
       position: this.position,
       commands: this.commands.map(cmd => ({
@@ -639,10 +670,16 @@ export class HistoryManager {
       branches: Array.from(this.branches.values()),
       currentBranch: this.currentBranch
     };
-    
-    const tx = this.db.transaction('history', 'readwrite');
-    const store = tx.objectStore('history');
-    store.put({ id: this.config.persistKey, state });
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction('history', 'readwrite');
+      const store = tx.objectStore('history');
+      store.put({ id: this.config.persistKey, state });
+      // Resolve/reject when the transaction settles — not when the request settles —
+      // so callers that await saveToDB() know the data is durable.
+      tx.oncomplete = () => resolve();
+      tx.onerror   = () => reject(tx.error);
+    });
   }
 
   private async loadFromDB(): Promise<void> {
@@ -697,15 +734,15 @@ export class HistoryManager {
     this.commands.push(command);
     this.position++;
     
-    // 最大数制限
+    // 最大数制限 — splice() trims in-place (O(n) shift) vs slice() (O(n) alloc).
     if (this.commands.length > this.config.maxCommands) {
       const excess = this.commands.length - this.config.maxCommands;
-      this.commands = this.commands.slice(excess);
+      this.commands.splice(0, excess);
       this.position -= excess;
     }
-    
+
     this.notifyListeners();
-    
+
     if (this.config.autoPersist) {
       this.saveToDB();
     }
@@ -775,7 +812,7 @@ export class HistoryManager {
     // allowing the history to grow beyond config.maxCommands when groups were used.
     if (this.commands.length > this.config.maxCommands) {
       const excess = this.commands.length - this.config.maxCommands;
-      this.commands = this.commands.slice(excess);
+      this.commands.splice(0, excess);
       this.position -= excess;
     }
 
@@ -843,15 +880,28 @@ export class HistoryManager {
   }
 
   // ----- 特定位置へジャンプ -----
+  /**
+   * Jump to an arbitrary history position in O(n) time.
+   *
+   * Prior implementation delegated to `undo()`/`redo()` in a loop, each of
+   * which called `notifyListeners()` (O(k) work) → O(n·k) total for an n-step
+   * jump with k listeners.  We now call the command callbacks directly and
+   * emit a single notification after all mutations are done.
+   */
   goToPosition(targetPosition: number): void {
     if (targetPosition < -1 || targetPosition >= this.commands.length) return;
-    
+    if (targetPosition === this.position) return;
+
     while (this.position > targetPosition) {
-      this.undo();
+      this.commands[this.position].undo();
+      this.position--;
     }
     while (this.position < targetPosition) {
-      this.redo();
+      this.position++;
+      this.commands[this.position].redo();
     }
+
+    this.notifyListeners();
   }
 
   // ----- クリア -----
@@ -866,6 +916,7 @@ export class HistoryManager {
       const tx = this.db.transaction('history', 'readwrite');
       const store = tx.objectStore('history');
       store.delete(this.config.persistKey);
+      tx.onerror = () => log.error('Failed to clear history from IndexedDB:', tx.error);
     }
   }
 
@@ -933,7 +984,7 @@ export function HistoryPanelUI(props: { history: HistoryManager }): string {
         gap: 8px;
         margin-bottom: 12px;
       ">
-        <button onclick="history.undo()" ${!props.history.canUndo() ? 'disabled' : ''} style="
+        <button data-action="undo" ${!props.history.canUndo() ? 'disabled' : ''} style="
           flex: 1;
           padding: 6px 12px;
           border: none;
@@ -944,7 +995,7 @@ export function HistoryPanelUI(props: { history: HistoryManager }): string {
         ">
           ← Undo
         </button>
-        <button onclick="history.redo()" ${!props.history.canRedo() ? 'disabled' : ''} style="
+        <button data-action="redo" ${!props.history.canRedo() ? 'disabled' : ''} style="
           flex: 1;
           padding: 6px 12px;
           border: none;
@@ -1001,6 +1052,34 @@ export function HistoryPanelUI(props: { history: HistoryManager }): string {
       </div>
     </div>
   `;
+}
+
+/**
+ * Mount the history panel into `container`, bind undo/redo button clicks, and
+ * return a cleanup function that removes all event listeners.
+ *
+ * Preferred over `HistoryPanelUI` + innerHTML alone because inline
+ * `onclick="history.undo()"` would reference `window.history` (the browser
+ * navigation API), not the HistoryManager instance.  The string template now
+ * uses `data-action` attributes; this function adds the actual handlers.
+ */
+export function mountHistoryPanel(
+  container: HTMLElement,
+  history: HistoryManager,
+): () => void {
+  container.innerHTML = HistoryPanelUI({ history });
+
+  const onClick = (e: Event) => {
+    const target = e.target as HTMLElement;
+    const btn = target.closest('[data-action]') as HTMLElement | null;
+    if (!btn) return;
+    if (btn.dataset['action'] === 'undo') history.undo();
+    else if (btn.dataset['action'] === 'redo') history.redo();
+    else if (btn.dataset['position'] !== undefined) history.goToPosition(Number(btn.dataset['position']));
+  };
+
+  container.addEventListener('click', onClick);
+  return () => container.removeEventListener('click', onClick);
 }
 
 function escapeHtml(s: string): string {

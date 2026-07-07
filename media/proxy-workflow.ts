@@ -15,6 +15,7 @@
  * @version 3.0.0
  */
 import { createLogger } from '../app/logger';
+import { setHighQualityScaling } from '../app/utils';
 
 const log = createLogger('ProxyWorkflow');
 
@@ -232,8 +233,20 @@ class ProxyEncoder {
     video.muted = true;
     video.crossOrigin = 'anonymous';
     await new Promise<void>((res, rej) => {
-      video.onloadedmetadata = () => res();
-      video.onerror = () => rej(new Error('Video load failed'));
+      const METADATA_TIMEOUT_MS = 30_000;
+      const timer = setTimeout(() => {
+        video.onloadedmetadata = null;
+        video.onerror = null;
+        rej(new Error(`Proxy encode: metadata load timeout after ${METADATA_TIMEOUT_MS}ms`));
+      }, METADATA_TIMEOUT_MS);
+      const settle = (fn: () => void) => () => {
+        clearTimeout(timer);
+        video.onloadedmetadata = null;
+        video.onerror = null;
+        fn();
+      };
+      video.onloadedmetadata = settle(res);
+      video.onerror = settle(() => rej(new Error('Video load failed')));
     });
 
     const duration = video.duration;
@@ -246,32 +259,41 @@ class ProxyEncoder {
     const canvas = new OffscreenCanvas(targetW, targetH);
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Failed to get 2D context');
+    setHighQualityScaling(ctx); // proxies downscale the source — use a good kernel
 
-    while (currentTime < duration) {
-      video.currentTime = currentTime;
-      await new Promise<void>((res) => {
-        video.onseeked = () => res();
-      });
+    try {
+      while (currentTime < duration) {
+        video.currentTime = currentTime;
+        await new Promise<void>((res) => {
+          video.onseeked = () => res();
+        });
 
-      ctx.drawImage(video, 0, 0, targetW, targetH);
-      const frame = new VideoFrame(canvas, {
-        timestamp: currentTime * 1_000_000,
-        duration: frameInterval * 1_000_000
-      });
+        ctx.drawImage(video, 0, 0, targetW, targetH);
+        const frame = new VideoFrame(canvas, {
+          timestamp: currentTime * 1_000_000,
+          duration: frameInterval * 1_000_000
+        });
 
-      try {
-        encoder.encode(frame, { keyFrame: frameCount % 60 === 0 });
-      } finally {
-        frame.close();
+        try {
+          encoder.encode(frame, { keyFrame: frameCount % 60 === 0 });
+        } finally {
+          frame.close();
+        }
+
+        frameCount++;
+        currentTime += frameInterval;
+        onProgress(frameCount / totalFrames);
       }
 
-      frameCount++;
-      currentTime += frameInterval;
-      onProgress(frameCount / totalFrames);
+      await encoder.flush();
+    } finally {
+      encoder.close();
+      // Release the network connection and allow the element to be GC'd immediately.
+      video.src = '';
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.onseeked = null;
     }
-
-    await encoder.flush();
-    encoder.close();
 
     return new Blob(chunks as BlobPart[], { type: 'video/mp4' });
   }

@@ -5,6 +5,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ColorGradingEngine, type ColorWheels } from '../color/grading-engine';
 
+/** jsdom's File lacks .text(); this wrapper injects it. */
+function makeFile(content: string, name: string): File {
+  const file = new File([content], name);
+  if (typeof (file as unknown as { text?: unknown }).text !== 'function') {
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(content) });
+  }
+  return file;
+}
+
 // ─── helpers ───────────────────────────────────────────────────
 
 /** Access private method via type cast. */
@@ -382,5 +391,39 @@ describe('ColorGradingEngine — applyWheels (CPU path)', () => {
     expect(data[0]).toBeCloseTo(151, -1);
     expect(data[1]).toBeCloseTo(151, -1);
     expect(data[2]).toBeCloseTo(151, -1);
+  });
+});
+
+// ─── loadCubeLUT ────────────────────────────────────────────────
+
+describe('ColorGradingEngine — loadCubeLUT', () => {
+  let engine: ColorGradingEngine;
+
+  beforeEach(() => { engine = new ColorGradingEngine(); });
+
+  const VALID_CUBE_2 = `LUT_3D_SIZE 2
+0.0 0.0 0.0
+1.0 0.0 0.0
+0.0 1.0 0.0
+1.0 1.0 0.0
+0.0 0.0 1.0
+1.0 0.0 1.0
+0.0 1.0 1.0
+1.0 1.0 1.0
+`;
+
+  it('REGRESSION: produces stride-3 RGB data (not stride-4), matching lut-apply.ts trilinear() reader', async () => {
+    const lut = await engine.loadCubeLUT(makeFile(VALID_CUBE_2, 'test.cube'));
+    expect(lut).not.toBeNull();
+    // size=2 cube has 8 cells; stride-3 => 24 floats. The prior bug appended a
+    // spurious 4th value per cell (stride 4 => 32 floats), which desynced
+    // every cell after the first against lut-apply.ts's stride-3 reader.
+    expect(lut!.data.length).toBe(2 * 2 * 2 * 3);
+  });
+
+  it('REGRESSION: rejects a truncated .cube (fewer than size^3 entries)', async () => {
+    const truncated = `LUT_3D_SIZE 2\n0.0 0.0 0.0\n1.0 0.0 0.0\n`;
+    const lut = await engine.loadCubeLUT(makeFile(truncated, 'bad.cube'));
+    expect(lut).toBeNull();
   });
 });

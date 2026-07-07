@@ -5,7 +5,7 @@
  *   npm run sbom
  *
  * 出力:
- *   sbom.json   (CycloneDX 1.5)
+ *   sbom.json   (CycloneDX 1.7)
  *   sbom.spdx   (SPDX 2.3)
  *
  * package.json + package-lock.json から依存ツリーを抽出。
@@ -196,7 +196,7 @@ async function main(): Promise<void> {
   }
 
   console.log('');
-  console.log('Output: sbom.json (CycloneDX 1.5), sbom.spdx (SPDX 2.3)');
+  console.log('Output: sbom.json (CycloneDX 1.7), sbom.spdx (SPDX 2.3)');
 }
 
 main().catch((err) => {

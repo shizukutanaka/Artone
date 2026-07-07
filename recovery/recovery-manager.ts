@@ -171,7 +171,7 @@ export class RecoveryManager {
         this.currentProjectId ?? undefined,
         this.currentProjectName ?? undefined,
         data,
-      );
+      ).catch(e => log.error('Failed to save crash snapshot:', e));
     };
 
     window.addEventListener('error', saveCrashSnapshot);
@@ -192,14 +192,21 @@ export class RecoveryManager {
 
     this.stopAutoSave();
 
-    this.autoSaveTimer = window.setInterval(async () => {
+    // Guard flag prevents concurrent saves when saveSnapshot takes longer than the interval.
+    let saving = false;
+    this.autoSaveTimer = window.setInterval(() => {
+      if (saving) return;
+      saving = true;
       const data = getData();
-      await this.saveSnapshot('auto', projectId, projectName, data);
+      this.saveSnapshot('auto', projectId, projectName, data)
+        .catch(e => log.warn('Auto-save failed', e))
+        .finally(() => { saving = false; });
     }, this.config.autoSaveInterval);
 
     // Save immediately on start
     const data = getData();
-    this.saveSnapshot('auto', projectId, projectName, data);
+    this.saveSnapshot('auto', projectId, projectName, data)
+      .catch(e => log.warn('Initial auto-save failed', e));
   }
 
   stopAutoSave(): void {
@@ -264,10 +271,15 @@ export class RecoveryManager {
     return new Promise((resolve, reject) => {
       const tx = this.requireDB().transaction(this.config.storeName, 'readwrite');
       const store = tx.objectStore(this.config.storeName);
-      const request = store.put(snapshot);
-      
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+
+      store.put(snapshot);
+
+      // Resolve on tx.oncomplete (durable commit) — critical in the data-loss
+      // risk zone. request.onsuccess fires when the write is enqueued but the
+      // transaction may still abort (disk full, browser killed), leaving a false
+      // "snapshot saved" result and potentially losing crash-recovery data.
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error ?? new Error('writeSnapshot: transaction aborted'));
     });
   }
 
@@ -289,9 +301,8 @@ export class RecoveryManager {
       
       request.onsuccess = () => {
         const snapshots = request.result as RecoverySnapshot[];
-        // Sort by timestamp descending
-        snapshots.sort((a, b) => b.timestamp - a.timestamp);
-        resolve(snapshots);
+        // Sort by timestamp descending — spread to avoid mutating the IDB result
+        resolve([...snapshots].sort((a, b) => b.timestamp - a.timestamp));
       };
       
       request.onerror = () => reject(request.error);
@@ -353,10 +364,11 @@ export class RecoveryManager {
     return new Promise((resolve) => {
       const tx = this.requireDB().transaction(this.config.storeName, 'readwrite');
       const store = tx.objectStore(this.config.storeName);
-      const request = store.delete(id);
-      
-      request.onsuccess = () => resolve(true);
-      request.onerror = () => resolve(false);
+
+      store.delete(id);
+
+      tx.oncomplete = () => resolve(true);
+      tx.onabort = () => resolve(false);
     });
   }
 
@@ -612,7 +624,7 @@ export function RecoveryDialogUI(props: {
           gap: 12px;
           justify-content: flex-end;
         ">
-          <button onclick="discardRecovery()" style="
+          <button data-action="discard" style="
             padding: 10px 20px;
             border: none;
             border-radius: 6px;
@@ -623,7 +635,7 @@ export function RecoveryDialogUI(props: {
           ">
             Start Fresh
           </button>
-          <button onclick="restoreSelected()" style="
+          <button data-action="restore" style="
             padding: 10px 20px;
             border: none;
             border-radius: 6px;
@@ -639,6 +651,33 @@ export function RecoveryDialogUI(props: {
       </div>
     </div>
   `;
+}
+
+/**
+ * Mount RecoveryDialogUI into a container and wire up event delegation.
+ * Returns a cleanup function that removes the listener.
+ */
+export function mountRecoveryDialog(
+  container: HTMLElement,
+  props: { snapshots: RecoverySnapshot[]; onRestore: (id: string) => void; onDiscard: () => void },
+): () => void {
+  container.innerHTML = RecoveryDialogUI(props);
+  // Track which snapshot item is selected (default: first)
+  let selectedId: string | null = props.snapshots[0]?.id ?? null;
+
+  const onClick = (e: Event): void => {
+    const target = e.target as HTMLElement;
+    const item = target.closest('.snapshot-item') as HTMLElement | null;
+    if (item?.dataset['id']) selectedId = item.dataset['id'];
+
+    const btn = target.closest('[data-action]') as HTMLElement | null;
+    if (!btn) return;
+    if (btn.dataset['action'] === 'discard') props.onDiscard();
+    else if (btn.dataset['action'] === 'restore' && selectedId) props.onRestore(selectedId);
+  };
+
+  container.addEventListener('click', onClick);
+  return () => container.removeEventListener('click', onClick);
 }
 
 // ============================================================

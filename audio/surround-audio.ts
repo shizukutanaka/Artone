@@ -151,6 +151,14 @@ export class SurroundAudioEngine {
   private channels: Map<string, SurroundChannel> = new Map();
   private channelNodes: Map<string, GainNode> = new Map();
   private masterNode: GainNode;
+  /**
+   * Transient downmix-only GainNodes (leftGain/rightGain/leftSplit/rightSplit)
+   * created by updateRouting()'s stereo-downmix branch. Unlike channelNodes
+   * these are rebuilt from scratch on every call, so without tracking and
+   * disconnecting them here each format/monitor-format change leaked the
+   * previous call's nodes — they stayed connected into the graph forever.
+   */
+  private downmixNodes: AudioNode[] = [];
   private lfeFilter: BiquadFilterNode;
   private monitorFormat: SurroundFormat = 'stereo';
   private listeners: Set<() => void> = new Set();
@@ -308,7 +316,7 @@ export class SurroundAudioEngine {
       let gain = Math.max(0, 1 - (distance / spreadFactor));
       
       // Apply power panning
-      gain = Math.pow(gain, 0.5);
+      gain = Math.sqrt(gain);
       
       // Special handling for LFE
       if (channel.label === 'LFE') {
@@ -356,6 +364,12 @@ export class SurroundAudioEngine {
     for (const node of this.channelNodes.values()) {
       node.disconnect();
     }
+    // Disconnect and drop any downmix nodes from a prior call — these are
+    // rebuilt from scratch below and were never released otherwise.
+    for (const node of this.downmixNodes) {
+      node.disconnect();
+    }
+    this.downmixNodes = [];
 
     if (this.format === this.monitorFormat) {
       // Direct connection
@@ -366,19 +380,21 @@ export class SurroundAudioEngine {
       // Downmix to stereo
       const leftGain = this.audioContext.createGain();
       const rightGain = this.audioContext.createGain();
-      
+      this.downmixNodes.push(leftGain, rightGain);
+
       leftGain.connect(this.masterNode);
       rightGain.connect(this.masterNode);
-      
+
       for (const [label, node] of this.channelNodes) {
         const matrix = DOWNMIX_51_TO_STEREO[label as ChannelLabel];
         if (matrix) {
           const leftSplit = this.audioContext.createGain();
           const rightSplit = this.audioContext.createGain();
-          
+          this.downmixNodes.push(leftSplit, rightSplit);
+
           leftSplit.gain.value = matrix[0];
           rightSplit.gain.value = matrix[1];
-          
+
           node.connect(leftSplit);
           node.connect(rightSplit);
           leftSplit.connect(leftGain);

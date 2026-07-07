@@ -14,6 +14,75 @@
 import { normalizeCues, type ReadabilityOptions } from './readability';
 
 // ============================================================
+// Line-break segmentation (CJK-aware)
+// ============================================================
+
+/**
+ * Cached word segmenter giving line-break opportunities. `undefined` until first
+ * use, then an `Intl.Segmenter` or `null` if the runtime lacks it.
+ */
+let _wordSegmenter: Intl.Segmenter | null | undefined;
+
+function getWordSegmenter(): Intl.Segmenter | null {
+  if (_wordSegmenter === undefined) {
+    try {
+      // No locale → host default; ICU still applies CJK dictionary rules.
+      _wordSegmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+    } catch {
+      _wordSegmenter = null;
+    }
+  }
+  return _wordSegmenter;
+}
+
+/**
+ * Split a paragraph into line-break tokens. Uses `Intl.Segmenter` so Japanese /
+ * Chinese / Thai (which have no inter-word spaces) gain break opportunities;
+ * falls back to keeping each trailing space attached for space-delimited text
+ * when `Intl.Segmenter` is unavailable.
+ */
+export function segmentForWrap(text: string): string[] {
+  const seg = getWordSegmenter();
+  if (seg) return Array.from(seg.segment(text), (s) => s.segment);
+  // Fallback: split after each run of whitespace, keeping it attached.
+  return text.split(/(?<=\s)(?=\S)/);
+}
+
+/**
+ * Greedily wrap `text` into lines no wider than `maxWidth`.
+ *
+ * Pure and DOM-free: `measure` returns a string's rendered width (the caller
+ * passes `s => ctx.measureText(s).width`) and `segment` yields break tokens
+ * (defaults to the CJK-aware {@link segmentForWrap}). Newlines in `text` are
+ * hard breaks. A single token wider than `maxWidth` is left on its own line
+ * rather than dropped (it cannot be broken without character-level splitting).
+ *
+ * # AI generated (reviewed)
+ */
+export function wrapCaptionLines(
+  text: string,
+  maxWidth: number,
+  measure: (s: string) => number,
+  segment: (s: string) => string[] = segmentForWrap,
+): string[] {
+  const lines: string[] = [];
+  for (const para of text.split('\n')) {
+    let current = '';
+    for (const tok of segment(para)) {
+      const test = current + tok;
+      if (measure(test) > maxWidth && current.trim() !== '') {
+        lines.push(current.trimEnd());
+        current = tok.replace(/^\s+/, ''); // don't start a wrapped line with the break space
+      } else {
+        current = test;
+      }
+    }
+    if (current.trim() !== '') lines.push(current.trimEnd());
+  }
+  return lines;
+}
+
+// ============================================================
 // Types
 // ============================================================
 
@@ -180,6 +249,12 @@ export class CaptionManager {
   private tracks: Map<string, CaptionTrack> = new Map();
   private activeTrackId: string | null = null;
   private listeners: Set<() => void> = new Set();
+  // Cached canvas for burnInCaptions() — recreated only when frame dimensions change.
+  private _burnCanvas: OffscreenCanvas | null = null;
+  private _burnCtx: OffscreenCanvasRenderingContext2D | null = null;
+  // Per-track maximum observed caption duration (seconds). Only grows — a conservative
+  // upper bound used as the getCaptionsAtTime lookback window.
+  private _trackMaxDuration: Map<string, number> = new Map();
 
   // ============================================================
   // Track Management
@@ -262,7 +337,16 @@ export class CaptionManager {
     };
 
     track.captions.push(caption);
-    track.captions.sort((a, b) => a.startTime - b.startTime);
+    // Skip the O(N log N) sort when appending in chronological order — the
+    // common case during bulk SRT/VTT/ASS import. Sort only when the new caption
+    // is out of order relative to what came before it.
+    const len = track.captions.length;
+    if (len > 1 && caption.startTime < track.captions[len - 2].startTime) {
+      track.captions.sort((a, b) => a.startTime - b.startTime);
+    }
+    const dur = endTime - startTime;
+    const prev = this._trackMaxDuration.get(trackId) ?? 0;
+    if (dur > prev) this._trackMaxDuration.set(trackId, dur);
 
     this.notify();
     return caption;
@@ -274,8 +358,20 @@ export class CaptionManager {
 
     const caption = track.captions.find(c => c.id === captionId);
     if (caption) {
+      // Validate the time range only when both endpoints are being set together.
+      // Single-field updates (e.g. move startTime while keeping endTime) are
+      // allowed: the caller may follow with a second update for the other field,
+      // or may intentionally set an open-ended start before clamping the end.
+      if (updates.startTime !== undefined && updates.endTime !== undefined) {
+        if (!(updates.endTime > updates.startTime)) return;
+      }
+      const prevStart = caption.startTime;
       Object.assign(caption, updates);
-      track.captions.sort((a, b) => a.startTime - b.startTime);
+      // Only resort when startTime changed — style and text updates never
+      // affect ordering, so the O(N log N) sort is wasted in that case.
+      if (caption.startTime !== prevStart) {
+        track.captions.sort((a, b) => a.startTime - b.startTime);
+      }
       this.notify();
     }
   }
@@ -292,7 +388,29 @@ export class CaptionManager {
     const track = this.tracks.get(trackId);
     if (!track) return [];
 
-    return track.captions.filter(c => time >= c.startTime && time < c.endTime);
+    const captions = track.captions;
+    const n = captions.length;
+    if (n === 0) return [];
+
+    // Binary search for the first caption with startTime > time.
+    // Active captions must have startTime <= time, so they're all in [0, lo).
+    let lo = 0, hi = n;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (captions[mid].startTime <= time) lo = mid + 1;
+      else hi = mid;
+    }
+    // Walk backwards from lo-1: active captions have endTime > time.
+    // Use the maximum observed duration for this track as the lookback window so
+    // long title cards (>60 s) are never missed. Falls back to 60 s on an empty track.
+    // This gives O(log N + window) instead of O(N) for late playback positions.
+    const maxDur = this._trackMaxDuration.get(trackId) ?? 60;
+    const lookBack = time - Math.max(60, maxDur);
+    const result: Caption[] = [];
+    for (let i = lo - 1; i >= 0 && captions[i].startTime >= lookBack; i--) {
+      if (captions[i].endTime > time) result.push(captions[i]);
+    }
+    return result;
   }
 
   // ============================================================
@@ -581,7 +699,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     // Draw background
     if (style.backgroundOpacity > 0) {
       const padding = 10;
-      const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
+      // Avoid lines.map() array allocation + spread; measureText N times in a loop.
+      let maxLineWidth = 0;
+      for (let li = 0; li < lines.length; li++) {
+        const w = ctx.measureText(lines[li]).width;
+        if (w > maxLineWidth) maxLineWidth = w;
+      }
       
       let bgX = x - padding;
       if (position.align === 'center') {
@@ -621,34 +744,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       ctx.shadowBlur = 0;
       ctx.fillText(lines[i], x, lineY);
     }
+
+    // Ensure all shadow state is cleared so subsequent canvas draws are unaffected.
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
   }
 
   private wrapText(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-    const paragraphs = text.split('\n');
-    const lines: string[] = [];
-
-    for (const para of paragraphs) {
-      const words = para.split(' ');
-      let currentLine = '';
-
-      for (const word of words) {
-        const testLine = currentLine ? `${currentLine} ${word}` : word;
-        const metrics = ctx.measureText(testLine);
-
-        if (metrics.width > maxWidth && currentLine) {
-          lines.push(currentLine);
-          currentLine = word;
-        } else {
-          currentLine = testLine;
-        }
-      }
-
-      if (currentLine) {
-        lines.push(currentLine);
-      }
-    }
-
-    return lines;
+    return wrapCaptionLines(text, maxWidth, (s) => ctx.measureText(s).width);
   }
 
   // ============================================================
@@ -666,10 +771,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const width = videoFrame.displayWidth;
     const height = videoFrame.displayHeight;
 
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d')!;
+    if (!this._burnCanvas || this._burnCanvas.width !== width || this._burnCanvas.height !== height) {
+      this._burnCanvas = new OffscreenCanvas(width, height);
+      this._burnCtx = this._burnCanvas.getContext('2d')!;
+    }
+    const canvas = this._burnCanvas;
+    const ctx = this._burnCtx!;
 
-    // Draw video frame
+    // Draw video frame (overwrites canvas from previous call)
     ctx.drawImage(videoFrame, 0, 0);
 
     // Draw captions
@@ -677,13 +786,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       this.renderCaption(ctx, caption, width, height);
     }
 
-    // Create new frame
-    const newFrame = new VideoFrame(canvas, {
-      timestamp: videoFrame.timestamp,
-      duration: videoFrame.duration || undefined
-    });
-
-    return newFrame;
+    // Create new frame, then release the source — caller owns newFrame.
+    // try/finally guarantees videoFrame.close() even if VideoFrame() throws (e.g. OOM).
+    try {
+      return new VideoFrame(canvas, {
+        timestamp: videoFrame.timestamp,
+        duration: videoFrame.duration || undefined
+      });
+    } finally {
+      videoFrame.close();
+    }
   }
 
   // ============================================================

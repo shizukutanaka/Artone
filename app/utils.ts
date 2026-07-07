@@ -146,3 +146,23 @@ export function formatTimecode(seconds: number, fps = 30): string {
   const m = Math.floor(seconds / 60);
   return `${pad(m)}:${pad(s)}:${pad(f)}`;
 }
+
+/** A 2D context (on-screen or offscreen) for image scaling. */
+type SmoothingContext = Pick<CanvasRenderingContext2D, 'imageSmoothingEnabled' | 'imageSmoothingQuality'>;
+
+/**
+ * Configure a 2D context for high-quality image downscaling.
+ *
+ * Canvas defaults to `imageSmoothingQuality = 'low'`, which produces aliased,
+ * blocky results when shrinking video frames into thumbnails / proxies / resized
+ * outputs. `'high'` selects a better (bicubic-class) resampling kernel. Call
+ * once, right before a scaling `drawImage`.
+ *
+ * Ref: MDN CanvasRenderingContext2D.imageSmoothingQuality.
+ *
+ * # AI generated (reviewed)
+ */
+export function setHighQualityScaling(ctx: SmoothingContext): void {
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+}

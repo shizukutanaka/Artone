@@ -292,7 +292,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ entries, onJumpTo, o
           marginBottom: 8
         }}
       >
-        <span style={{ fontSize: 11, color: color.textTertiary }}>{entries.length} 操作</span>
+        <span style={{ fontSize: 11, color: color.textTertiary }}>{t('history.opsCount', { count: entries.length })}</span>
         <button
           onClick={onClear}
           style={{
@@ -305,7 +305,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ entries, onJumpTo, o
             fontSize: 10
           }}
         >
-          クリア
+          {t('history.clear')}
         </button>
       </div>
 
@@ -319,7 +319,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ entries, onJumpTo, o
               padding: 24
             }}
           >
-            履歴なし
+            {t('history.empty')}
           </div>
         ) : (
           entries.map((entry) => (

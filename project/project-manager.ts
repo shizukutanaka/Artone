@@ -9,6 +9,9 @@
  * 
  * @version 1.0.0
  */
+import { createLogger } from '../app/logger';
+
+const log = createLogger('ProjectManager');
 
 // ============================================================
 // Types
@@ -295,17 +298,20 @@ class ProjectDB {
 
   async saveProject(project: Project): Promise<void> {
     if (!this.db) await this.open();
-    
+
     return new Promise((resolve, reject) => {
       const tx = this.requireDB().transaction('projects', 'readwrite');
       const store = tx.objectStore('projects');
-      
+
       project.modified = Date.now();
       project.version++;
-      
-      const request = store.put(project);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
+
+      store.put(project);
+
+      // Resolve on tx.oncomplete (durable commit), not request.onsuccess (write enqueued).
+      // tx.onabort covers both request errors and explicit aborts.
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error ?? new Error('saveProject: transaction aborted'));
     });
   }
 
@@ -328,10 +334,11 @@ class ProjectDB {
     return new Promise((resolve, reject) => {
       const tx = this.requireDB().transaction('projects', 'readwrite');
       const store = tx.objectStore('projects');
-      const request = store.delete(id);
 
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
+      store.delete(id);
+
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error ?? new Error('deleteProject: transaction aborted'));
     });
   }
 
@@ -347,9 +354,8 @@ class ProjectDB {
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const projects = request.result as Project[];
-        // Sort by modified descending
-        projects.sort((a, b) => b.modified - a.modified);
-        resolve(projects);
+        // Sort by modified descending — spread to avoid mutating the IDB result
+        resolve([...projects].sort((a, b) => b.modified - a.modified));
       };
     });
   }
@@ -360,10 +366,11 @@ class ProjectDB {
     return new Promise((resolve, reject) => {
       const tx = this.requireDB().transaction('versions', 'readwrite');
       const store = tx.objectStore('versions');
-      const request = store.put(version);
 
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
+      store.put(version);
+
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error ?? new Error('saveVersion: transaction aborted'));
     });
   }
 
@@ -379,8 +386,7 @@ class ProjectDB {
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const versions = request.result as ProjectVersion[];
-        versions.sort((a, b) => b.timestamp - a.timestamp);
-        resolve(versions);
+        resolve([...versions].sort((a, b) => b.timestamp - a.timestamp));
       };
     });
   }
@@ -550,10 +556,9 @@ export class ProjectManager {
     this.stopAutosave();
     
     // Autosave every 30 seconds
-    this.autosaveInterval = window.setInterval(async () => {
+    this.autosaveInterval = window.setInterval(() => {
       if (this.isDirty && this.currentProject) {
-        await this.saveProject();
-        // Autosave complete — silent by design
+        this.saveProject().catch(e => log.error('Autosave failed:', e));
       }
     }, 30000);
   }

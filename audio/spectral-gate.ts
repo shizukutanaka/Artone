@@ -87,9 +87,10 @@ export function nextPow2(n: number): number {
 // Cooley-Tukey radix-2 FFT on real-valued input of length N (power of two).
 // Returns interleaved complex bins [re0,im0, re1,im1, ..., re(N/2),im(N/2)].
 
-function fft(reIn: Float32Array): Float32Array {
+function fft(reIn: Float32Array, work?: Float32Array): Float32Array {
   const N   = reIn.length;
-  const buf = new Float32Array(N * 2);
+  const buf = work ?? new Float32Array(N * 2);
+  buf.fill(0); // zero imaginary parts and any stale data from prior reuse
   for (let i = 0; i < N; i++) buf[i * 2] = reIn[i];
 
   // Bit-reversal permutation
@@ -131,8 +132,8 @@ function fft(reIn: Float32Array): Float32Array {
 }
 
 /** IFFT: takes N/2+1 complex bins, returns N real samples. */
-function ifft(bins: Float32Array, N: number): Float32Array {
-  const buf = new Float32Array(N * 2);
+function ifft(bins: Float32Array, N: number, work?: Float32Array, out?: Float32Array): Float32Array {
+  const buf = work ?? new Float32Array(N * 2);
   const half = N / 2;
   for (let k = 0; k <= half; k++) {
     buf[k * 2]     = bins[k * 2];
@@ -184,9 +185,9 @@ function ifft(bins: Float32Array, N: number): Float32Array {
   }
 
   // Conjugate + scale → real part
-  const out = new Float32Array(N);
-  for (let i = 0; i < N; i++) out[i] = buf[i * 2] / N;
-  return out;
+  const result = out ?? new Float32Array(N);
+  for (let i = 0; i < N; i++) result[i] = buf[i * 2] / N;
+  return result;
 }
 
 // ─── Hann window ─────────────────────────────────────────────────────────────
@@ -208,8 +209,9 @@ function subtractNoise(
   noisePow: Float32Array,
   alpha: number,
   floorLinear: number,
+  out?: Float32Array,
 ): Float32Array {
-  const out  = new Float32Array(bins.length);
+  const buf   = out ?? new Float32Array(bins.length);
   const bins2 = bins.length >> 1; // N/2 + 1 complex bins
   for (let k = 0; k < bins2; k++) {
     const re      = bins[k * 2];
@@ -221,10 +223,10 @@ function subtractNoise(
     const noiseFloorMag = Math.sqrt(noisePow[k] * floorLinear);
     const outMag        = Math.max(mag - alpha * Math.sqrt(noisePow[k]), noiseFloorMag);
 
-    out[k * 2]     = outMag * Math.cos(phase);
-    out[k * 2 + 1] = outMag * Math.sin(phase);
+    buf[k * 2]     = outMag * Math.cos(phase);
+    buf[k * 2 + 1] = outMag * Math.sin(phase);
   }
-  return out;
+  return buf;
 }
 
 // ─── Core ─────────────────────────────────────────────────────────────────────
@@ -387,11 +389,26 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
   // for periodic Hann with 50 % overlap, ∑_k hann[n−k·hop] = 1 exactly).
   const outAccum = new Float32Array(N);
 
-  // Samples that are ready to be emitted (fully accumulated)
-  const ready: number[] = [];
+  // Pre-allocated analysis frame — reused every hop to avoid per-hop Float32Array
+  // allocation inside the process() while-loop.
+  const frame = new Float32Array(N);
+
+  // Ready-output buffer: pre-allocated Float32Array replaces the number[] + splice()
+  // pattern that created one number[] and one Float32Array per process() call.
+  // 64 hops × hop samples = conservative max before a single process() would overflow;
+  // typical input blocks are ≪ this.
+  const readyBuf = new Float32Array(hop * 64);
+  let readyLen = 0;
+
+  // Pre-allocated FFT/IFFT/subtraction work buffers — reused every processFrame()
+  // call to eliminate per-frame Float32Array allocations in the audio hot path.
+  const fftWorkBuf  = new Float32Array(N * 2);
+  const ifftWorkBuf = new Float32Array(N * 2);
+  const ifftOutBuf  = new Float32Array(N);
+  const subtractBuf = new Float32Array((N / 2 + 1) * 2);
 
   function processFrame(frame: Float32Array): void {
-    const spec = fft(frame);
+    const spec = fft(frame, fftWorkBuf);
 
     // Phase 1: noise profiling
     for (let k = 0; k < bins; k++) {
@@ -407,16 +424,16 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
     }
 
     const modified = noiseReady
-      ? subtractNoise(spec, noisePow, alpha, floorLin)
+      ? subtractNoise(spec, noisePow, alpha, floorLin, subtractBuf)
       : spec; // passthrough during profiling
 
-    const recon = ifft(modified, N);
+    const recon = ifft(modified, N, ifftWorkBuf, ifftOutBuf);
 
     // OLA: add IFFT output directly (no synthesis window)
     for (let i = 0; i < N; i++) outAccum[i] += recon[i];
 
     // Emit the first `hop` samples (they will not be updated further)
-    for (let i = 0; i < hop; i++) ready.push(outAccum[i]);
+    for (let i = 0; i < hop; i++) readyBuf[readyLen++] = outAccum[i];
 
     // Shift accumulator by hop
     for (let i = 0; i < N - hop; i++) outAccum[i] = outAccum[i + hop];
@@ -435,9 +452,8 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
     ringBuf.set(input, ringLen);
     ringLen += input.length;
 
-    // Process complete frames
+    // Process complete frames — reuse pre-allocated `frame` to avoid per-hop alloc
     while (ringLen >= N) {
-      const frame = new Float32Array(N);
       for (let i = 0; i < N; i++) frame[i] = ringBuf[i] * hann[i];
       processFrame(frame);
       // Shift ring buffer by hop
@@ -445,7 +461,9 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
       ringLen -= hop;
     }
 
-    const out = new Float32Array(ready.splice(0, ready.length));
+    // Slice the ready buffer: one allocation (the output the caller owns).
+    const out = readyBuf.slice(0, readyLen);
+    readyLen = 0;
     return out;
   }
 
@@ -456,14 +474,15 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
 
   function flush(): Float32Array {
     if (ringLen > 0) {
-      // Pad with zeros to complete the last frame
-      const padded = new Float32Array(N);
-      padded.set(ringBuf.subarray(0, ringLen));
-      for (let i = 0; i < N; i++) padded[i] *= hann[i];
-      processFrame(padded);
+      // Reuse the pre-allocated `frame` buffer — zero-pad tail, apply window.
+      frame.fill(0);
+      frame.set(ringBuf.subarray(0, ringLen));
+      for (let i = 0; i < N; i++) frame[i] *= hann[i];
+      processFrame(frame);
       ringLen = 0;
     }
-    const out = new Float32Array(ready.splice(0, ready.length));
+    const out = readyBuf.slice(0, readyLen);
+    readyLen = 0;
     return out;
   }
 
@@ -475,7 +494,8 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
     ringBuf    = new Float32Array(N * 2);
     ringLen    = 0;
     outAccum.fill(0);
-    ready.length = 0;
+    frame.fill(0);
+    readyLen = 0;
   }
 
   return { process, setNoiseProfile, flush, reset };

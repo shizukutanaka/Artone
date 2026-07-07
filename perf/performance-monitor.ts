@@ -167,7 +167,8 @@ class RollingStats {
   percentile(p: number): number {
     if (this.values.length === 0) return 0;
     const sorted = [...this.values].sort((a, b) => a - b);
-    const index = Math.floor(sorted.length * (p / 100));
+    const pClamped = Math.max(0, Math.min(100, p));
+    const index = Math.floor(sorted.length * (pClamped / 100));
     return sorted[Math.min(index, sorted.length - 1)];
   }
 }

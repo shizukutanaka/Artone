@@ -83,43 +83,44 @@ const EASING_FUNCTIONS: Record<EasingType, (t: number) => number> = {
   
   easeIn: (t) => t * t,
   easeOut: (t) => 1 - (1 - t) * (1 - t),
-  easeInOut: (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
-  
+  easeInOut: (t) => { if (t < 0.5) return 2*t*t; const x = 2-2*t; return 1 - x*x/2; },
+
   easeInQuad: (t) => t * t,
   easeOutQuad: (t) => 1 - (1 - t) * (1 - t),
-  easeInOutQuad: (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
-  
+  easeInOutQuad: (t) => { if (t < 0.5) return 2*t*t; const x = 2-2*t; return 1 - x*x/2; },
+
   easeInCubic: (t) => t * t * t,
-  easeOutCubic: (t) => 1 - Math.pow(1 - t, 3),
-  easeInOutCubic: (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
-  
+  easeOutCubic: (t) => { const x = 1-t; return 1 - x*x*x; },
+  easeInOutCubic: (t) => { if (t < 0.5) return 4*t*t*t; const x = 2-2*t; return 1 - x*x*x/2; },
+
   easeInQuart: (t) => t * t * t * t,
-  easeOutQuart: (t) => 1 - Math.pow(1 - t, 4),
-  easeInOutQuart: (t) => t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2,
-  
-  easeInExpo: (t) => t === 0 ? 0 : Math.pow(2, 10 * t - 10),
-  easeOutExpo: (t) => t === 1 ? 1 : 1 - Math.pow(2, -10 * t),
+  easeOutQuart: (t) => { const x = 1-t; return 1 - x*x*x*x; },
+  easeInOutQuart: (t) => { if (t < 0.5) return 8*t*t*t*t; const x = 2-2*t; return 1 - x*x*x*x/2; },
+
+  // Math.exp((n*t+c)*Math.LN2) ≡ Math.pow(2, n*t+c) but uses the native exp() fast path.
+  easeInExpo: (t) => t === 0 ? 0 : Math.exp((10*t - 10) * Math.LN2),
+  easeOutExpo: (t) => t === 1 ? 1 : 1 - Math.exp(-10*t * Math.LN2),
   easeInOutExpo: (t) => {
     if (t === 0) return 0;
     if (t === 1) return 1;
-    return t < 0.5 
-      ? Math.pow(2, 20 * t - 10) / 2 
-      : (2 - Math.pow(2, -20 * t + 10)) / 2;
+    return t < 0.5
+      ? Math.exp((20*t - 10) * Math.LN2) / 2
+      : (2 - Math.exp((-20*t + 10) * Math.LN2)) / 2;
   },
-  
+
   easeInElastic: (t) => {
     if (t === 0 || t === 1) return t;
-    return -Math.pow(2, 10 * t - 10) * Math.sin((t * 10 - 10.75) * (2 * Math.PI) / 3);
+    return -Math.exp((10*t - 10) * Math.LN2) * Math.sin((t * 10 - 10.75) * (2 * Math.PI) / 3);
   },
   easeOutElastic: (t) => {
     if (t === 0 || t === 1) return t;
-    return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * (2 * Math.PI) / 3) + 1;
+    return Math.exp(-10*t * Math.LN2) * Math.sin((t * 10 - 0.75) * (2 * Math.PI) / 3) + 1;
   },
   easeInOutElastic: (t) => {
     if (t === 0 || t === 1) return t;
     return t < 0.5
-      ? -(Math.pow(2, 20 * t - 10) * Math.sin((20 * t - 11.125) * (2 * Math.PI) / 4.5)) / 2
-      : (Math.pow(2, -20 * t + 10) * Math.sin((20 * t - 11.125) * (2 * Math.PI) / 4.5)) / 2 + 1;
+      ? -(Math.exp((20*t - 10) * Math.LN2) * Math.sin((20*t - 11.125) * (2 * Math.PI) / 4.5)) / 2
+      : (Math.exp((-20*t + 10) * Math.LN2) * Math.sin((20*t - 11.125) * (2 * Math.PI) / 4.5)) / 2 + 1;
   },
   
   easeInBounce: (t) => 1 - EASING_FUNCTIONS.easeOutBounce(1 - t),
@@ -141,27 +142,71 @@ const EASING_FUNCTIONS: Record<EasingType, (t: number) => number> = {
 };
 
 // ============================================================
+// Keyframe lookup
+// ============================================================
+
+/**
+ * Binary-search a time-ascending keyframe array for the last keyframe at or
+ * before `time`.
+ *
+ * Returns that keyframe's index, or -1 when `time` precedes the first keyframe.
+ * Mirrors the previous linear scan exactly (the last keyframe whose time is
+ * `<= time`) but in O(log n); see {@link KeyframeAnimator.getValue}. Exported
+ * for direct unit testing.
+ *
+ * @param keyframes Keyframes sorted ascending by `time` (invariant upheld by
+ *   addKeyframe/updateKeyframe).
+ * @param time Query time.
+ *
+ * # AI generated (reviewed)
+ */
+export function findPrevKeyframeIndex(keyframes: Keyframe[], time: number): number {
+  let lo = 0;
+  let hi = keyframes.length - 1;
+  let result = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (keyframes[mid].time <= time) {
+      result = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return result;
+}
+
+// ============================================================
 // Bezier Curve
 // ============================================================
 
+// Module-level cache: the same 4 control points produce the same closure, so
+// memoize to avoid re-creating the Newton-Raphson closure on every interpolate()
+// call (called 60×/s per animated property during playback).
+const _bezierCache = new Map<string, (t: number) => number>();
+
 function cubicBezier(p1x: number, p1y: number, p2x: number, p2y: number): (t: number) => number {
+  const key = `${p1x},${p1y},${p2x},${p2y}`;
+  const cached = _bezierCache.get(key);
+  if (cached) return cached;
+
   // Newton-Raphson iteration to find t for given x
   const cx = 3 * p1x;
   const bx = 3 * (p2x - p1x) - cx;
   const ax = 1 - cx - bx;
-  
+
   const cy = 3 * p1y;
   const by = 3 * (p2y - p1y) - cy;
   const ay = 1 - cy - by;
-  
+
   function sampleCurveX(t: number): number {
     return ((ax * t + bx) * t + cx) * t;
   }
-  
+
   function sampleCurveY(t: number): number {
     return ((ay * t + by) * t + cy) * t;
   }
-  
+
   function solveCurveX(x: number): number {
     let t = x;
     for (let i = 0; i < 8; i++) {
@@ -173,8 +218,10 @@ function cubicBezier(p1x: number, p1y: number, p2x: number, p2y: number): (t: nu
     }
     return t;
   }
-  
-  return (x: number): number => sampleCurveY(solveCurveX(x));
+
+  const fn = (x: number): number => sampleCurveY(solveCurveX(x));
+  _bezierCache.set(key, fn);
+  return fn;
 }
 
 // ============================================================
@@ -282,11 +329,9 @@ export class KeyframeAnimator {
     property.keyframes.push(keyframe);
     property.keyframes.sort((a, b) => a.time - b.time);
 
-    // Update animation duration
-    animation.duration = Math.max(
-      animation.duration,
-      ...Array.from(animation.properties.values()).flatMap(p => p.keyframes.map(k => k.time))
-    );
+    // Update animation duration — the new keyframe is the only value that can
+    // raise the ceiling; no need to scan all other properties' keyframes.
+    animation.duration = Math.max(animation.duration, time);
 
     this.notify();
     return keyframe;
@@ -342,24 +387,20 @@ export class KeyframeAnimator {
       return property.keyframes[0].value;
     }
 
-    // Find surrounding keyframes
-    let prevKey: Keyframe | null = null;
-    let nextKey: Keyframe | null = null;
-
-    for (const kf of property.keyframes) {
-      if (kf.time <= time) {
-        prevKey = kf;
-      }
-      if (kf.time > time && !nextKey) {
-        nextKey = kf;
-        break;
-      }
-    }
+    // Find the surrounding keyframes. Keyframes are kept in ascending time
+    // order (addKeyframe/updateKeyframe re-sort), so a binary search replaces
+    // the previous O(n) scan with O(log n) — getValue runs per animated
+    // property per frame (60fps), so the scan was a real hot-path cost.
+    const kfs = property.keyframes;
+    const prevIndex = findPrevKeyframeIndex(kfs, time);
 
     // Before first keyframe
-    if (!prevKey) {
-      return property.keyframes[0].value;
+    if (prevIndex === -1) {
+      return kfs[0].value;
     }
+
+    const prevKey = kfs[prevIndex];
+    const nextKey = prevIndex + 1 < kfs.length ? kfs[prevIndex + 1] : null;
 
     // After last keyframe
     if (!nextKey) {

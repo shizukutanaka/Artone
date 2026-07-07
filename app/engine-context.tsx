@@ -49,19 +49,24 @@ export interface EngineState {
   lastCommand: { cmd: AppCommand; seq: number } | null;
 }
 
-const DEFAULT_STATE: EngineState = {
-  isPlaying: false,
-  currentTime: 0,
-  duration: 0,
-  fps: 30,
-  projectName: t('file.untitled'),
-  hasUnsavedChanges: false,
-  isReady: false,
-  error: null,
-  warnings: [],
-  capabilityTier: 'unknown',
-  lastCommand: null,
-};
+// Built lazily (as a useState initializer) rather than as a module-level
+// constant: t('file.untitled') requires i18n to already be set up, and this
+// module can be imported before entry.tsx finishes awaiting setupI18n().init().
+function createDefaultState(): EngineState {
+  return {
+    isPlaying: false,
+    currentTime: 0,
+    duration: 0,
+    fps: 30,
+    projectName: t('file.untitled'),
+    hasUnsavedChanges: false,
+    isReady: false,
+    error: null,
+    warnings: [],
+    capabilityTier: 'unknown',
+    lastCommand: null,
+  };
+}
 
 // === Engine Actions (UI → エンジンのコマンド) ===
 
@@ -165,7 +170,7 @@ function createPlaybackTick(
 
 export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children }) => {
   const appRef = useRef<ArtoneApp | null>(null);
-  const [state, setState] = useState<EngineState>(DEFAULT_STATE);
+  const [state, setState] = useState<EngineState>(createDefaultState);
   const rafRef = useRef<number>(0);
   const cancelledRef = useRef(false);
 

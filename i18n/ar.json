@@ -57,6 +57,11 @@
     "paste": "لصق",
     "selectAll": "تحديد الكل"
   },
+  "history": {
+    "opsCount": "{count} عملية",
+    "clear": "مسح",
+    "empty": "لا يوجد سجل"
+  },
   "timeline": {
     "title": "الخط الزمني",
     "play": "تشغيل",
@@ -187,6 +192,9 @@
     "all": "الكل",
     "empty": "أفلت الوسائط أو استوردها",
     "noMatch": "لا توجد نتائج",
+    "itemsLabel": "عناصر",
+    "sidebarClose": "إغلاق لوحة الوسائط",
+    "sidebarOpen": "فتح لوحة الوسائط",
     "status": {
       "pending": "قيد الانتظار",
       "proxy": "بروكسي",
@@ -280,6 +288,8 @@
       "setInPoint": "تعيين نقطة البداية",
       "setOutPoint": "تعيين نقطة النهاية",
       "clearInOut": "مسح الدخول / الخروج",
+      "lift": "رفع",
+      "extract": "استخراج",
       "zoomIn": "تكبير",
       "zoomOut": "تصغير",
       "zoomFit": "ملاءمة للشاشة",
@@ -358,7 +368,10 @@
       "scale": "مقياس",
       "rotation": "دوران",
       "alpha": "α",
-      "enabled": "مفعّل"
+      "enabled": "مفعّل",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {
@@ -374,6 +387,7 @@
     "placeholder": "ابحث عن الأوامر والتأثيرات والإعدادات...",
     "hint": "↑↓ التنقل · Enter تنفيذ · Esc إغلاق",
     "count": "{count} نتيجة",
+    "noResults": "لا توجد نتائج",
     "cmd": {
       "cut": "قص",
       "copy": "نسخ",

@@ -48,15 +48,15 @@ export type MutableClip = {
   -readonly [K in keyof TrimClip]: TrimClip[K];
 };
 
-/** Outcome of a trim operation. */
-export interface TrimResult {
-  /** Updated clip array (new references for modified clips). */
-  clips: TrimClip[];
-  /** Whether the operation succeeded without violating any constraint. */
-  ok: boolean;
-  /** Human-readable reason if `ok` is false. */
-  reason?: string;
-}
+/**
+ * Outcome of a trim operation — discriminated union on `ok`.
+ *
+ * TypeScript narrows automatically: `if (!result.ok) result.reason` is always
+ * a string; `if (result.ok) result.clips` is the updated array.
+ */
+export type TrimResult =
+  | { readonly ok: true;  readonly clips: TrimClip[] }
+  | { readonly ok: false; readonly clips: TrimClip[]; readonly reason: string };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

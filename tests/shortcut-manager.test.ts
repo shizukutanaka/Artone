@@ -43,8 +43,8 @@ describe('ShortcutManager — defaults', () => {
   let sm: ShortcutManager;
   beforeEach(() => { sm = makeManager(); });
 
-  it('loads 58 default shortcuts', () => {
-    expect(sm.getAllShortcuts()).toHaveLength(58);
+  it('loads 60 default shortcuts', () => {
+    expect(sm.getAllShortcuts()).toHaveLength(60);
   });
 
   it('all shortcuts have i18n description keys starting with shortcut.action.', () => {
@@ -319,7 +319,7 @@ describe('ShortcutManager — import/export', () => {
   it('importShortcuts silently skips unknown actions', () => {
     const payload = JSON.stringify([{ action: 'ghost', key: 'KeyG', modifiers: { ctrl: false, shift: false, alt: false, meta: false } }]);
     expect(sm.importShortcuts(payload)).toBe(true);
-    expect(sm.getAllShortcuts()).toHaveLength(58);
+    expect(sm.getAllShortcuts()).toHaveLength(60);
   });
 
   it('round-trips customizations through export/import', () => {
@@ -426,5 +426,70 @@ describe('ShortcutManager — dispose', () => {
     // No public API to inspect callbacks directly, but a second dispose()
     // must be idempotent (no double-remove errors).
     expect(() => sm.dispose()).not.toThrow();
+  });
+});
+
+// ─── Modifier matching (ctrl/meta unification) ──────────────────────────────
+
+import {
+  shortcutModifiersMatch,
+  sameModifierChord,
+} from '../app/shortcut-manager';
+
+const mods = (o: Partial<{ ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }> = {}) =>
+  ({ ctrl: false, shift: false, alt: false, meta: false, ...o });
+const ev = (o: Partial<{ ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }> = {}) =>
+  ({ ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...o });
+
+describe('shortcutModifiersMatch — ctrl/meta unified as the command key', () => {
+  it('a ctrl-bound shortcut matches both Ctrl and ⌘', () => {
+    expect(shortcutModifiersMatch(mods({ ctrl: true }), ev({ ctrlKey: true }))).toBe(true);
+    expect(shortcutModifiersMatch(mods({ ctrl: true }), ev({ metaKey: true }))).toBe(true);
+  });
+
+  it('REGRESSION: a meta-bound shortcut (⌘B) matches ⌘ and Ctrl (previously never matched)', () => {
+    expect(shortcutModifiersMatch(mods({ meta: true }), ev({ metaKey: true }))).toBe(true);
+    expect(shortcutModifiersMatch(mods({ meta: true }), ev({ ctrlKey: true }))).toBe(true);
+  });
+
+  it('requires the command key when bound, rejects when absent', () => {
+    expect(shortcutModifiersMatch(mods({ ctrl: true }), ev())).toBe(false);
+    expect(shortcutModifiersMatch(mods(), ev({ ctrlKey: true }))).toBe(false);
+  });
+
+  it('matches shift and alt exactly', () => {
+    expect(shortcutModifiersMatch(mods({ shift: true }), ev({ shiftKey: true }))).toBe(true);
+    expect(shortcutModifiersMatch(mods({ shift: true }), ev())).toBe(false);
+    expect(shortcutModifiersMatch(mods({ alt: true }), ev({ altKey: true }))).toBe(true);
+    expect(shortcutModifiersMatch(mods(), ev({ altKey: true }))).toBe(false);
+  });
+
+  it('no-modifier shortcut matches a bare key', () => {
+    expect(shortcutModifiersMatch(mods(), ev())).toBe(true);
+  });
+});
+
+describe('sameModifierChord', () => {
+  it('treats ctrl-only and meta-only as the same chord', () => {
+    expect(sameModifierChord(mods({ ctrl: true }), mods({ meta: true }))).toBe(true);
+  });
+  it('distinguishes shift/alt', () => {
+    expect(sameModifierChord(mods({ ctrl: true }), mods({ ctrl: true, shift: true }))).toBe(false);
+  });
+});
+
+describe('ShortcutManager — meta bindings dispatch (FCP preset)', () => {
+  let sm: ShortcutManager;
+  beforeEach(() => { sm = makeManager(); });
+  afterEach(() => { sm.dispose(); vi.restoreAllMocks(); });
+
+  it('REGRESSION: FCP ⌘B split fires on a metaKey keydown', () => {
+    sm.applyPreset('fcp');
+    sm.setContext('timeline');
+    const cb = vi.fn();
+    sm.registerCallback('split', cb);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyB', metaKey: true, bubbles: true }));
+    expect(cb).toHaveBeenCalledOnce();
   });
 });

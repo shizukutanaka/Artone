@@ -12,6 +12,8 @@
  */
 
 import { IntervalIndex } from './interval-index';
+import { liftRange, extractRange, captureRangeEditUndo, type RangeEditResult } from './range-edit';
+import { CommandFactory, type Command } from '../undo/history-manager';
 
 // ============================================================
 // Types
@@ -139,6 +141,32 @@ export class MagneticTimeline {
   private state: TimelineState;
   private snapThreshold = 10; // pixels
   private listeners: Set<(state: TimelineState) => void> = new Set();
+
+  /**
+   * Batch depth counter. When > 0, `notify()` is deferred until the
+   * outermost `endBatch()` fires it once. This ensures multi-step
+   * commands deliver exactly ONE state-change event to subscribers
+   * rather than one per sub-operation, maintaining the "atomic command"
+   * abstraction.
+   */
+  private batchDepth = 0;
+  private batchPending = false;
+
+  /**
+   * Lazy interval-index cache. Rebuilt from scratch on first access after
+   * any mutation; invalidated by `_fireListeners()`. Subsequent
+   * `getClipsAtTime()` calls between mutations cost O(log n + k) instead
+   * of O(n) per call.
+   */
+  private clipIndexCache: IntervalIndex<{ id: string; start: number; end: number }> | null = null;
+
+  /**
+   * Lazy per-track clip-ID index. Maps trackId → Set of clipIds for that
+   * track. Allows getTrackClips() and shiftClipsAfter() to iterate only the
+   * K clips on the target track instead of all N clips (O(K) vs O(N)).
+   * Invalidated alongside clipIndexCache on every mutation.
+   */
+  private trackIndexCache: Map<string, Set<string>> | null = null;
 
   constructor() {
     this.state = {
@@ -349,9 +377,17 @@ export class MagneticTimeline {
   // ============================================================
 
   private shiftClipsAfter(trackId: string, afterTime: number, delta: number, excludeClipId?: string): void {
-    for (const clip of this.state.clips.values()) {
-      if (clip.id === excludeClipId) continue;
-      if (clip.trackId === trackId && clip.startTime >= afterTime) {
+    const ids = this._getTrackIndex().get(trackId);
+    if (!ids) return;
+    for (const id of ids) {
+      if (id === excludeClipId) continue;
+      // Use a guarded get: the trackIndexCache may be stale inside a batch
+      // (cache invalidation is deferred until _fireListeners() at endBatch()),
+      // so a clip deleted earlier in the same batch is still in `ids` but
+      // absent from state.clips.
+      const clip = this.state.clips.get(id);
+      if (!clip || clip.locked) continue;
+      if (clip.startTime >= afterTime) {
         clip.startTime = Math.max(0, clip.startTime + delta);
       }
     }
@@ -359,7 +395,7 @@ export class MagneticTimeline {
 
   closeGaps(trackId: string): void {
     const clips = this.getTrackClips(trackId).sort((a, b) => a.startTime - b.startTime);
-    
+
     let currentTime = 0;
     for (const clip of clips) {
       if (clip.startTime > currentTime) {
@@ -369,6 +405,275 @@ export class MagneticTimeline {
     }
 
     this.notify();
+  }
+
+  // ============================================================
+  // Three-point editing (Lift / Extract over the in→out range)
+  // ============================================================
+
+  /**
+   * Lift: remove the marked in→out range, leaving a gap. Subsequent clips do
+   * not move. Pass `trackId` to limit the edit to one track (default: all).
+   *
+   * @returns true if an edit was applied (valid in/out range), false otherwise.
+   */
+  lift(trackId?: string): boolean {
+    return this.applyRangeEdit(liftRange, trackId);
+  }
+
+  /**
+   * Extract: remove the marked in→out range and ripple subsequent clips left to
+   * close the gap (sequence shortens). Pass `trackId` to limit to one track.
+   *
+   * @returns true if an edit was applied (valid in/out range), false otherwise.
+   */
+  extract(trackId?: string): boolean {
+    return this.applyRangeEdit(extractRange, trackId);
+  }
+
+  /**
+   * Build an **undoable** Lift command over the current in→out range, or null if
+   * no range is set or the edit is a no-op. Run it via `HistoryManager.execute`.
+   */
+  liftCommand(trackId?: string): Command | null {
+    return this.rangeEditCommand(liftRange, 'clip.lift', 'Lift range', trackId);
+  }
+
+  /** Build an **undoable** Extract command over the current in→out range, or null. */
+  extractCommand(trackId?: string): Command | null {
+    return this.rangeEditCommand(extractRange, 'clip.extract', 'Extract range', trackId);
+  }
+
+  /** Shared apply path for lift/extract. Requires both in and out points set. */
+  private applyRangeEdit(
+    op: typeof liftRange,
+    trackId: string | undefined,
+  ): boolean {
+    const result = this.computeRangeEdit(op, trackId);
+    if (!result) return false;
+    this.applyRangeEditResult(result);
+    this.notify();
+    return true;
+  }
+
+  /** Validate the in→out range and compute the (non-applied) edit result. */
+  private computeRangeEdit(
+    op: typeof liftRange,
+    trackId: string | undefined,
+  ): RangeEditResult | null {
+    const { inPoint, outPoint } = this.state;
+    if (inPoint === null || outPoint === null) return null;
+    const start = Math.min(inPoint, outPoint);
+    const end = Math.max(inPoint, outPoint);
+    if (!(end > start)) return null;
+
+    const result = op([...this.state.clips.values()], { start, end }, { trackId });
+    if (result.clips.length === 0 && result.removedIds.length === 0) return null;
+    return result;
+  }
+
+  /** Apply a computed range-edit result to the clip store (no notify). */
+  private applyRangeEditResult(result: RangeEditResult): void {
+    for (const id of result.removedIds) this.state.clips.delete(id);
+    for (const clip of result.clips) {
+      this.state.clips.set(clip.id, { ...clip, transform: { ...clip.transform } });
+    }
+  }
+
+  /** Build a reversible structural command for a lift/extract edit. */
+  private rangeEditCommand(
+    op: typeof liftRange,
+    type: string,
+    description: string,
+    trackId: string | undefined,
+  ): Command | null {
+    const before = [...this.state.clips.values()].map((c) => ({ ...c, transform: { ...c.transform } }));
+    const result = this.computeRangeEdit(op, trackId);
+    if (!result) return null;
+    const undo = captureRangeEditUndo(before, result);
+
+    const apply = (): void => {
+      this.applyRangeEditResult(result);
+      this.notify();
+    };
+    const revert = (): void => {
+      for (const id of undo.addedIds) this.state.clips.delete(id);
+      for (const c of undo.removed) this.state.clips.set(c.id, { ...c, transform: { ...c.transform } });
+      for (const c of undo.modifiedBefore) this.state.clips.set(c.id, { ...c, transform: { ...c.transform } });
+      this.notify();
+    };
+    return CommandFactory.structural(type, description, apply, revert);
+  }
+
+  // ============================================================
+  // Structural Commands — split / add / delete / closeGaps
+  // ============================================================
+
+  /** Shallow-clone all clips for snapshot-based undo. */
+  private snapshotClips(): Clip[] {
+    return [...this.state.clips.values()].map((c) => ({ ...c, transform: { ...c.transform } }));
+  }
+
+  /**
+   * Restore clip store from a snapshot; triggers notify().
+   *
+   * Both representations of selection state are rebuilt atomically:
+   * `state.clips[id].selected` (rendering flag) AND `state.selection`
+   * (the O(1) Set index). Restoring only clips without rebuilding the
+   * Set breaks the invariant `∀id: state.selection.has(id) ↔ clip.selected`,
+   * producing "ghost selected" clips that render as selected but are invisible
+   * to every command that queries `state.selection`.
+   */
+  private restoreClips(snapshot: Clip[]): void {
+    this.state.clips.clear();
+    this.state.selection.clear();
+    for (const c of snapshot) {
+      this.state.clips.set(c.id, { ...c, transform: { ...c.transform } });
+      if (c.selected) this.state.selection.add(c.id);
+    }
+    this.notify();
+  }
+
+  /**
+   * Build a snapshot-based reversible structural command.
+   *
+   * Captures the full clip set before the edit, lazily runs `mutate` on the
+   * first execute (capturing the resulting state for stable redo), and
+   * restores the captured before/after state on undo/redo. This is the shared
+   * machinery behind every single-shot structural command (split/add/delete/
+   * move/trim/closeGaps), eliminating the per-method snapshot/restore
+   * boilerplate. Lift/Extract use a separate delta-based path
+   * (`rangeEditCommand`) because their inverse is computed analytically by
+   * `captureRangeEditUndo` rather than from a full snapshot.
+   *
+   * @param mutate the in-place edit to perform (calls the plain mutator).
+   */
+  private structuralCommand(type: string, description: string, mutate: () => void): Command {
+    const before = this.snapshotClips();
+    let after: Clip[] | null = null;
+
+    const apply = (): void => {
+      if (after) {
+        this.restoreClips(after);
+      } else {
+        mutate();
+        after = this.snapshotClips();
+      }
+    };
+    return CommandFactory.structural(type, description, apply, () => this.restoreClips(before));
+  }
+
+  /**
+   * Build an **undoable** command that splits `clipId` at `splitTime`.
+   * Returns null when splitTime is outside the clip bounds (no-op).
+   *
+   * Pass the returned command to `HistoryManager.execute()` so undo/redo work.
+   */
+  splitClipCommand(clipId: string, splitTime: number): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip) return null;
+    if (splitTime <= clip.startTime || splitTime >= clip.startTime + clip.duration) return null;
+    return this.structuralCommand('clip.split', 'Split clip', () => this.splitClip(clipId, splitTime));
+  }
+
+  /**
+   * Build an **undoable** command that adds `clip` to the timeline (with
+   * magnetic ripple). The returned command is always non-null; pass it to
+   * `HistoryManager.execute()`.
+   */
+  addClipCommand(clip: Omit<Clip, 'id' | 'selected'>): Command {
+    return this.structuralCommand('clip.add', 'Add clip', () => this.addClip(clip));
+  }
+
+  /**
+   * Build an **undoable** command that deletes the clip with `clipId`
+   * (magnetic ripple closes the gap). Returns null if the clip doesn't exist
+   * or is locked.
+   */
+  deleteClipCommand(clipId: string): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+    return this.structuralCommand('clip.delete', 'Delete clip', () => this.deleteClip(clipId));
+  }
+
+  /**
+   * Build an **undoable** command that deletes all currently-selected
+   * non-locked clips (magnetic ripple per clip, leftmost last so positions
+   * remain consistent during the forward pass). Returns null if nothing
+   * actionable is selected.
+   */
+  deleteSelectedCommand(): Command | null {
+    const selected = [...this.state.selection]
+      .map((id) => this.state.clips.get(id))
+      .filter((c): c is Clip => c !== undefined && !c.locked);
+    if (selected.length === 0) return null;
+
+    // Sort right-to-left so earlier deletions don't shift the startTimes we
+    // rely on when checking subsequent clips during the same batch.
+    selected.sort((a, b) => b.startTime - a.startTime);
+    const ids = selected.map((c) => c.id);
+
+    return this.structuralCommand('clip.deleteSelected', 'Delete selected clips', () => {
+      // Batch the per-clip deletions so subscribers receive exactly ONE
+      // state-change notification for the whole operation (atomic command
+      // contract). Without this, each deleteClip() fires notify() and
+      // subscribers see N intermediate partially-deleted states.
+      this.beginBatch();
+      for (const id of ids) this.deleteClip(id);
+      this.endBatch();
+    });
+  }
+
+  /**
+   * Build an **undoable** command that closes gaps on `trackId`. Returns null
+   * when the track has no clips or they are already contiguous (no-op).
+   */
+  closeGapsCommand(trackId: string): Command | null {
+    const clips = this.getTrackClips(trackId).sort((a, b) => a.startTime - b.startTime);
+    // Quick no-op check: already gap-free?
+    let cursor = 0;
+    let hasGap = false;
+    for (const c of clips) {
+      if (c.startTime > cursor + 0.001) { hasGap = true; break; }
+      cursor = c.startTime + c.duration;
+    }
+    if (!hasGap) return null;
+    return this.structuralCommand('clip.closeGaps', 'Close gaps', () => this.closeGaps(trackId));
+  }
+
+  /**
+   * Build an **undoable** command that moves `clipId` to `newStart`
+   * (optionally changing track via `newTrackId`). Returns null if the
+   * clip doesn't exist or is locked.
+   */
+  moveClipCommand(clipId: string, newStart: number, newTrackId?: string): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+    return this.structuralCommand('clip.move', 'Move clip', () => this.moveClip(clipId, newStart, newTrackId));
+  }
+
+  /**
+   * Build an **undoable** command that trims the **start** of `clipId`
+   * to `newStart` (head trim). Returns null if the clip doesn't exist,
+   * is locked, or the trim would make duration ≤ 0.
+   */
+  trimClipStartCommand(clipId: string, newStart: number): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+    if (newStart - clip.startTime >= clip.duration) return null; // would zero-out
+    return this.structuralCommand('clip.trimStart', 'Trim clip start', () => this.trimClipStart(clipId, newStart));
+  }
+
+  /**
+   * Build an **undoable** command that trims the **end** of `clipId`
+   * to `newEnd` (tail trim). Returns null if the clip doesn't exist,
+   * is locked, or the trim would make duration ≤ 0.
+   */
+  trimClipEndCommand(clipId: string, newEnd: number): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+    if (newEnd <= clip.startTime) return null; // would zero-out
+    return this.structuralCommand('clip.trimEnd', 'Trim clip end', () => this.trimClipEnd(clipId, newEnd));
   }
 
   // ============================================================
@@ -399,27 +704,37 @@ export class MagneticTimeline {
   }
 
   findNearestSnapPoint(time: number, excludeClipId?: string): number | null {
-    const points = this.getSnapPoints().filter(p => p.clipId !== excludeClipId);
-    
-    let nearest: SnapPoint | null = null;
+    // Scan candidates directly — avoids allocating getSnapPoints() array and
+    // a second filter() array on every drag-tick (timeline CLAUDE.md: GC禁止 during drag).
+    const timeThreshold = this.snapThreshold / this.state.zoom;
+    let nearestTime = -1;
     let minDist = Infinity;
 
-    for (const point of points) {
-      const dist = Math.abs(point.time - time);
-      if (dist < minDist) {
-        minDist = dist;
-        nearest = point;
-      }
+    // Playhead
+    const pdist = Math.abs(this.state.playhead - time);
+    if (pdist < minDist) { minDist = pdist; nearestTime = this.state.playhead; }
+
+    // Clip edges (skip the clip being dragged)
+    for (const clip of this.state.clips.values()) {
+      if (clip.id === excludeClipId) continue;
+      const d1 = Math.abs(clip.startTime - time);
+      if (d1 < minDist) { minDist = d1; nearestTime = clip.startTime; }
+      const endTime = clip.startTime + clip.duration;
+      const d2 = Math.abs(endTime - time);
+      if (d2 < minDist) { minDist = d2; nearestTime = endTime; }
     }
 
-    // Convert pixel threshold to time threshold
-    const timeThreshold = this.snapThreshold / this.state.zoom;
-    
-    if (nearest && minDist <= timeThreshold) {
-      return nearest.time;
+    // In/Out points
+    if (this.state.inPoint !== null) {
+      const d = Math.abs(this.state.inPoint - time);
+      if (d < minDist) { minDist = d; nearestTime = this.state.inPoint; }
+    }
+    if (this.state.outPoint !== null) {
+      const d = Math.abs(this.state.outPoint - time);
+      if (d < minDist) { minDist = d; nearestTime = this.state.outPoint; }
     }
 
-    return null;
+    return minDist <= timeThreshold && nearestTime >= 0 ? nearestTime : null;
   }
 
   // ============================================================
@@ -588,25 +903,43 @@ export class MagneticTimeline {
   // ============================================================
 
   getTrackClips(trackId: string): Clip[] {
-    return Array.from(this.state.clips.values())
-      .filter(c => c.trackId === trackId);
+    const ids = this._getTrackIndex().get(trackId);
+    if (!ids) return [];
+    const result: Clip[] = [];
+    for (const id of ids) {
+      const clip = this.state.clips.get(id);
+      if (clip) result.push(clip);
+    }
+    return result;
   }
 
   getClipsAtTime(time: number): Clip[] {
-    // IntervalIndex で O(log n + k) 検索 (大量クリップ時の最適化)
-    const index = this.buildIntervalIndex();
-    const hits = index.queryPoint(time);
-    const byId = this.state.clips;
-    return hits.map((h) => byId.get(h.id)!).filter(Boolean);
+    const hits = this.getClipIndex().queryPoint(time);
+    const result: Clip[] = [];
+    for (const h of hits) {
+      const clip = this.state.clips.get(h.id);
+      if (clip) result.push(clip);
+    }
+    return result;
   }
 
-  /** クリップ群から区間インデックスを構築 (時間範囲クエリ用) */
-  private buildIntervalIndex(): IntervalIndex<{ id: string; start: number; end: number }> {
-    const index = new IntervalIndex<{ id: string; start: number; end: number }>();
-    for (const c of this.state.clips.values()) {
-      index.insert({ id: c.id, start: c.startTime, end: c.startTime + c.duration });
+  /**
+   * Return the lazily-built, mutation-invalidated IntervalIndex.
+   *
+   * Before this cache, `getClipsAtTime` rebuilt the entire index O(n) on
+   * every call — negating the O(log n + k) query benefit. Now the first
+   * call after a mutation pays O(n) to build; subsequent calls between
+   * mutations cost O(log n + k). The cache is invalidated by
+   * `_fireListeners()`, which runs on every `notify()`.
+   */
+  private getClipIndex(): IntervalIndex<{ id: string; start: number; end: number }> {
+    if (!this.clipIndexCache) {
+      this.clipIndexCache = new IntervalIndex<{ id: string; start: number; end: number }>();
+      for (const c of this.state.clips.values()) {
+        this.clipIndexCache.insert({ id: c.id, start: c.startTime, end: c.startTime + c.duration });
+      }
     }
-    return index;
+    return this.clipIndexCache;
   }
 
   getTimelineDuration(): number {
@@ -626,15 +959,91 @@ export class MagneticTimeline {
     return { ...this.state };
   }
 
+  /**
+   * Bulk-replace the entire timeline state — tracks, clips, playhead,
+   * in/out points, zoom, scroll position, and selection — in one atomic
+   * step. Used by crash recovery to load a full {@link deserializeTimelineState}
+   * snapshot back in, as opposed to {@link restoreClips} which only covers
+   * the clip store for undo. Triggers exactly one `notify()`.
+   */
+  loadState(newState: TimelineState): void {
+    this.state.tracks = new Map(newState.tracks);
+    this.state.clips = new Map(newState.clips);
+    this.state.playhead = newState.playhead;
+    this.state.inPoint = newState.inPoint;
+    this.state.outPoint = newState.outPoint;
+    this.state.zoom = newState.zoom;
+    this.state.scrollX = newState.scrollX;
+    this.state.selection = new Set(newState.selection);
+    this.notify();
+  }
+
   subscribe(listener: (state: TimelineState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * Fire listeners immediately, or defer when inside a batch.
+   * Callers throughout the class use this unchanged — batching is
+   * transparent to every individual operation.
+   */
   private notify(): void {
-    for (const listener of this.listeners) {
-      listener(this.state);
+    if (this.batchDepth > 0) {
+      this.batchPending = true;
+      return;
     }
+    this._fireListeners();
+  }
+
+  /** Suppress notifications for the duration of a logical batch. */
+  private beginBatch(): void {
+    this.batchDepth++;
+  }
+
+  /**
+   * End a batch. If this is the outermost `endBatch()` and at least one
+   * `notify()` was suppressed, fire listeners exactly once.
+   */
+  private endBatch(): void {
+    if (--this.batchDepth === 0 && this.batchPending) {
+      this.batchPending = false;
+      this._fireListeners();
+    }
+  }
+
+  /** Build and return the per-track clip-ID index. */
+  private _getTrackIndex(): Map<string, Set<string>> {
+    if (!this.trackIndexCache) {
+      this.trackIndexCache = new Map<string, Set<string>>();
+      for (const clip of this.state.clips.values()) {
+        let set = this.trackIndexCache.get(clip.trackId);
+        if (!set) { set = new Set<string>(); this.trackIndexCache.set(clip.trackId, set); }
+        set.add(clip.id);
+      }
+    }
+    return this.trackIndexCache;
+  }
+
+  /** Invalidate the clip-index cache and fire all listeners. */
+  private _fireListeners(): void {
+    this.clipIndexCache = null; // invalidate O(n) build cache
+    this.trackIndexCache = null;
+    for (const listener of this.listeners) {
+      try {
+        listener(this.state);
+      } catch (e) {
+        // Isolate listeners from each other: a throw in one must not skip the rest.
+        // Re-raise asynchronously so devtools still sees the error.
+        queueMicrotask(() => { throw e; });
+      }
+    }
+  }
+
+  /** Stop the playback interval and clear all subscribers. Call when discarding the instance. */
+  destroy(): void {
+    this.stopPlayback();
+    this.listeners.clear();
   }
 }
 

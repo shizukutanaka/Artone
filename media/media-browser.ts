@@ -1,4 +1,5 @@
 import { color } from '../app/design-system';
+import { setHighQualityScaling } from '../app/utils';
 /**
  * Artone v3 — Media Browser
  * 
@@ -327,6 +328,7 @@ export class MediaBrowser {
         canvas.height = height * scale;
 
         const ctx = canvas.getContext('2d')!;
+        setHighQualityScaling(ctx);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
         resolve(canvas.toDataURL('image/jpeg', 0.7));
@@ -338,10 +340,12 @@ export class MediaBrowser {
   }
 
   private async generateAudioWaveform(url: string): Promise<string> {
+    let audioContext: AudioContext | null = null;
     try {
       const response = await fetch(url);
+      if (!response.ok) throw new Error(`generateAudioWaveform: fetch failed ${response.status} ${response.statusText}`);
       const arrayBuffer = await response.arrayBuffer();
-      const audioContext = new AudioContext();
+      audioContext = new AudioContext();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
       const data = audioBuffer.getChannelData(0);
@@ -373,10 +377,12 @@ export class MediaBrowser {
         ctx.fillRect(x, y, canvas.width / samples - 1, barHeight);
       }
 
-      audioContext.close();
       return canvas.toDataURL('image/png');
     } catch {
       return ''; // Thumbnail generation failed — return empty string
+    } finally {
+      // Close in finally so the OS audio context is released even if decodeAudioData throws.
+      audioContext?.close();
     }
   }
 
@@ -395,6 +401,7 @@ export class MediaBrowser {
         canvas.height = img.height * scale;
 
         const ctx = canvas.getContext('2d')!;
+        setHighQualityScaling(ctx);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
         resolve(canvas.toDataURL('image/jpeg', 0.7));

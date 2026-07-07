@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   PluginBridge,
   BUILTIN_PLUGINS,
+  buildWasmProcessorCode,
   type PluginDescriptor,
   type PluginInstance,
 } from '../plugins/plugin-bridge';
@@ -40,7 +41,14 @@ let instCounter = 0;
 function injectInstance(bridge: PluginBridge, descriptor = makeDescriptor()): PluginInstance {
   instCounter++;
   const parameters = new Map<string, number>();
-  for (const p of descriptor.parameters) parameters.set(p.id, p.defaultValue);
+  const paramById = new Map<string, (typeof descriptor.parameters)[0]>();
+  const paramIndexById = new Map<string, number>();
+  for (let i = 0; i < descriptor.parameters.length; i++) {
+    const p = descriptor.parameters[i];
+    parameters.set(p.id, p.defaultValue);
+    paramById.set(p.id, p);
+    paramIndexById.set(p.id, i);
+  }
   const instance: PluginInstance = {
     id: `inst-${instCounter}`,
     descriptor,
@@ -51,6 +59,8 @@ function injectInstance(bridge: PluginBridge, descriptor = makeDescriptor()): Pl
     presets: [],
     currentPreset: -1,
     bypassed: false,
+    paramById,
+    paramIndexById,
   };
   (bridge as unknown as { instances: Map<string, PluginInstance> }).instances.set(instance.id, instance);
   return instance;
@@ -678,7 +688,7 @@ describe('PluginBridge — scanPlugins', () => {
   it('fetches the directory index and registers every descriptor', async () => {
     const bridge = makeBridge();
     const descs = [makeDescriptor({ id: 'a:1' }), makeDescriptor({ id: 'b:2' })];
-    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => descs }) as unknown as Response));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => descs }) as unknown as Response));
     try {
       const result = await bridge.scanPlugins('/plugins');
       expect(result).toHaveLength(2);
@@ -691,7 +701,7 @@ describe('PluginBridge — scanPlugins', () => {
 
   it('requests <directory>/index.json', async () => {
     const bridge = makeBridge();
-    const fetchSpy = vi.fn(async () => ({ json: async () => [] }) as unknown as Response);
+    const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => [] }) as unknown as Response);
     vi.stubGlobal('fetch', fetchSpy);
     try {
       await bridge.scanPlugins('/my/plugins');
@@ -711,7 +721,7 @@ describe('PluginBridge — loadFactoryPresets', () => {
     const bridge = makeBridge();
     const inst = injectInstance(bridge);
     const presets = [{ name: 'Warm', parameters: { gain: 3 } }];
-    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => presets }) as unknown as Response));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => presets }) as unknown as Response));
     try {
       await (bridge as unknown as BridgePrivate).loadFactoryPresets(inst);
       expect(inst.presets).toEqual(presets);
@@ -746,9 +756,9 @@ describe('PluginBridge — loadPlugin', () => {
     bridge.registerPlugin(makeDescriptor({ id: 'wasm:1', wasmUrl: '/plugins/x.wasm' }));
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('.wasm')) {
-        return { arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
+        return { ok: true, arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
       }
-      return { json: async () => [] } as unknown as Response; // presets sidecar
+      return { ok: true, json: async () => [] } as unknown as Response; // presets sidecar
     }));
     try {
       const instanceId = await bridge.loadPlugin('wasm:1');
@@ -777,9 +787,9 @@ describe('PluginBridge — loadPlugin', () => {
     const presets = [{ name: 'Default', parameters: { gain: 6 } }];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('.wasm')) {
-        return { arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
+        return { ok: true, arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
       }
-      return { json: async () => presets } as unknown as Response;
+      return { ok: true, json: async () => presets } as unknown as Response;
     }));
     try {
       const instanceId = await bridge.loadPlugin('wasm:2');
@@ -932,5 +942,144 @@ describe('PluginBridge — UI listener cleanup', () => {
       data: { type: 'parameterChange', instanceId: inst.id, parameterId: 'gain', value: 5 },
     }));
     expect(bridge.getParameter(inst.id, 'gain')).toBe(before);
+  });
+});
+
+// ============================================================
+// WasmPluginProcessor worklet — real-time path is allocation-free
+// ============================================================
+
+/**
+ * Evaluate the stringified AudioWorklet source under mocked worklet globals and
+ * return the registered processor class. The worklet runs in an isolated scope
+ * with no module imports, so this eval harness (same pattern as the sandbox
+ * lockdown test in plugin-manager.test.ts) is the only way to exercise it.
+ */
+function instantiateWorkletProcessor(): new (opts: unknown) => {
+  process(inputs: Float32Array[][], outputs: Float32Array[][], params: unknown): boolean;
+  [k: string]: unknown;
+} {
+  let RegisteredClass: unknown = null;
+  const registerProcessor = (_name: string, cls: unknown): void => { RegisteredClass = cls; };
+  class AudioWorkletProcessor {
+    port = { postMessage: (): void => {}, onmessage: null as unknown };
+  }
+  const sampleRate = 48000;
+  new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', buildWasmProcessorCode())(
+    AudioWorkletProcessor, registerProcessor, sampleRate,
+  );
+  if (!RegisteredClass) throw new Error('worklet did not registerProcessor');
+  return RegisteredClass as new (opts: unknown) => {
+    process(inputs: Float32Array[][], outputs: Float32Array[][], params: unknown): boolean;
+    [k: string]: unknown;
+  };
+}
+
+const BLOCK = 128;
+
+/** Build a processor wired to a WASM-like memory with a doubling processFunc. */
+function makeWiredProcessor() {
+  const Proc = instantiateWorkletProcessor();
+  const p = new Proc({});
+  p.blockSize = BLOCK;
+  const mem = new WebAssembly.Memory({ initial: 1 }); // 64 KiB
+  p.wasmMemory = mem;
+  p.inputPtr = 0;
+  p.outputPtr = BLOCK * 2 * 4; // bytes: directly after the 256-float input region
+  // Doubles every input sample, reading/writing the processor's cached views.
+  p.processFunc = (): void => {
+    const iv = p.inputView as Float32Array;
+    const ov = p.outputView as Float32Array;
+    for (let i = 0; i < BLOCK * 2; i++) ov[i] = iv[i] * 2;
+  };
+  return { p, mem };
+}
+
+function stereoIO() {
+  const inL = new Float32Array(BLOCK).fill(0.25);
+  const inR = new Float32Array(BLOCK).fill(0.5);
+  const outL = new Float32Array(BLOCK);
+  const outR = new Float32Array(BLOCK);
+  return { inputs: [[inL, inR]], outputs: [[outL, outR]], outL, outR };
+}
+
+describe('WasmPluginProcessor — real-time process()', () => {
+  it('routes input through WASM buffers to output via cached views', () => {
+    const { p } = makeWiredProcessor();
+    const { inputs, outputs, outL, outR } = stereoIO();
+
+    expect(p.process(inputs, outputs, {})).toBe(true);
+    expect(outL[0]).toBeCloseTo(0.5);  // 0.25 * 2
+    expect(outR[0]).toBeCloseTo(1.0);  // 0.5 * 2
+  });
+
+  it('REGRESSION: reuses the same Float32Array views across blocks (no per-block alloc)', () => {
+    const { p } = makeWiredProcessor();
+    const { inputs, outputs } = stereoIO();
+
+    p.process(inputs, outputs, {});
+    const inView = p.inputView;
+    const outView = p.outputView;
+    expect(inView).toBeInstanceOf(Float32Array);
+
+    // Many more blocks must not allocate new views.
+    for (let i = 0; i < 50; i++) p.process(inputs, outputs, {});
+    expect(p.inputView).toBe(inView);
+    expect(p.outputView).toBe(outView);
+  });
+
+  it('rebuilds views when WASM memory grows (buffer detached)', () => {
+    const { p, mem } = makeWiredProcessor();
+    const { inputs, outputs, outL } = stereoIO();
+
+    p.process(inputs, outputs, {});
+    const before = p.inputView;
+
+    mem.grow(1); // detaches the previous ArrayBuffer, invalidating old views
+    p.process(inputs, outputs, {});
+
+    // Plain identity checks — never hand the now-detached old view to a matcher,
+    // whose diff serializer would throw on the detached buffer.
+    expect(p.inputView !== before).toBe(true);
+    expect(p.viewBuffer === mem.buffer).toBe(true);
+    expect(outL[0]).toBeCloseTo(0.5); // still correct after rebuild
+  });
+
+  it('bypass path copies present channels and zero-fills absent ones without allocating', () => {
+    const { p } = makeWiredProcessor();
+    p.bypassed = true;
+
+    // Present input channel is copied through.
+    const inL = new Float32Array(BLOCK).fill(0.7);
+    const outL = new Float32Array(BLOCK).fill(9);
+    expect(p.process([[inL]], [[outL]], {})).toBe(true);
+    expect(outL[0]).toBeCloseTo(0.7);
+
+    // Absent input channel is silenced in place (no allocated silent buffer).
+    const outSilent = new Float32Array(BLOCK).fill(9);
+    p.process([[]], [[outSilent]], {});
+    expect(outSilent[0]).toBe(0);
+
+    // Missing inputs[0] entirely must not throw.
+    const outSilent2 = new Float32Array(BLOCK).fill(9);
+    expect(() => p.process([], [[outSilent2]], {})).not.toThrow();
+    expect(outSilent2[0]).toBe(0);
+  });
+
+  it('bypasses (silences) before init when processFunc is unset', () => {
+    const Proc = instantiateWorkletProcessor();
+    const p = new Proc({});
+    p.blockSize = BLOCK;
+    // processFunc unset → bypass branch even though not explicitly bypassed.
+    const outL = new Float32Array(BLOCK).fill(9);
+    expect(p.process([[]], [[outL]], {})).toBe(true);
+    expect(outL[0]).toBe(0);
+  });
+
+  it('source no longer contains the old per-block allocation patterns', () => {
+    const src = buildWasmProcessorCode();
+    expect(src).not.toMatch(/new Float32Array\(this\.blockSize\)/); // old bypass alloc
+    expect(src).not.toMatch(/\.subarray\(/);                        // old per-channel output view
+    expect(src).toContain('this.viewBuffer');                       // view caching present
   });
 });

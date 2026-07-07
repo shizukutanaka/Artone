@@ -275,10 +275,10 @@ const ClipInspector: React.FC<{ sel: ClipSelection; onChange: (s: ClipSelection)
     </Section>
 
     <Section title={t('inspector.section.transform')}>
-      <Row label="X">
+      <Row label={t('inspector.label.x')}>
         <NumberInput value={sel.position.x} onChange={(v) => onChange({ ...sel, position: { ...sel.position, x: v } })} unit="px" />
       </Row>
-      <Row label="Y">
+      <Row label={t('inspector.label.y')}>
         <NumberInput value={sel.position.y} onChange={(v) => onChange({ ...sel, position: { ...sel.position, y: v } })} unit="px" />
       </Row>
       <Row label={t('inspector.label.scale')}>
@@ -390,7 +390,7 @@ const ProjectInspector: React.FC<{ sel: ProjectSelection; onChange: (s: ProjectS
           }}
         />
       </Row>
-      <Row label="FPS">
+      <Row label={t('inspector.label.fps')}>
         <select
           value={sel.fps}
           onChange={(e) => onChange({ ...sel, fps: parseFloat(e.target.value) })}
@@ -437,7 +437,7 @@ interface InspectorProps {
   onChange: (s: Selection) => void;
 }
 
-export const Inspector: React.FC<InspectorProps> = ({ selection, onChange }) => {
+export const Inspector: React.FC<InspectorProps> = React.memo(({ selection, onChange }) => {
   if (selection.type === 'none') {
     return (
       <div
@@ -466,6 +466,7 @@ export const Inspector: React.FC<InspectorProps> = ({ selection, onChange }) => 
     return <ProjectInspector sel={selection} onChange={(s) => onChange(s)} />;
   }
   return null;
-};
+});
+Inspector.displayName = 'Inspector';
 
 export default Inspector;

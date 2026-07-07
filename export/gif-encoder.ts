@@ -198,20 +198,24 @@ function mapPixelsDithered(
       const errG = oldG - palette[idx][1];
       const errB = oldB - palette[idx][2];
 
-      // Floyd-Steinberg kernel: distribute error to 4 neighbours
-      function addErr(ox: number, oy: number, w: number): void {
-        const nx = x + ox;
-        const ny = y + oy;
-        if (nx < 0 || nx >= width || ny >= height) return;
-        const np = ny * width + nx;
-        err[np * 3] += errR * w;
-        err[np * 3 + 1] += errG * w;
-        err[np * 3 + 2] += errB * w;
+      // Floyd-Steinberg kernel: distribute error to 4 neighbours (inlined for throughput)
+      let np: number;
+      if (x + 1 < width) {
+        np = (pi + 1) * 3;
+        err[np] += errR * 0.4375; err[np + 1] += errG * 0.4375; err[np + 2] += errB * 0.4375;
       }
-      addErr(1, 0, 7 / 16);
-      addErr(-1, 1, 3 / 16);
-      addErr(0, 1, 5 / 16);
-      addErr(1, 1, 1 / 16);
+      if (x > 0 && y + 1 < height) {
+        np = (pi + width - 1) * 3;
+        err[np] += errR * 0.1875; err[np + 1] += errG * 0.1875; err[np + 2] += errB * 0.1875;
+      }
+      if (y + 1 < height) {
+        np = (pi + width) * 3;
+        err[np] += errR * 0.3125; err[np + 1] += errG * 0.3125; err[np + 2] += errB * 0.3125;
+      }
+      if (x + 1 < width && y + 1 < height) {
+        np = (pi + width + 1) * 3;
+        err[np] += errR * 0.0625; err[np + 1] += errG * 0.0625; err[np + 2] += errB * 0.0625;
+      }
     }
   }
 
@@ -229,7 +233,9 @@ function lzwCompress(indices: Uint8Array, minCodeSize: number): Uint8Array {
   const clearCode = 1 << minCodeSize;
   const eofCode = clearCode + 1;
 
-  const output: number[] = [];
+  // Pre-allocate: worst case each pixel produces at most 2 bytes at max code width (12 bits)
+  const output = new Uint8Array(indices.length * 2 + 512);
+  let outPos = 0;
   let codeSize = minCodeSize + 1;
   let nextCode = eofCode + 1;
   let bitBuf = 0;
@@ -247,7 +253,7 @@ function lzwCompress(indices: Uint8Array, minCodeSize: number): Uint8Array {
     bitBuf |= code << bitCount;
     bitCount += codeSize;
     while (bitCount >= 8) {
-      output.push(bitBuf & 0xFF);
+      output[outPos++] = bitBuf & 0xFF;
       bitBuf >>>= 8;
       bitCount -= 8;
     }
@@ -258,8 +264,8 @@ function lzwCompress(indices: Uint8Array, minCodeSize: number): Uint8Array {
 
   if (indices.length === 0) {
     writeCode(eofCode);
-    if (bitCount > 0) output.push(bitBuf & 0xFF);
-    return new Uint8Array(output);
+    if (bitCount > 0) output[outPos++] = bitBuf & 0xFF;
+    return output.subarray(0, outPos);
   }
 
   let prefix = indices[0];
@@ -289,9 +295,9 @@ function lzwCompress(indices: Uint8Array, minCodeSize: number): Uint8Array {
 
   writeCode(prefix);
   writeCode(eofCode);
-  if (bitCount > 0) output.push(bitBuf & 0xFF);
+  if (bitCount > 0) output[outPos++] = bitBuf & 0xFF;
 
-  return new Uint8Array(output);
+  return output.subarray(0, outPos);
 }
 
 // ============================================================

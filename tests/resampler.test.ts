@@ -11,6 +11,7 @@ import {
   resampleMultichannel,
   createResampler,
   outputSampleCount,
+  effectiveHalfWidth,
   type ResampleOptions,
 } from '../audio/resampler';
 
@@ -419,5 +420,52 @@ describe('resample — invalid sample-rate guards', () => {
     const input = sine(440, 512, 48000);
     expect(() => r.process(input)).not.toThrow();
     expect(r.process(input).every(isFinite)).toBe(true);
+  });
+});
+
+// ─── Downsampling anti-aliasing kernel width ───────────────────────────────────
+
+describe('effectiveHalfWidth', () => {
+  it('equals the base half-width for upsampling and same-rate (cutoff ≥ 1)', () => {
+    expect(effectiveHalfWidth('sinc16', 1)).toBe(8);
+    expect(effectiveHalfWidth('sinc4', 1)).toBe(2);
+  });
+
+  it('widens by 1/cutoff when downsampling (sinc tiers)', () => {
+    // cutoff 0.25 → 4× wider window so the cutoff-scaled sinc lobes fit.
+    expect(effectiveHalfWidth('sinc16', 0.25)).toBe(32);
+    expect(effectiveHalfWidth('sinc4', 0.5)).toBe(4);
+  });
+
+  it('never widens the linear tier (fast/preview, accepts aliasing)', () => {
+    expect(effectiveHalfWidth('linear', 0.25)).toBe(1);
+  });
+});
+
+describe('resample — downsampling anti-aliasing', () => {
+  it('rejects a stopband tone far better than it passes a passband tone', () => {
+    // 48k → 12k (target Nyquist 6 kHz). 1 kHz is passband; 9 kHz is stopband and
+    // would alias to 3 kHz if not filtered. The widened sinc kernel must
+    // attenuate 9 kHz strongly while passing 1 kHz.
+    const opts: ResampleOptions = { sourceSampleRate: 48000, targetSampleRate: 12000, quality: 'sinc16' };
+    const N = 48000; // 1 s
+    const pass = resample(sine(1000, N, 48000), opts);
+    const stop = resample(sine(9000, N, 48000), opts);
+
+    const skip = 64; // ignore edge transients
+    const passRms = rms(pass.slice(skip, pass.length - skip));
+    const stopRms = rms(stop.slice(skip, stop.length - skip));
+
+    // Passband tone largely preserved; stopband tone heavily attenuated.
+    expect(passRms).toBeGreaterThan(0.5);
+    expect(stopRms).toBeLessThan(passRms * 0.25);
+  });
+
+  it('keeps upsampling output finite and full-amplitude (kernel unchanged)', () => {
+    const out = resample(sine(1000, 24000, 24000), {
+      sourceSampleRate: 24000, targetSampleRate: 48000, quality: 'sinc16',
+    });
+    expect(out.every(Number.isFinite)).toBe(true);
+    expect(rms(out.slice(64, out.length - 64))).toBeGreaterThan(0.5);
   });
 });

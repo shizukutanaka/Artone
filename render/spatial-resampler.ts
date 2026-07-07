@@ -152,7 +152,7 @@ export function resampleBicubic(
       const dx  = fx - ix;
 
       const dstOff = (y * dstW + x) * 4;
-      const out = [0, 0, 0, 0];
+      let or = 0, og = 0, ob = 0, oa = 0;
 
       for (let m = -1; m <= 2; m++) {
         const wy = cubicWeight(dy - m);
@@ -163,17 +163,17 @@ export function resampleBicubic(
           const sx   = Math.max(0, Math.min(srcW - 1, ix + n));
           const w    = wy * wx;
           const sOff = (sy * srcW + sx) * 4;
-          out[0] += src[sOff]     * w;
-          out[1] += src[sOff + 1] * w;
-          out[2] += src[sOff + 2] * w;
-          out[3] += src[sOff + 3] * w;
+          or += src[sOff]     * w;
+          og += src[sOff + 1] * w;
+          ob += src[sOff + 2] * w;
+          oa += src[sOff + 3] * w;
         }
       }
 
-      dst[dstOff]     = Math.max(0, Math.min(255, Math.round(out[0])));
-      dst[dstOff + 1] = Math.max(0, Math.min(255, Math.round(out[1])));
-      dst[dstOff + 2] = Math.max(0, Math.min(255, Math.round(out[2])));
-      dst[dstOff + 3] = Math.max(0, Math.min(255, Math.round(out[3])));
+      dst[dstOff]     = Math.max(0, Math.min(255, Math.round(or)));
+      dst[dstOff + 1] = Math.max(0, Math.min(255, Math.round(og)));
+      dst[dstOff + 2] = Math.max(0, Math.min(255, Math.round(ob)));
+      dst[dstOff + 3] = Math.max(0, Math.min(255, Math.round(oa)));
     }
   }
   return dst;

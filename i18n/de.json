@@ -57,6 +57,11 @@
     "paste": "Einfügen",
     "selectAll": "Alles auswählen"
   },
+  "history": {
+    "opsCount": "{count} Vorgänge",
+    "clear": "Löschen",
+    "empty": "Kein Verlauf"
+  },
   "timeline": {
     "title": "Timeline",
     "play": "Wiedergabe",
@@ -187,6 +192,9 @@
     "all": "Alle",
     "empty": "Medien ablegen oder importieren",
     "noMatch": "Keine Treffer",
+    "itemsLabel": "Elemente",
+    "sidebarClose": "Medienbereich schließen",
+    "sidebarOpen": "Medienbereich öffnen",
     "status": {
       "pending": "Ausstehend",
       "proxy": "Proxy",
@@ -280,6 +288,8 @@
       "setInPoint": "In-Punkt setzen",
       "setOutPoint": "Out-Punkt setzen",
       "clearInOut": "In / Out löschen",
+      "lift": "Anheben",
+      "extract": "Extrahieren",
       "zoomIn": "Vergrößern",
       "zoomOut": "Verkleinern",
       "zoomFit": "Einpassen",
@@ -358,7 +368,10 @@
       "scale": "Skalierung",
       "rotation": "Drehung",
       "alpha": "α",
-      "enabled": "Aktiviert"
+      "enabled": "Aktiviert",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {
@@ -374,6 +387,7 @@
     "placeholder": "Befehle, Effekte, Einstellungen suchen...",
     "hint": "↑↓ Navigieren · Enter Ausführen · Esc Schließen",
     "count": "{count} Ergebnisse",
+    "noResults": "Keine Ergebnisse gefunden",
     "cmd": {
       "cut": "Ausschneiden",
       "copy": "Kopieren",

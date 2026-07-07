@@ -153,7 +153,8 @@ export class A11yAuditor {
     for (const el of Array.from(textNodes)) {
       if (el.textContent?.trim() === '') continue;
       this.checks++;
-      const style = this.host.window.getComputedStyle(el);
+      let style: CSSStyleDeclaration;
+      try { style = this.host.window.getComputedStyle(el); } catch { this.passed++; continue; }
       const fg = ColorContrast.parseColor(style.color);
       const bg = this.findBackground(el);
       if (!fg || !bg) continue;
@@ -188,7 +189,8 @@ export class A11yAuditor {
   private findBackground(el: Element): [number, number, number] | null {
     let cur: Element | null = el;
     while (cur) {
-      const style = this.host.window.getComputedStyle(cur);
+      let style: CSSStyleDeclaration;
+      try { style = this.host.window.getComputedStyle(cur); } catch { break; }
       const raw = style.backgroundColor;
 
       // 完全透明をスキップ

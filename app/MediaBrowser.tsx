@@ -196,7 +196,7 @@ const ItemView: React.FC<{
             cursor: 'pointer',
             fontSize: 12
           }}
-          title="削除"
+          title={t('common.delete')}
         >
           ×
         </button>
@@ -209,7 +209,7 @@ const ItemView: React.FC<{
 // Main Browser
 // ============================================================
 
-export const MediaBrowser: React.FC<MediaBrowserProps> = ({
+export const MediaBrowser: React.FC<MediaBrowserProps> = React.memo(({
   items,
   onImport,
   onSelect,
@@ -275,7 +275,7 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = ({
             fontWeight: 600
           }}
         >
-          + インポート
+          + {t('media.import')}
         </button>
         <input
           ref={fileInputRef}
@@ -360,11 +360,12 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = ({
           fontFamily: 'ui-monospace, monospace'
         }}
       >
-        {filtered.length} / {items.length} アイテム ·{' '}
+        {filtered.length} / {items.length} {t('media.itemsLabel')} ·{' '}
         {formatSize(items.reduce((s, i) => s + i.size, 0))}
       </div>
     </div>
   );
-};
+});
+MediaBrowser.displayName = 'MediaBrowser';
 
 export default MediaBrowser;

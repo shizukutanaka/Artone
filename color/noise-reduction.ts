@@ -400,10 +400,12 @@ export function estimateNoise(
     }
   }
 
+  // scaleFactor already divides by N (Immerkaer 1996: sigma = sqrt(pi/2) * sum / (6N)) —
+  // dividing by N again here underestimated sigma by a factor of N.
   const channelSigma: [number, number, number] = [
-    channelSums[0] * scaleFactor / Math.max(N, 1),
-    channelSums[1] * scaleFactor / Math.max(N, 1),
-    channelSums[2] * scaleFactor / Math.max(N, 1),
+    channelSums[0] * scaleFactor,
+    channelSums[1] * scaleFactor,
+    channelSums[2] * scaleFactor,
   ];
 
   const sigma = (channelSigma[0] + channelSigma[1] + channelSigma[2]) / 3;

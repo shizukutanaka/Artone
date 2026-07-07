@@ -122,14 +122,6 @@ else
   echo "  PASS: All modules documented"
 fi
 
-echo ""
-if [ $ERRORS -gt 0 ]; then
-  echo "FAILED: $ERRORS critical violation(s)"
-  exit 1
-else
-  echo "PASSED"
-fi
-
 # 8. localStorage 直書き (app/ 内 — safeStorage 経由が必須)
 echo "[8/10] Raw localStorage access..."
 RAW_LS=$(grep -rn "localStorage\." "$APP" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "safeStorage\|//\|setup\|test\|utils\.ts" || true)

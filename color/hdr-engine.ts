@@ -19,6 +19,39 @@ export type HDRFormat = 'sdr' | 'hdr10' | 'hdr10plus' | 'hlg' | 'dolby_vision';
 export type ColorSpace = 'rec709' | 'rec2020' | 'dci_p3' | 'aces';
 export type TransferFunction = 'gamma22' | 'gamma24' | 'pq' | 'hlg' | 'linear';
 
+const GAMMA22_ENC = 1 / 2.2;
+
+// PQ EOTF LUT: 8-bit code value → normalized linear [0,1] (i.e. L_nits / 10000).
+// Eliminates 2× Math.pow per channel per pixel in processFrame().
+const _PQ_EOTF_LUT = (() => {
+  const m1 = 2610 / 16384;
+  const m2 = 2523 / 4096 * 128;
+  const c1 = 3424 / 4096;
+  const c2 = 2413 / 4096 * 32;
+  const c3 = 2392 / 4096 * 32;
+  const lut = new Float32Array(256);
+  for (let v = 0; v < 256; v++) {
+    const x = v / 255;
+    const Vp = Math.pow(x, 1 / m2);
+    const n = Math.max(Vp - c1, 0);
+    lut[v] = Math.pow(n / (c2 - c3 * Vp), 1 / m1);
+  }
+  return lut;
+})();
+
+// HLG EOTF LUT: 8-bit code value → linear [0,1].
+const _HLG_EOTF_LUT = (() => {
+  const a = 0.17883277;
+  const b = 0.28466892;
+  const c = 0.55991073;
+  const lut = new Float32Array(256);
+  for (let v = 0; v < 256; v++) {
+    const x = v / 255;
+    lut[v] = x <= 0.5 ? (x * x) / 3 : (Math.exp((x - c) / a) + b) / 12;
+  }
+  return lut;
+})();
+
 export interface HDRMetadata {
   format: HDRFormat;
   colorSpace: ColorSpace;
@@ -357,7 +390,9 @@ export class HDREngine {
       const CP = -C2 / P;
 
       const w0 = 1.0 - Math.smoothstep(0.0, m, x);
-      const w2 = Math.smoothstep(m + l0, m + l0, x);
+      // smoothstep(S0, S0, x) is degenerate (edge0 === edge1 → 0/0 = NaN at boundary).
+      // The Uchimura formula intends a unit step at S0: 0 below, 1 above.
+      const w2 = x >= m + l0 ? 1.0 : 0.0;
       const w1 = 1.0 - w0 - w2;
 
       const T = m * Math.pow(x / m, c) + b;
@@ -511,14 +546,15 @@ export class HDREngine {
       if (metadata) {
         switch (metadata.transferFunction) {
           case 'pq':
-            r = this.pqEOTF(r) / 10000;
-            g = this.pqEOTF(g) / 10000;
-            b = this.pqEOTF(b) / 10000;
+            // Module-level LUTs replace 2×Math.pow per channel (6 pow calls → 3 lookups)
+            r = _PQ_EOTF_LUT[data[i]];
+            g = _PQ_EOTF_LUT[data[i + 1]];
+            b = _PQ_EOTF_LUT[data[i + 2]];
             break;
           case 'hlg':
-            r = this.hlgEOTF(r);
-            g = this.hlgEOTF(g);
-            b = this.hlgEOTF(b);
+            r = _HLG_EOTF_LUT[data[i]];
+            g = _HLG_EOTF_LUT[data[i + 1]];
+            b = _HLG_EOTF_LUT[data[i + 2]];
             break;
         }
 
@@ -539,10 +575,10 @@ export class HDREngine {
         b = mapped.b;
       }
 
-      // Apply gamma for SDR output
-      r = Math.pow(r, 1 / 2.2);
-      g = Math.pow(g, 1 / 2.2);
-      b = Math.pow(b, 1 / 2.2);
+      // Apply gamma for SDR output (Math.exp faster than Math.pow in V8)
+      r = r > 0 ? Math.exp(GAMMA22_ENC * Math.log(r)) : 0;
+      g = g > 0 ? Math.exp(GAMMA22_ENC * Math.log(g)) : 0;
+      b = b > 0 ? Math.exp(GAMMA22_ENC * Math.log(b)) : 0;
 
       data[i] = Math.round(Math.max(0, Math.min(255, r * 255)));
       data[i + 1] = Math.round(Math.max(0, Math.min(255, g * 255)));

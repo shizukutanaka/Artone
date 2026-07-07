@@ -298,8 +298,11 @@ export class CommandFactory {
     getClip: () => ClipLike,
     setClip: (clip: ClipLike) => void
   ): Command {
-    const savedEffect = { ...effect };
-    
+    // Guarantee an id: undo/redo below identify this exact effect by id, and
+    // an id-less effect would make undo strip every OTHER id-less effect on
+    // the clip too (all of them match `id !== undefined`).
+    const savedEffect = { ...effect, id: effect.id ?? crypto.randomUUID() };
+
     return {
       id: `effect_add_${Date.now()}`,
       type: 'effect.add',
@@ -450,8 +453,11 @@ export class CommandFactory {
     getClip: () => ClipLike,
     setClip: (clip: ClipLike) => void
   ): Command {
-    const savedKf = { ...keyframe };
-    
+    // Guarantee an id: undo below identifies this exact keyframe by id, and
+    // an id-less keyframe would make undo strip every OTHER id-less keyframe
+    // on this property too (all of them match `id !== undefined`).
+    const savedKf = { ...keyframe, id: (keyframe.id as string | undefined) ?? crypto.randomUUID() };
+
     return {
       id: `keyframe_add_${Date.now()}`,
       type: 'keyframe.add',

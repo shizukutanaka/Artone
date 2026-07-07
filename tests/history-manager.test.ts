@@ -426,6 +426,55 @@ describe('CommandFactory.clipDelete', () => {
 });
 
 // ============================================================
+// CommandFactory.effectAdd / keyframeAdd — id collision on undo
+// ============================================================
+
+describe('CommandFactory.effectAdd', () => {
+  it('REGRESSION: undo removes only the added effect, not every other id-less effect', () => {
+    // Before fix: an id-less effect made undo's `e.id !== savedEffect.id`
+    // filter match `undefined !== undefined` (false) for EVERY id-less
+    // effect on the clip, deleting all of them instead of just the one added.
+    const { get, set } = clipCell({ id: 'c1', effects: [{ type: 'blur' }] }); // pre-existing id-less effect
+    const cmd = CommandFactory.effectAdd('c1', { type: 'sharpen' }, get, set);
+
+    cmd.execute();
+    expect(get().effects).toHaveLength(2);
+
+    cmd.undo();
+    expect(get().effects).toHaveLength(1);
+    expect(get().effects![0].type).toBe('blur'); // the pre-existing effect survives
+  });
+
+  it('redo re-adds exactly the same effect', () => {
+    const { get, set } = clipCell({ id: 'c1', effects: [] });
+    const cmd = CommandFactory.effectAdd('c1', { type: 'vignette' }, get, set);
+    cmd.execute();
+    cmd.undo();
+    cmd.redo();
+    expect(get().effects).toHaveLength(1);
+    expect(get().effects![0].type).toBe('vignette');
+  });
+});
+
+describe('CommandFactory.keyframeAdd', () => {
+  it('REGRESSION: undo removes only the added keyframe, not every other id-less keyframe', () => {
+    const { get, set } = clipCell({
+      id: 'c1',
+      keyframes: { opacity: [{ frame: 0, value: 1 }] }, // pre-existing id-less keyframe
+    });
+    const cmd = CommandFactory.keyframeAdd('c1', 'opacity', { frame: 10, value: 0.5 }, get, set);
+
+    cmd.execute();
+    expect((get().keyframes as Record<string, unknown[]>).opacity).toHaveLength(2);
+
+    cmd.undo();
+    const remaining = (get().keyframes as Record<string, { frame: number }[]>).opacity;
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].frame).toBe(0); // the pre-existing keyframe survives
+  });
+});
+
+// ============================================================
 // CommandFactory — composite
 // ============================================================
 

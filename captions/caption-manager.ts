@@ -196,7 +196,7 @@ export const CAPTION_PRESETS: CaptionPreset[] = [
       backgroundOpacity: 0,
       outlineWidth: 3
     },
-    position: DEFAULT_POSITION
+    position: { ...DEFAULT_POSITION }
   },
   {
     id: 'youtube',

@@ -207,6 +207,44 @@ describe('CollaborationEngine — comments', () => {
     expect(engine.getComments()).toHaveLength(0);
   });
 
+  it('REGRESSION: resolveComment resolves a reply by its own id', async () => {
+    // Before fix: replyToComment only pushed into parent.replies and never
+    // registered the reply in the `comments` map, so resolveComment(replyId)
+    // silently no-op'd (Map lookup miss).
+    const engine = await connected();
+    const parent = engine.addComment('Parent');
+    const reply = engine.replyToComment(parent.id, 'Reply text')!;
+    engine.resolveComment(reply.id);
+    expect(engine.getComments()[0].replies[0].resolved).toBe(true);
+  });
+
+  it('REGRESSION: deleteComment removes a reply by its own id from parent.replies', async () => {
+    const engine = await connected();
+    const parent = engine.addComment('Parent');
+    const reply = engine.replyToComment(parent.id, 'Reply text')!;
+    engine.deleteComment(reply.id);
+    expect(engine.getComments()[0].replies).toHaveLength(0);
+  });
+
+  it('getComments does not surface replies as top-level threads', async () => {
+    const engine = await connected();
+    const parent = engine.addComment('Parent');
+    engine.replyToComment(parent.id, 'Reply text');
+    // Only the parent is top-level; the reply lives under parent.replies.
+    expect(engine.getComments()).toHaveLength(1);
+    expect(engine.getComments()[0].id).toBe(parent.id);
+  });
+
+  it('deleteComment on a top-level comment also drops its replies from lookup', async () => {
+    const engine = await connected();
+    const parent = engine.addComment('Parent');
+    const reply = engine.replyToComment(parent.id, 'Reply text')!;
+    engine.deleteComment(parent.id);
+    expect(engine.getComments()).toHaveLength(0);
+    // The reply's own map entry must be gone too — resolving it must no-op.
+    expect(() => engine.resolveComment(reply.id)).not.toThrow();
+  });
+
   it('REGRESSION: deleteComment does not throw when not connected', () => {
     // broadcastUpdate formerly called requireLocalUser() unconditionally,
     // causing an unexpected throw for callers that lacked a null guard.

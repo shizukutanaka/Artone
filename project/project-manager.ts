@@ -684,6 +684,11 @@ export class ProjectManager {
     if (!this.currentProject) return;
 
     this.currentProject.media = this.currentProject.media.filter(m => m.id !== mediaId);
+    // Drop clips referencing the removed media too, or they'd point at a
+    // MediaReference that no longer exists once the project is saved/reloaded.
+    this.currentProject.timeline.clips = this.currentProject.timeline.clips.filter(
+      c => c.mediaId !== mediaId
+    );
     this.isDirty = true;
     this.notify();
   }

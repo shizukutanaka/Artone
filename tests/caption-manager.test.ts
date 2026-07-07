@@ -213,6 +213,21 @@ describe('CAPTION_PRESETS', () => {
     // Restore for other tests
     defaultPreset.style.fontSize = before;
   });
+
+  it('REGRESSION: netflix preset position is a copy, not a shared reference to DEFAULT_POSITION', () => {
+    const netflixPreset = CAPTION_PRESETS.find(p => p.id === 'netflix')!;
+    const cm = makeManager();
+    const trackId = cm.createTrack('T').id;
+    const before = cm.addCaption(trackId, 0, 1, 'before')!.position.y;
+
+    netflixPreset.position.y = 999; // mutate the preset
+
+    const after = cm.addCaption(trackId, 1, 2, 'after')!.position.y;
+    expect(after).toBe(before); // unaffected by preset mutation
+
+    // Restore for other tests
+    netflixPreset.position.y = before;
+  });
 });
 
 // ============================================================

@@ -382,6 +382,34 @@ describe('Media operations', () => {
     pm.removeMedia('m1');
     expect(pm.getCurrentProject()!.media).toHaveLength(0);
   });
+
+  it('REGRESSION: removeMedia also drops clips referencing the removed media', () => {
+    pm.addMedia(media);
+    const clip: ClipData = {
+      id: 'c1', trackId: 'v1', mediaId: 'm1', startTime: 0, duration: 5,
+      mediaIn: 0, mediaOut: 5,
+      transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+      effects: []
+    };
+    pm.addClip(clip);
+    pm.removeMedia('m1');
+    expect(pm.getCurrentProject()!.media).toHaveLength(0);
+    expect(pm.getCurrentProject()!.timeline.clips).toHaveLength(0);
+  });
+
+  it('removeMedia leaves clips referencing other media untouched', () => {
+    pm.addMedia(media);
+    pm.addMedia({ ...media, id: 'm2' });
+    const keep: ClipData = {
+      id: 'c1', trackId: 'v1', mediaId: 'm2', startTime: 0, duration: 5,
+      mediaIn: 0, mediaOut: 5,
+      transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+      effects: []
+    };
+    pm.addClip(keep);
+    pm.removeMedia('m1');
+    expect(pm.getCurrentProject()!.timeline.clips.map(c => c.id)).toEqual(['c1']);
+  });
 });
 
 // ============================================================

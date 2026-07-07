@@ -467,6 +467,10 @@ describe('VideoPipeline — transcode processor wiring', () => {
 
   class FakeStreamDecoder {
     state = 'unconfigured';
+    // Read by awaitDecodeQueueBelow before every decode() call; 0 keeps it
+    // under the default threshold so these simple synchronous fakes never
+    // need to exercise the addEventListener('dequeue', ...) wait path.
+    decodeQueueSize = 0;
     private init: FakeInit;
     constructor(init: FakeInit) { this.init = init; }
     configure(): void { this.state = 'configured'; }
@@ -532,6 +536,45 @@ describe('VideoPipeline — transcode processor wiring', () => {
     await p.transcode(chunks(), (x) => progress.push(x));
     expect(progress.at(-1)).toBeCloseTo(1);
     expect(progress).toHaveLength(3);
+  });
+
+  it('REGRESSION: does not deadlock when a decoder buffers multiple inputs before any output (B-frame reordering)', async () => {
+    // Before fix: VideoDecoderStream.transform() returned a Promise that only
+    // resolved on the NEXT output frame, assuming exactly one output per
+    // input chunk. TransformStream calls transform() strictly sequentially,
+    // so a decoder that consumes 2+ chunks before emitting its first output
+    // (as any B-frame-reordering decoder can) deadlocked: transform(chunk 1)
+    // never resolved, so chunk 2/3 were never fed, so the buffered output
+    // that chunk 2/3 would have unblocked never arrived either.
+    class BufferingFakeDecoder {
+      state = 'unconfigured';
+      decodeQueueSize = 0;
+      private init: FakeInit;
+      private pending: Array<{ timestamp: number }> = [];
+      constructor(init: FakeInit) { this.init = init; }
+      configure(): void { this.state = 'configured'; }
+      decode(chunk: { timestamp: number }): void {
+        this.pending.push(chunk);
+        // Only emit once at least 2 chunks have been fed — models a decoder
+        // that needs a lookahead buffer before it can output anything.
+        if (this.pending.length >= 2) {
+          for (const c of this.pending.splice(0)) {
+            this.init.output({ timestamp: c.timestamp, duration: 1000, close: vi.fn() });
+          }
+        }
+      }
+      async flush(): Promise<void> {
+        for (const c of this.pending.splice(0)) {
+          this.init.output({ timestamp: c.timestamp, duration: 1000, close: vi.fn() });
+        }
+      }
+      close(): void { this.state = 'closed'; }
+    }
+    vi.stubGlobal('VideoDecoder', BufferingFakeDecoder);
+
+    const p = fullyConfigured();
+    const out = await p.transcode(chunks());
+    expect(out).toHaveLength(3);
   });
 });
 

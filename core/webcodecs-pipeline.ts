@@ -131,6 +131,30 @@ export async function getBestCodec(
 // Video Decoder Stream
 // ============================================================
 
+/**
+ * Wait until decoder.decodeQueueSize drops below maxQueue, or resolve
+ * immediately if already below it. Mirrors export/export-engine.ts's
+ * awaitEncoderQueueBelow (kept as a local, decoder-specific copy —
+ * core/ is the lower-level foundation export/ builds on, so it must not
+ * import from export/; VideoDecoder's queue-size property and 'dequeue'
+ * event are otherwise identical in shape to VideoEncoder's).
+ */
+async function awaitDecodeQueueBelow(
+  decoder: EventTarget & { decodeQueueSize: number },
+  maxQueue = 8,
+  timeoutMs = 10_000,
+): Promise<void> {
+  if (decoder.decodeQueueSize < maxQueue) return;
+  await new Promise<void>((resolve, reject) => {
+    const onDequeue = () => { clearTimeout(timer); resolve(); };
+    const timer = setTimeout(() => {
+      decoder.removeEventListener('dequeue', onDequeue);
+      reject(new Error(`awaitDecodeQueueBelow: no dequeue within ${timeoutMs}ms — decoder may have stalled`));
+    }, timeoutMs);
+    decoder.addEventListener('dequeue', onDequeue, { once: true });
+  });
+}
+
 export class VideoDecoderStream extends TransformStream<EncodedVideoChunk, DecodedFrame> {
   private decoder: VideoDecoder | null = null;
 
@@ -138,44 +162,41 @@ export class VideoDecoderStream extends TransformStream<EncodedVideoChunk, Decod
     // Definite assignment: start() sets `decoder` synchronously inside super().
     let decoder!: VideoDecoder;
     let frameIndex = 0;
-    const pendingResolves: Array<(frame: DecodedFrame) => void> = [];
 
     super({
       start: (controller) => {
         decoder = new VideoDecoder({
           output: (frame) => {
-            const resolve = pendingResolves.shift();
-            if (resolve) {
-              resolve({
-                frame,
-                index: frameIndex++,
-                timestamp: frame.timestamp,
-                duration: frame.duration ?? 0,
-                keyFrame: false
-              });
-            } else {
-              controller.enqueue({
-                frame,
-                index: frameIndex++,
-                timestamp: frame.timestamp,
-                duration: frame.duration ?? 0,
-                keyFrame: false
-              });
-            }
+            controller.enqueue({
+              frame,
+              index: frameIndex++,
+              timestamp: frame.timestamp,
+              duration: frame.duration ?? 0,
+              keyFrame: false
+            });
           },
           error: (e) => controller.error(e)
         });
         decoder.configure(config);
       },
 
-      transform: async (chunk, controller) => {
-        return new Promise((resolve) => {
-          pendingResolves.push((decodedFrame) => {
-            controller.enqueue(decodedFrame);
-            resolve();
-          });
-          decoder.decode(chunk);
-        });
+      // REGRESSION fix: transform() used to return a Promise that only
+      // resolved when the NEXT output frame arrived, assuming exactly one
+      // output per input chunk. TransformStream calls transform()
+      // strictly sequentially — it will not feed chunk N+1 until chunk N's
+      // promise resolves — but a decoder with B-frame reordering can
+      // buffer several input chunks before emitting any output at all, so
+      // this deadlocked real H.264/H.265 content. decode() is fire-and-
+      // forget; the `output` callback above enqueues frames independently
+      // of transform()'s cadence, exactly like VideoEncoderStream's
+      // transform below and export/export-engine.ts's already-corrected
+      // batch decode/encode methods (which explicitly gate on flush()
+      // rather than an input:output count match "which would otherwise
+      // hang forever"). Backpressure is still enforced via decodeQueueSize
+      // so a fast source doesn't queue unbounded decode() calls.
+      transform: async (chunk) => {
+        await awaitDecodeQueueBelow(decoder);
+        decoder.decode(chunk);
       },
 
       flush: async () => {

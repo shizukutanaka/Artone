@@ -19,7 +19,7 @@ import {
   type VideoChunkRef,
   type AudioChunkRef,
 } from './webm-muxer';
-import { muxMP4 } from './mp4-muxer';
+import { muxMP4, buildAacAudioSpecificConfig } from './mp4-muxer';
 
 // ============================================================
 // Types
@@ -604,10 +604,18 @@ export class ExportEngine {
         height: config.height,
       };
       const hasAudio = audioChunks && audioChunks.length > 0;
+      // REGRESSION fix: WebM's A_AAC track requires CodecPrivate (the AAC
+      // AudioSpecificConfig) per the Matroska codec spec, since WebCodecs'
+      // AAC output is raw (no ADTS header) and a decoder has no other way
+      // to learn the sample rate/channel config. Without it, every WebM
+      // export with audio produced an undecodable/silent audio track while
+      // reporting success. Reuses the same ASC builder mp4-muxer.ts already
+      // uses for MP4's esds box.
       const audioTrack = hasAudio ? {
         codecId: toWebMAudioCodecId('mp4a.40.2'),
         sampleRate: this.lastAudioSampleRate,
         channels: this.lastAudioChannels,
+        codecPrivate: buildAacAudioSpecificConfig(this.lastAudioSampleRate, this.lastAudioChannels),
       } : undefined;
       const webmBytes = muxWebM(
         videoTrack,

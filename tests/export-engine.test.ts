@@ -533,6 +533,82 @@ describe('REGRESSION: mux() declares the real audio sample rate/channels, not a 
 });
 
 // ============================================================
+// REGRESSION: WebM audio track CodecPrivate (AAC AudioSpecificConfig)
+// ============================================================
+
+describe('REGRESSION: mux() populates WebM audioTrack.codecPrivate for A_AAC', () => {
+  const videoChunks: VideoChunkRef[] = [
+    { data: new Uint8Array(8).fill(1), timestampUs: 0, durationUs: 33333, isKeyframe: true },
+  ];
+  const audioChunks: AudioChunkRef[] = [
+    { data: new Uint8Array(4).fill(2), timestampUs: 0 },
+  ];
+
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('WebM audio track carries the AAC-LC AudioSpecificConfig, not undefined', async () => {
+    // Before fix: audioTrack never set codecPrivate at all. Per the Matroska
+    // codec spec, an A_AAC track requires it (WebCodecs' AAC output is raw,
+    // no ADTS header) -- without it, real demuxers/players can't determine
+    // sample rate/channel config and the exported WebM's audio is
+    // undecodable/silent, even though export() reports success.
+    const engine = new ExportEngine();
+    const priv = engine as unknown as ExportEnginePrivate;
+    priv.lastAudioSampleRate = 48000;
+    priv.lastAudioChannels = 2;
+
+    const config: ExportConfig = {
+      format: 'webm', codec: 'vp09.00.10.08', width: 320, height: 240, fps: 30,
+      bitrate: 1_000_000, audioBitrate: 128_000, quality: 'high', hardwareAcceleration: false,
+    };
+    await priv.mux(videoChunks, audioChunks, config, 1);
+
+    // Known reference AudioSpecificConfig bytes for AAC-LC, 48kHz stereo
+    // (objectType=2, samplingFreqIndex=3, channelConfig=2, all flag bits 0).
+    expect(muxWebM).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      expect.objectContaining({ codecPrivate: new Uint8Array([0x11, 0x90]) }),
+      expect.anything(),
+    );
+  });
+
+  it('AudioSpecificConfig reflects the actual sample rate/channels (44.1kHz mono)', async () => {
+    const engine = new ExportEngine();
+    const priv = engine as unknown as ExportEnginePrivate;
+    priv.lastAudioSampleRate = 44100;
+    priv.lastAudioChannels = 1;
+
+    const config: ExportConfig = {
+      format: 'webm', codec: 'vp09.00.10.08', width: 320, height: 240, fps: 30,
+      bitrate: 1_000_000, audioBitrate: 128_000, quality: 'high', hardwareAcceleration: false,
+    };
+    await priv.mux(videoChunks, audioChunks, config, 1);
+
+    // Known reference AudioSpecificConfig bytes for AAC-LC, 44.1kHz mono
+    // (objectType=2, samplingFreqIndex=4, channelConfig=1).
+    expect(muxWebM).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      expect.objectContaining({ codecPrivate: new Uint8Array([0x12, 0x08]) }),
+      expect.anything(),
+    );
+  });
+
+  it('does not set audioTrack when there are no audio chunks', async () => {
+    const engine = new ExportEngine();
+    const priv = engine as unknown as ExportEnginePrivate;
+    const config: ExportConfig = {
+      format: 'webm', codec: 'vp09.00.10.08', width: 320, height: 240, fps: 30,
+      bitrate: 1_000_000, audioBitrate: 128_000, quality: 'high', hardwareAcceleration: false,
+    };
+    await priv.mux(videoChunks, null, config, 1);
+
+    expect(muxWebM).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), undefined, undefined,
+    );
+  });
+});
+
+// ============================================================
 // WebCodecs back-pressure helper (per Chrome best practices / Qiita findings)
 // ============================================================
 

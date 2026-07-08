@@ -306,15 +306,25 @@ function buildAvc1(width: number, height: number, sps: Uint8Array, pps: Uint8Arr
   ]);
 }
 
-/** Build 'mp4a' audio sample entry with esds (MPEG-4 Elementary Stream Descriptor). */
-function buildMp4a(sampleRate: number, channels: number): Uint8Array {
-  // Minimal esds box for AAC-LC (AudioSpecificConfig: 0x11 0x90 for 44.1kHz stereo or similar)
-  // ObjectType=2 (AAC-LC), SamplingFrequency index, ChannelConfig
-  // AudioSpecificConfig: objectType(5bits) + samplingFreqIndex(4bits) + channelConf(4bits)
+/**
+ * Build a 2-byte AAC-LC AudioSpecificConfig (ISO/IEC 14496-3): objectType(5
+ * bits, 2=AAC-LC) + samplingFreqIndex(4 bits) + channelConfig(4 bits) +
+ * frameLengthFlag/dependsOnCoreCoder/extensionFlag(1 bit each, all 0).
+ * Reused as-is for both the MP4 esds box below and WebM's CodecPrivate
+ * element (export-engine.ts) — Matroska embeds AAC using this same
+ * MPEG-4 AudioSpecificConfig per the Matroska codec spec.
+ */
+export function buildAacAudioSpecificConfig(sampleRate: number, channels: number): Uint8Array {
   const freqIndex = FREQ_INDEX[sampleRate] ?? 15;  // 15 = explicit frequency
   const asc = new Uint8Array(2);
   asc[0] = (2 << 3) | (freqIndex >> 1);       // AAC-LC (objectType=2)
   asc[1] = ((freqIndex & 1) << 7) | (channels << 3);
+  return asc;
+}
+
+/** Build 'mp4a' audio sample entry with esds (MPEG-4 Elementary Stream Descriptor). */
+function buildMp4a(sampleRate: number, channels: number): Uint8Array {
+  const asc = buildAacAudioSpecificConfig(sampleRate, channels);
 
   // MPEG-4 Elementary Stream Descriptor (simplified ISO 14496-1)
   const esds = buildEsds(asc);

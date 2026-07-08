@@ -343,10 +343,16 @@ export class OTIOExporter {
       // OTIO convention: time_scalar > 1 means source plays slower (fewer output frames per input)
       // Artone convention: speedFactor > 1 means playback is faster (more frames per second)
       // They are reciprocal: time_scalar = 1 / speedFactor
+      // REGRESSION guard: speed === 0 (freeze frame) has no finite reciprocal.
+      // 1/0 = Infinity, and JSON.stringify silently turns Infinity into null,
+      // producing an invalid "time_scalar": null in the exported file. Write
+      // 0 instead (a valid finite JSON number) -- the exact original speed is
+      // still recoverable losslessly via metadata.artone.speedFactor below,
+      // which the importer reads in preference to time_scalar.
       const ltw: OTIOLinearTimeWarp = {
         OTIO_SCHEMA: 'LinearTimeWarp.1',
         effect_name: 'LinearTimeWarp',
-        time_scalar: 1 / speed,
+        time_scalar: speed !== 0 ? 1 / speed : 0,
         metadata: { artone: { speedFactor: speed } },
       };
       effects.push(ltw);
@@ -405,6 +411,19 @@ export class OTIOImporter {
    * fail with a clear message at the entry point rather than a cryptic
    * "Cannot read properties of undefined" deep in the conversion.
    */
+  /**
+   * Recovers Artone's speedFactor from an imported LinearTimeWarp.1 effect.
+   * Prefers the exact value round-tripped in metadata.artone.speedFactor
+   * (written by OTIOExporter.toOTIOClip) over 1/time_scalar, since speed=0
+   * (freeze frame) has no finite reciprocal and time_scalar alone cannot
+   * represent it losslessly.
+   */
+  private speedFactorFromLinearTimeWarp(ltw: OTIOLinearTimeWarp): number {
+    const fromMeta = (ltw.metadata?.artone as { speedFactor?: unknown } | undefined)?.speedFactor;
+    if (typeof fromMeta === 'number' && Number.isFinite(fromMeta)) return fromMeta;
+    return ltw.time_scalar !== 0 ? 1 / ltw.time_scalar : 1;
+  }
+
   private requireStack(tl: OTIOTimeline): OTIOStack {
     const stack = tl?.tracks;
     if (!stack || stack.OTIO_SCHEMA !== 'Stack.1' || !Array.isArray(stack.children)) {
@@ -567,6 +586,19 @@ export class OTIOImporter {
         otioType: 'MissingReference.1',
         detail: 'Media file could not be resolved; clip will have empty mediaUrl.',
       });
+    } else if (ref?.OTIO_SCHEMA === 'GeneratorReference.1') {
+      // REGRESSION fix: this fell through the same `url = ''` default as
+      // MissingReference.1 above (Artone has no generated-media concept —
+      // color bars/slugs/solids), but unlike that case produced no loss
+      // entry, silently swallowing the same practical outcome (empty
+      // mediaUrl) that the sibling branch explicitly reports.
+      losses.push({
+        trackName,
+        clipName: clip.name,
+        field: 'media_reference',
+        otioType: 'GeneratorReference.1',
+        detail: 'Generated media (color bars/slug/solid) is not supported; clip will have empty mediaUrl.',
+      });
     }
 
     let speedFactor: number | undefined;
@@ -575,8 +607,7 @@ export class OTIOImporter {
     for (const eff of clip.effects ?? []) {
       if (eff.OTIO_SCHEMA === 'LinearTimeWarp.1') {
         const ltw = eff as OTIOLinearTimeWarp;
-        // Artone speedFactor is reciprocal of OTIO time_scalar
-        speedFactor = ltw.time_scalar !== 0 ? 1 / ltw.time_scalar : 1;
+        speedFactor = this.speedFactorFromLinearTimeWarp(ltw);
       } else {
         const artoneEff = this.fromOTIOEffect(eff as OTIOEffect);
         artoneEffects.push(artoneEff);
@@ -665,7 +696,7 @@ export class OTIOImporter {
     for (const eff of clip.effects ?? []) {
       if (eff.OTIO_SCHEMA === 'LinearTimeWarp.1') {
         const ltw = eff as OTIOLinearTimeWarp;
-        speedFactor = ltw.time_scalar !== 0 ? 1 / ltw.time_scalar : 1;
+        speedFactor = this.speedFactorFromLinearTimeWarp(ltw);
       } else {
         effects.push(this.fromOTIOEffect(eff as OTIOEffect));
       }

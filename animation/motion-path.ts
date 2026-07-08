@@ -296,13 +296,23 @@ export function makeClosedPath(anchors: readonly Vec2[]): MotionPath {
   const n = anchors.length;
   if (n < 3) throw new RangeError('Closed path requires at least 3 anchors');
 
+  // REGRESSION fix: handles used to sit at 1/3 and 2/3 along the chord
+  // p0->p3 itself, which makes every segment degenerate to a straight
+  // line (no curvature) with a hard corner (tangent discontinuity) at
+  // every anchor — the opposite of the "smooth C1 curve" this function
+  // documents. Catmull-Rom-to-Bezier conversion derives each handle from
+  // the NEIGHBORING anchors instead, which does produce matching tangent
+  // direction and magnitude on both sides of every anchor (verified: the
+  // outgoing tangent at A_k, (A_{k+1}-A_{k-1})/6, equals the incoming
+  // tangent arriving at A_k from the previous segment).
   const segments: BezierSegment[] = [];
   for (let i = 0; i < n; i++) {
+    const prev = anchors[(i - 1 + n) % n];
     const p0 = anchors[i];
     const p3 = anchors[(i + 1) % n];
-    const chord = vecSub(p3, p0);
-    const p1 = vecAdd(p0, vecScale(chord, 1 / 3));
-    const p2 = vecAdd(p0, vecScale(chord, 2 / 3));
+    const next = anchors[(i + 2) % n];
+    const p1 = vecAdd(p0, vecScale(vecSub(p3, prev), 1 / 6));
+    const p2 = vecSub(p3, vecScale(vecSub(next, p0), 1 / 6));
     segments.push({ p0, p1, p2, p3 });
   }
   return { segments };

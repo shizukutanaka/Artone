@@ -272,6 +272,37 @@ describe('makeClosedPath', () => {
     expect(lastSeg.p3.x).toBeCloseTo(anchors[0].x, 10);
     expect(lastSeg.p3.y).toBeCloseTo(anchors[0].y, 10);
   });
+
+  it('REGRESSION: tangent direction is continuous (C1) across every anchor junction', () => {
+    // Before fix: both handles of each segment sat on the straight chord
+    // p0->p3, so the outgoing tangent at an anchor (end of one segment)
+    // and the incoming tangent at the same anchor (start of the next
+    // segment) pointed along two different chords — a hard corner at
+    // every anchor instead of the smooth loop the function documents.
+    const anchors = [p(0, 0), p(4, 0), p(4, 4), p(0, 4), p(-2, 2)];
+    const path = makeClosedPath(anchors);
+    const n = path.segments.length;
+    for (let i = 0; i < n; i++) {
+      const outgoing = vecNormalize(bezierDerivative(path.segments[i], 1));
+      const incoming = vecNormalize(bezierDerivative(path.segments[(i + 1) % n], 0));
+      expect(outgoing.x).toBeCloseTo(incoming.x, 8);
+      expect(outgoing.y).toBeCloseTo(incoming.y, 8);
+    }
+  });
+
+  it('REGRESSION: curve bows away from the straight chord (not degenerate to a polygon)', () => {
+    // Before fix: p1/p2 both lay on the p0->p3 chord, so bezierPoint at
+    // t=0.5 landed exactly on the midpoint of the chord — a straight
+    // edge, not a curve. The Catmull-Rom-derived handles pull the curve
+    // toward the neighboring anchors, so the midpoint should be off the
+    // chord whenever the neighbors make the path bend.
+    const anchors = [p(0, 0), p(4, 0), p(4, 4), p(0, 4)];
+    const path = makeClosedPath(anchors);
+    const seg = path.segments[0]; // p0=(0,0) -> p3=(4,0), bends toward (4,4) and (0,4)
+    const mid = bezierPoint(seg, 0.5);
+    const chordMidY = (seg.p0.y + seg.p3.y) / 2;
+    expect(Math.abs(mid.y - chordMidY)).toBeGreaterThan(0.01);
+  });
 });
 
 // ─── makeMotionPath ───────────────────────────────────────────────────────────

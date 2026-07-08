@@ -182,6 +182,26 @@ describe('CaptionManager — caption operations', () => {
     expect(cm.getCaptionsAtTime(trackId, 5)).toHaveLength(0); // 5 is end → excluded
     expect(cm.getCaptionsAtTime(trackId, 4.999)).toHaveLength(1);
   });
+
+  it('REGRESSION: updateCaption lengthening endTime keeps the caption reachable by getCaptionsAtTime', () => {
+    // Before fix: the lookback-window cache (_trackMaxDuration) was only ever
+    // updated in addCaption(). A caption whose endTime was later extended via
+    // updateCaption() (e.g. a user dragging its trim handle in the UI) grew
+    // past the cached max duration without updating it, so getCaptionsAtTime's
+    // binary-search-plus-bounded-lookback silently stopped finding it once the
+    // query time was far enough past the caption's start.
+    const a = cm.addCaption(trackId, 0, 5, 'A')!; // duration 5, cache max = 5
+    cm.updateCaption(trackId, a.id, { endTime: 90 }); // now spans 0-90
+    const at = cm.getCaptionsAtTime(trackId, 70);
+    expect(at.map(c => c.text)).toEqual(['A']);
+  });
+
+  it('REGRESSION: updateCaption moving startTime much earlier keeps the caption reachable', () => {
+    const a = cm.addCaption(trackId, 500, 505, 'A')!; // duration 5, cache max = 5
+    cm.updateCaption(trackId, a.id, { startTime: 0 }); // now spans 0-505
+    const at = cm.getCaptionsAtTime(trackId, 490);
+    expect(at.map(c => c.text)).toEqual(['A']);
+  });
 });
 
 // ============================================================

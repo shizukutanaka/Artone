@@ -372,6 +372,15 @@ export class CaptionManager {
       if (caption.startTime !== prevStart) {
         track.captions.sort((a, b) => a.startTime - b.startTime);
       }
+      // REGRESSION fix: _trackMaxDuration is the lookback window used by
+      // getCaptionsAtTime's binary search — it was only ever updated in
+      // addCaption(), so lengthening a caption's span here (moving endTime
+      // later or startTime earlier) left the window stale. A caption
+      // extended well past the cached max duration would fall outside the
+      // backward scan and silently stop being returned as "active".
+      const dur = caption.endTime - caption.startTime;
+      const prevMax = this._trackMaxDuration.get(trackId) ?? 0;
+      if (dur > prevMax) this._trackMaxDuration.set(trackId, dur);
       this.notify();
     }
   }

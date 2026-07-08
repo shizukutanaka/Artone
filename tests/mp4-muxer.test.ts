@@ -233,18 +233,59 @@ describe('muxMP4 — audio', () => {
   it('adding audio track increases file size', () => {
     const video: VideoChunkRef[] = [fakeVideoChunk(0, true, new Uint8Array(32).fill(1))];
     const noAudio = muxMP4(VP9_TRACK, video);
-    const audio: AudioChunkRef[] = [{ data: new Uint8Array(64).fill(0xAA), timestampUs: 0 }];
+    const audio: AudioChunkRef[] = [{ data: new Uint8Array(64).fill(0xAA), timestampUs: 0, durationUs: 21333 }];
     const withAudio = muxMP4(VP9_TRACK, video, { sampleRate: 48000, channels: 2 }, audio);
     expect(withAudio.length).toBeGreaterThan(noAudio.length);
   });
 
   it('audio track has "soun" handler', () => {
     const video: VideoChunkRef[] = [fakeVideoChunk(0, true, new Uint8Array(32).fill(1))];
-    const audio: AudioChunkRef[] = [{ data: new Uint8Array(64).fill(0xAA), timestampUs: 0 }];
+    const audio: AudioChunkRef[] = [{ data: new Uint8Array(64).fill(0xAA), timestampUs: 0, durationUs: 21333 }];
     const bytes = muxMP4(VP9_TRACK, video, { sampleRate: 48000, channels: 2 }, audio);
     // 'soun' = 0x73 0x6F 0x75 0x6E
     const idx = findBytes(bytes, [0x73, 0x6F, 0x75, 0x6E]);
     expect(idx).toBeGreaterThan(-1);
+  });
+
+  it('REGRESSION: audio stts reflects the actual short final chunk, not an overstated constant-1024 assumption', () => {
+    // Before fix: buildAudioStbl hardcoded a single stts entry of
+    // {count: sampleCount, delta: 1024} regardless of the real per-chunk
+    // sample count -- so a final chunk shorter than 1024 samples (true
+    // whenever the source buffer length isn't an exact multiple of 1024,
+    // i.e. virtually any real-world audio) made the declared track duration
+    // longer than the actual encoded audio.
+    const video: VideoChunkRef[] = [fakeVideoChunk(0, true, new Uint8Array(32).fill(1))];
+    const fullDurationUs = Math.round((1024 / 48000) * 1_000_000); // a full 1024-sample AAC frame
+    const shortDurationUs = Math.round((500 / 48000) * 1_000_000); // a short final 500-sample frame
+    const audio: AudioChunkRef[] = [
+      { data: new Uint8Array(64).fill(0xAA), timestampUs: 0, durationUs: fullDurationUs },
+      { data: new Uint8Array(64).fill(0xAA), timestampUs: fullDurationUs, durationUs: fullDurationUs },
+      { data: new Uint8Array(32).fill(0xAA), timestampUs: fullDurationUs * 2, durationUs: shortDurationUs },
+    ];
+    const bytes = muxMP4(VP9_TRACK, video, { sampleRate: 48000, channels: 2 }, audio);
+
+    // Locate every 'stts' box; the audio track's trak (and its stts) comes
+    // after the video track's in trak order, so the second occurrence is
+    // the audio track's.
+    const sttsFourCC = [0x73, 0x74, 0x74, 0x73];
+    const offsets: number[] = [];
+    for (let i = 0; i <= bytes.length - 4; i++) {
+      if (sttsFourCC.every((b, j) => bytes[i + j] === b)) offsets.push(i);
+    }
+    expect(offsets).toHaveLength(2);
+    // offsets[] point at the 'stts' fourCC bytes themselves (box() writes
+    // [4-byte size][4-byte fourCC]...), so the fourCC is already 4 bytes
+    // into the box: fourCC(+0) -> hdr/version+flags(+4) -> body(+8).
+    const audioSttsFourCC = offsets[1];
+
+    // fullbox body layout after the fourCC: [4 hdr][4 entry_count]
+    // then entry_count * (4 sample_count + 4 sample_delta).
+    const entryCount = readU32BE(bytes, audioSttsFourCC + 8);
+    expect(entryCount).toBe(2); // before fix this was always 1 (a single flat assumption)
+    expect(readU32BE(bytes, audioSttsFourCC + 12)).toBe(2);    // first entry: 2 full frames
+    expect(readU32BE(bytes, audioSttsFourCC + 16)).toBe(1024); // ...at 1024 samples each
+    expect(readU32BE(bytes, audioSttsFourCC + 20)).toBe(1);    // second entry: 1 short frame
+    expect(readU32BE(bytes, audioSttsFourCC + 24)).toBe(500);  // ...at its real 500-sample length
   });
 });
 

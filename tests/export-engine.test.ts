@@ -471,7 +471,7 @@ describe('REGRESSION: mux() declares the real audio sample rate/channels, not a 
     { data: new Uint8Array(8).fill(1), timestampUs: 0, durationUs: 33333, isKeyframe: true },
   ];
   const audioChunks: AudioChunkRef[] = [
-    { data: new Uint8Array(4).fill(2), timestampUs: 0 },
+    { data: new Uint8Array(4).fill(2), timestampUs: 0, durationUs: 21333 },
   ];
 
   beforeEach(() => { vi.clearAllMocks(); });
@@ -541,7 +541,7 @@ describe('REGRESSION: mux() populates WebM audioTrack.codecPrivate for A_AAC', (
     { data: new Uint8Array(8).fill(1), timestampUs: 0, durationUs: 33333, isKeyframe: true },
   ];
   const audioChunks: AudioChunkRef[] = [
-    { data: new Uint8Array(4).fill(2), timestampUs: 0 },
+    { data: new Uint8Array(4).fill(2), timestampUs: 0, durationUs: 21333 },
   ];
 
   beforeEach(() => { vi.clearAllMocks(); });

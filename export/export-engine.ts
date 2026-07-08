@@ -521,11 +521,25 @@ export class ExportEngine {
     }
 
     return new Promise((resolve, reject) => {
+      // REGRESSION fix: the muxers used to assume every encoded chunk spans
+      // exactly `frameSize` samples (see the now-removed hardcoded stts
+      // delta in mp4-muxer.ts), but the LAST chunk is shorter whenever
+      // buffer.length isn't an exact multiple of frameSize (true for
+      // virtually any real-world audio buffer) — overstating the muxed
+      // audio track's declared duration. Track each chunk's actual sample
+      // count (FIFO — a single AudioEncoder's output order matches its
+      // input order) so durationUs reflects the real encoded span, falling
+      // back to it only when the browser doesn't populate chunk.duration
+      // itself (matches the same chunk.duration ?? fallback pattern the
+      // video path already uses).
+      const pendingFrameLengths: number[] = [];
       this.audioEncoder = new AudioEncoder({
         output: (chunk) => {
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
-          chunks.push({ data, timestampUs: chunk.timestamp });
+          const length = pendingFrameLengths.shift() ?? frameSize;
+          const durationUs = chunk.duration ?? Math.round((length / sampleRate) * 1_000_000);
+          chunks.push({ data, timestampUs: chunk.timestamp, durationUs });
         },
         error: reject
       });
@@ -551,6 +565,7 @@ export class ExportEngine {
           await awaitEncoderQueueBelow(this.audioEncoder!);
           const offset = f * frameSize;
           const length = Math.min(frameSize, buffer.length - offset);
+          pendingFrameLengths.push(length);
 
           // REGRESSION fix: f32-planar requires all ch-0 samples first, then ch-1.
           // The previous write `data[i * channels + ch]` produced interleaved layout

@@ -41,7 +41,7 @@ function fakeVideoChunk(
 function fakeAudioChunk(timestampUs: number, size = 32): AudioChunkRef {
   const data = new Uint8Array(size);
   data.fill(0xAA);
-  return { data, timestampUs };
+  return { data, timestampUs, durationUs: 21333 };
 }
 
 const VP9_TRACK: WebMVideoTrack = { codecId: 'V_VP9', width: 320, height: 240 };

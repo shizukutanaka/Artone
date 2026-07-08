@@ -392,6 +392,30 @@ function buildStts(sampleCount: number, sampleDelta: number): Uint8Array {
   return fullBox('stts', 0, 0, concat([u32(1), u32(sampleCount), u32(sampleDelta)]));
 }
 
+/**
+ * Build stts from a per-sample list of deltas (audio-timescale ticks), run-
+ * length-encoding consecutive equal deltas into single entries. Unlike
+ * buildStts's fixed single-entry form, this correctly represents the final
+ * chunk of a track whose sample count isn't an exact multiple of the frame
+ * size (true for virtually any real-world audio buffer) instead of
+ * overstating the track's total duration.
+ */
+function buildSttsVariable(sampleDeltas: number[]): Uint8Array {
+  const entries: Array<{ count: number; delta: number }> = [];
+  for (const delta of sampleDeltas) {
+    const last = entries[entries.length - 1];
+    if (last && last.delta === delta) {
+      last.count++;
+    } else {
+      entries.push({ count: 1, delta });
+    }
+  }
+  return fullBox('stts', 0, 0, concat([
+    u32(entries.length),
+    concat(entries.map((e) => concat([u32(e.count), u32(e.delta)]))),
+  ]));
+}
+
 /** Build stss (sync sample table) — indices of keyframe samples (1-based). */
 function buildStss(keyframeIndices: number[]): Uint8Array {
   const entries = concat(keyframeIndices.map(i => u32(i)));
@@ -447,12 +471,13 @@ function buildVideoStbl(
 function buildAudioStbl(
   sampleCount: number,
   sampleSizes: number[],
+  sampleDeltas: number[],
   sampleEntry: Uint8Array,
   chunkOffset: number,
 ): Uint8Array {
   return box('stbl', concat([
     buildStsd(false, sampleEntry, 'mp4a'),
-    buildStts(sampleCount, 1024),   // AAC: 1024 samples per frame (constant)
+    buildSttsVariable(sampleDeltas),
     buildStsc(sampleCount),
     buildStsz(sampleSizes),
     buildStco(chunkOffset),
@@ -491,10 +516,11 @@ function buildAudioTrak(
   movieTimescale: number,
   audioTrack: MP4AudioTrack,
   sampleSizes: number[],
+  sampleDeltas: number[],
   chunkOffset: number,
 ): Uint8Array {
   const sampleEntry = buildMp4a(audioTrack.sampleRate, audioTrack.channels);
-  const stbl = buildAudioStbl(sampleSizes.length, sampleSizes, sampleEntry, chunkOffset);
+  const stbl = buildAudioStbl(sampleSizes.length, sampleSizes, sampleDeltas, sampleEntry, chunkOffset);
   const minf = box('minf', concat([buildSmhd(), buildDinf(), stbl]));
   const mdia = box('mdia', concat([
     buildMdhd(audioTrack.sampleRate, durationMs),
@@ -572,6 +598,13 @@ export function muxMP4(
 
   const audioFrames = hasAudio ? audioChunks!.map(c => c.data) : [];
   const audioSizes = audioFrames.map(f => f.length);
+  // Per-chunk delta in audio-timescale (sample rate) ticks, derived from each
+  // chunk's actual encoded duration — not assumed to be a constant 1024
+  // samples, which overstated the track's total duration whenever the
+  // sample count wasn't an exact multiple of the encoder's frame size.
+  const audioSampleDeltas = hasAudio
+    ? audioChunks!.map(c => Math.round((c.durationUs * audioTrack!.sampleRate) / 1_000_000))
+    : [];
 
   const ftyp = buildFtyp();
 
@@ -586,7 +619,7 @@ export function muxMP4(
       videoTrak,
     ];
     if (hasAudio) {
-      parts.push(buildAudioTrak(durationMs, movieTimescale, audioTrack!, audioSizes, audioChunkOffset));
+      parts.push(buildAudioTrak(durationMs, movieTimescale, audioTrack!, audioSizes, audioSampleDeltas, audioChunkOffset));
     }
     return box('moov', concat(parts));
   }

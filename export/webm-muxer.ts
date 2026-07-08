@@ -28,6 +28,7 @@ export interface VideoChunkRef {
 export interface AudioChunkRef {
   data: Uint8Array;
   timestampUs: number;   // presentation timestamp, microseconds
+  durationUs: number;    // frame duration, microseconds
 }
 
 /** Video track parameters for the WebM Tracks block. */

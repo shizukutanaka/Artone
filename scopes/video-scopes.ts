@@ -226,7 +226,16 @@ export class WaveformScope {
       const thirdWidth = Math.floor(width / 3);
       for (let x = 0; x < width; x++) {
         const base = x * 256;
-        const paradeX = Math.floor(x / 3);
+        // REGRESSION fix: dividing by the constant 3 only compresses x
+        // correctly when width is an exact multiple of 3. For e.g. width=400
+        // (thirdWidth=133), floor(399/3)=133 -- one past the lane's own
+        // last column (thirdWidth-1=132) -- so the R lane's rightmost column
+        // coincided with the G lane's leftmost column (and G/B likewise),
+        // blending the wrong channel's data into what should be a pure
+        // single-channel readout at each lane boundary. Scaling by the
+        // actual thirdWidth/width ratio (clamped) keeps every lane strictly
+        // within its own [0, thirdWidth) range.
+        const paradeX = Math.min(thirdWidth - 1, Math.floor((x * thirdWidth) / width));
         for (let brt = 0; brt < 256; brt++) {
           const y = height - Math.ceil((brt / 255) * height);
           const cr = waveR[base + brt];

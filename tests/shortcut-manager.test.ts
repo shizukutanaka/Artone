@@ -188,6 +188,38 @@ describe('ShortcutManager — context and callback', () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
+  it('REGRESSION: ignores keydown from a focused button (e.g. Space to activate a toggle)', () => {
+    // Before fix: only <input>/<textarea> were excluded, so pressing Space
+    // on a focused <button> (Inspector.tsx's Solo/Mute/Enabled toggles) fired
+    // the global "play" shortcut instead of letting the button handle Space
+    // natively -- hijacking ordinary keyboard interaction with the control.
+    const cb = vi.fn();
+    sm.registerCallback('play', cb);
+
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    button.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    document.body.removeChild(button);
+
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: ignores keydown from a focused select (e.g. arrow keys to change FPS)', () => {
+    // Before fix: arrow-key navigation on a <select> (the FPS dropdown)
+    // collided with the global frameForward/frameBack (ArrowLeft/ArrowRight)
+    // shortcuts.
+    const cb = vi.fn();
+    sm.registerCallback('frameForward', cb);
+
+    const select = document.createElement('select');
+    document.body.appendChild(select);
+    select.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight', bubbles: true }));
+    document.body.removeChild(select);
+
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+
   it('unregisters callback correctly', () => {
     const cb = vi.fn();
     sm.registerCallback('play', cb);

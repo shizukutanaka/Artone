@@ -249,10 +249,21 @@ export class ShortcutManager {
 
   private handleKeyDown(event: KeyboardEvent): void {
     if (!this.enabled) return;
-    
-    // Ignore if in input field
-    if (event.target instanceof HTMLInputElement || 
-        event.target instanceof HTMLTextAreaElement) {
+
+    // REGRESSION fix: only <input>/<textarea> were excluded, so a focused
+    // <button> (e.g. Inspector.tsx's Solo/Mute/Enabled toggles) or <select>
+    // (the FPS dropdown) never got the native Space-to-click / arrow-key
+    // navigation the user expects -- the global shortcut underneath it
+    // (e.g. Space -> play, ArrowLeft/Right -> frame step) fired instead,
+    // via preventDefault() below, hijacking ordinary keyboard interaction
+    // with any focused interactive control.
+    const target = event.target;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLButtonElement ||
+      target instanceof HTMLSelectElement
+    ) {
       return;
     }
 

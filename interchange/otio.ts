@@ -198,7 +198,7 @@ export interface OTIOImportLoss {
   /** Clip name where the loss occurred (empty string for track-level). */
   clipName: string;
   /** Category of the lost element. */
-  field: 'effect' | 'retiming' | 'transition' | 'media_reference';
+  field: 'effect' | 'retiming' | 'transition' | 'media_reference' | 'marker';
   /** OTIO schema or effect_name value. */
   otioType: string;
   /** Human-readable explanation. */
@@ -521,6 +521,23 @@ export class OTIOImporter {
     let cursor = 0;
     let pendingTransition: ArtoneTransition | null = null;
     const trackName = track.name ?? 'Track';
+
+    // REGRESSION fix: track.markers (Track is itself a Composition/Item and
+    // can carry its own markers per the OTIO spec -- distinct from markers
+    // on the top-level Stack or on individual Clips) was never read here.
+    // ArtoneTrack has no field to hold them, so unlike Stack/Clip markers
+    // they cannot be represented after import -- report the loss instead of
+    // silently dropping them, matching the effect/transition/media_reference
+    // loss-report contract.
+    for (const marker of track.markers ?? []) {
+      losses.push({
+        trackName,
+        clipName: '',
+        field: 'marker',
+        otioType: marker.OTIO_SCHEMA,
+        detail: `Track-level marker "${marker.name ?? ''}" has no Artone equivalent (Artone only supports timeline- and clip-level markers) and was dropped.`,
+      });
+    }
 
     for (const child of track.children ?? []) {
       if (child.OTIO_SCHEMA === 'Clip.1' || child.OTIO_SCHEMA === 'Clip.2') {

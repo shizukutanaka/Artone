@@ -331,6 +331,34 @@ describe('OTIOImporter.importWithReport', () => {
     expect(losses.some(l => l.field === 'media_reference' && l.otioType === 'GeneratorReference.1')).toBe(true);
   });
 
+  it('REGRESSION: reports a loss for track-level markers instead of silently dropping them', () => {
+    // Before fix: fromOTIOTrackWithReport never read track.markers at all
+    // (only Stack-level and Clip-level markers were read) -- a third-party
+    // OTIO file (e.g. from DaVinci Resolve) placing a marker on the TRACK
+    // itself vanished completely, with no exception, warning, or loss entry.
+    const json = JSON.stringify({
+      OTIO_SCHEMA: 'Timeline.1',
+      name: 'T',
+      global_start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 0 },
+      tracks: {
+        OTIO_SCHEMA: 'Stack.1', effects: [], markers: [], children: [{
+          OTIO_SCHEMA: 'Track.1', kind: 'Video', effects: [], children: [],
+          markers: [{
+            OTIO_SCHEMA: 'Marker.2', name: 'Track Cue', color: 'RED',
+            marked_range: {
+              OTIO_SCHEMA: 'TimeRange.1',
+              start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 10 },
+              duration:   { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 1 },
+            },
+          }],
+        }],
+      },
+    });
+    const imp = new OTIOImporter();
+    const { losses } = imp.importWithReport(json);
+    expect(losses.some(l => l.field === 'marker')).toBe(true);
+  });
+
   it('reports foreign Effect loss for effects from other tools', () => {
     const json = JSON.stringify({
       OTIO_SCHEMA: 'Timeline.1', name: 'T',

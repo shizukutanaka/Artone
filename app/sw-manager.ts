@@ -38,6 +38,15 @@ export class ServiceWorkerManager {
   private setupListeners(): void {
     if (!this.registration) return;
 
+    const { signal } = this.abortCtrl;
+
+    // REGRESSION fix: this listener used to be registered with no `signal`,
+    // so destroy()'s abortCtrl.abort() couldn't remove it. Every
+    // register()/setupListeners() call on the underlying registration (a
+    // fresh ServiceWorkerManager instance, or a re-register after destroy())
+    // added another 'updatefound' listener that lived on for the
+    // registration's full lifetime -- unbounded accumulation across manager
+    // re-creation.
     this.registration.addEventListener('updatefound', () => {
       const worker = this.registration!.installing;
       if (!worker) return;
@@ -53,9 +62,7 @@ export class ServiceWorkerManager {
           this.notify('updated');
         }
       }, { once: true });
-    });
-
-    const { signal } = this.abortCtrl;
+    }, { signal });
 
     navigator.serviceWorker.addEventListener('message', (e) => {
       // ハンドラ拡張ポイント

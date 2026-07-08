@@ -16,6 +16,7 @@ import {
   deserializeBaseline,
   BaselineStore,
   bench,
+  checkBudgets,
   type BenchmarkSpec,
   type BenchmarkResult,
   type BenchmarkBaseline,
@@ -250,6 +251,90 @@ describe('RegressionDetector', () => {
     const current = [makeResult('a', 150)];
     const report = detector.detect(baseline, current);
     expect(report.regressions[0].deltaPercent).toBeCloseTo(50, 1);
+  });
+
+  it('REGRESSION: flags a p95 tail regression even when the mean looks stable', () => {
+    // bench/CLAUDE.md: "統計値は p50/p95/p99 含める。平均だけで判断しない".
+    // Before fix: detect() only ever compared meanMs, so a bench whose
+    // median/mean barely moved but whose tail latency blew up (e.g. GC
+    // pauses, a new slow path hit only occasionally) would silently pass.
+    const baseline = makeBaseline('1.0.0', [
+      makeResult('a', 100, { p95Ms: 105, p99Ms: 108 }),
+    ]);
+    const current = [
+      // mean only +2% (well under the 5% minor threshold)...
+      makeResult('a', 102, { p95Ms: 145, p99Ms: 150 }), // ...but p95 is +38%
+    ];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions).toHaveLength(1);
+    expect(report.regressions[0].severity).toBe('critical');
+    expect(report.regressions[0].p95DeltaPercent).toBeGreaterThan(30);
+  });
+
+  it('REGRESSION: an improved mean with a worse p95 is not misreported as an improvement', () => {
+    const baseline = makeBaseline('1.0.0', [
+      makeResult('a', 100, { p95Ms: 110 }),
+    ]);
+    const current = [
+      makeResult('a', 80, { p95Ms: 140 }), // mean -20% but p95 +27%
+    ];
+    const report = detector.detect(baseline, current);
+    expect(report.improvements).toHaveLength(0);
+    expect(report.regressions).toHaveLength(1);
+  });
+
+  it('Regression records baseline/current p95Ms alongside meanMs', () => {
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100, { p95Ms: 110 })]);
+    const current = [makeResult('a', 140, { p95Ms: 154 })];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions[0].baselineP95Ms).toBe(110);
+    expect(report.regressions[0].currentP95Ms).toBe(154);
+  });
+});
+
+// ── checkBudgets ──────────────────────────────────────────────────────────────
+
+describe('checkBudgets', () => {
+  it('REGRESSION: flags a bench whose mean exceeds its declared budget', () => {
+    // Before fix: BenchmarkSpec.budget was documented as "expected max time
+    // (ms) — warn on exceed" but no code anywhere read the field.
+    const specs: BenchmarkSpec[] = [
+      { name: 'render.fill', category: 'render', run: () => {}, budget: 16 },
+    ];
+    const results = [makeResult('render.fill', 25)];
+    const violations = checkBudgets(specs, results);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].name).toBe('render.fill');
+    expect(violations[0].budgetMs).toBe(16);
+    expect(violations[0].actualMeanMs).toBe(25);
+    expect(violations[0].exceedPercent).toBeCloseTo(56.25, 1);
+  });
+
+  it('does not flag a bench within its budget', () => {
+    const specs: BenchmarkSpec[] = [
+      { name: 'render.fill', category: 'render', run: () => {}, budget: 16 },
+    ];
+    const results = [makeResult('render.fill', 10)];
+    expect(checkBudgets(specs, results)).toHaveLength(0);
+  });
+
+  it('skips specs with no budget declared', () => {
+    const specs: BenchmarkSpec[] = [
+      { name: 'render.fill', category: 'render', run: () => {} },
+    ];
+    const results = [makeResult('render.fill', 999)];
+    expect(checkBudgets(specs, results)).toHaveLength(0);
+  });
+
+  it('skips specs with no matching result', () => {
+    const specs: BenchmarkSpec[] = [
+      { name: 'missing', category: 'render', run: () => {}, budget: 1 },
+    ];
+    expect(checkBudgets(specs, [])).toHaveLength(0);
+  });
+
+  it('bench.checkBudgets is exposed via the factory', () => {
+    expect(bench.checkBudgets).toBe(checkBudgets);
   });
 });
 

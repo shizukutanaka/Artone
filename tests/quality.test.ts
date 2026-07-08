@@ -97,6 +97,7 @@ describe('Regression Detector', () => {
       {
         ...baseline.results['test.foo'],
         meanMs: 7, // 30% faster
+        p95Ms: 7.7, // tail latency improved proportionally too
       },
     ];
 

@@ -40,6 +40,16 @@ async function main(): Promise<void> {
   }
   console.log('');
 
+  // budget 超過警告 (BenchmarkSpec.budget: 期待最大時間)
+  const budgetViolations = bench.checkBudgets(standardBenchmarks, results);
+  if (budgetViolations.length > 0) {
+    console.warn(`Budget exceeded (${budgetViolations.length}):`);
+    for (const v of budgetViolations) {
+      console.warn(`  ${v.name}: ${v.actualMeanMs.toFixed(2)}ms > budget ${v.budgetMs}ms (+${v.exceedPercent.toFixed(1)}%)`);
+    }
+    console.log('');
+  }
+
   // レポート保存
   writeFileSync(REPORT_PATH, JSON.stringify({ timestamp: Date.now(), results }, null, 2));
 

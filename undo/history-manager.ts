@@ -725,6 +725,15 @@ export class HistoryManager {
       const lastCmd = this.commands[this.position];
       if (lastCmd.canMergeWith?.(command)) {
         const merged = lastCmd.merge!(command);
+        // REGRESSION fix: the normal (non-merge) path below clears any
+        // stale redo-tail commands (left over from a prior undo()) before
+        // recording the new command. This merge path replaced
+        // commands[position] in place but skipped that same truncation, so
+        // a stale command still sitting beyond `position` stayed reachable
+        // via redo() — its redo() would then run against the state the
+        // *merged* command produced instead of the state it was actually
+        // designed for, corrupting data.
+        this.commands = this.commands.slice(0, this.position + 1);
         this.commands[this.position] = merged;
         merged.execute();
         this.notifyListeners();

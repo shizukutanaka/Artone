@@ -182,6 +182,35 @@ describe('HistoryManager — command merging', () => {
 
     expect(hm.getStats().count).toBe(2);
   });
+
+  it('REGRESSION: merging after an undo clears the stale redo tail instead of leaving it reachable', () => {
+    // Before fix: the merge branch replaced commands[position] in place but
+    // never truncated commands beyond it (unlike the normal execute path).
+    // A stale "future" command left over from a prior undo() stayed in the
+    // array and canRedo() reported true for it -- redo() would then run
+    // that stale command's redo() against the state the merge produced,
+    // not the state it was actually designed for, corrupting data.
+    const hm = makeManager();
+    const cell = clipCell({ id: 'c1', trackId: 'track-A', startFrame: 0 });
+    const other = { value: 0 };
+
+    const cmd1 = CommandFactory.clipMove('c1', 'track-A', 'track-A', 0, 10, cell.get, cell.set);
+    cmd1.timestamp = 1000;
+    hm.execute(cmd1); // A: 0 -> 10
+
+    const cmd2 = counterCmd(other); // unrelated command type, does not merge with cmd1
+    hm.execute(cmd2);
+
+    hm.undo(); // back to position 0 (cmd2 now sits as a stale "future" entry)
+
+    const cmd3 = CommandFactory.clipMove('c1', 'track-A', 'track-A', 10, 30, cell.get, cell.set);
+    cmd3.timestamp = 1100; // within cmd1's 500ms merge window -> merges with cmd1
+    hm.execute(cmd3);
+
+    expect(hm.getStats().count).toBe(1); // stale cmd2 must be gone, not just overwritten at index 0
+    expect(hm.canRedo()).toBe(false);
+    expect(cell.clip.startFrame).toBe(30);
+  });
 });
 
 // ============================================================

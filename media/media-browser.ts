@@ -13,6 +13,13 @@ import { setHighQualityScaling } from '../app/utils';
  * @version 1.0.0
  */
 
+// Some malformed containers / blob-timing edge cases never fire
+// onloadedmetadata/onerror at all (proxy-workflow.ts's encodeProxy already
+// guards against this exact failure mode for the same reason). Without a
+// timeout, importFiles()'s sequential `for...await` loop would hang on that
+// one file forever, blocking every subsequent file in the same import batch.
+const METADATA_TIMEOUT_MS = 30_000;
+
 // ============================================================
 // Types
 // ============================================================
@@ -247,7 +254,14 @@ export class MediaBrowser {
       const video = document.createElement('video');
       video.preload = 'metadata';
 
+      const timer = setTimeout(() => {
+        video.onloadedmetadata = null;
+        video.onerror = null;
+        reject(new Error(`Video metadata load timeout after ${METADATA_TIMEOUT_MS}ms`));
+      }, METADATA_TIMEOUT_MS);
+
       video.onloadedmetadata = () => {
+        clearTimeout(timer);
         resolve({
           width: video.videoWidth,
           height: video.videoHeight,
@@ -256,7 +270,10 @@ export class MediaBrowser {
         });
       };
 
-      video.onerror = () => reject(new Error('Failed to load video'));
+      video.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error('Failed to load video'));
+      };
       video.src = url;
     });
   }
@@ -270,7 +287,14 @@ export class MediaBrowser {
       const audio = document.createElement('audio');
       audio.preload = 'metadata';
 
+      const timer = setTimeout(() => {
+        audio.onloadedmetadata = null;
+        audio.onerror = null;
+        reject(new Error(`Audio metadata load timeout after ${METADATA_TIMEOUT_MS}ms`));
+      }, METADATA_TIMEOUT_MS);
+
       audio.onloadedmetadata = () => {
+        clearTimeout(timer);
         resolve({
           duration: audio.duration,
           sampleRate: 48000, // Default
@@ -278,7 +302,10 @@ export class MediaBrowser {
         });
       };
 
-      audio.onerror = () => reject(new Error('Failed to load audio'));
+      audio.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error('Failed to load audio'));
+      };
       audio.src = url;
     });
   }
@@ -312,6 +339,20 @@ export class MediaBrowser {
       video.preload = 'metadata';
       video.muted = true;
 
+      // Matches this function's own graceful-fallback convention (resolve
+      // with '' on failure, same as onerror below) rather than rejecting —
+      // a missing thumbnail should not fail the whole import.
+      const timer = setTimeout(() => {
+        video.onloadeddata = null;
+        video.onseeked = null;
+        video.onerror = null;
+        resolve('');
+      }, METADATA_TIMEOUT_MS);
+      const settle = (value: string): void => {
+        clearTimeout(timer);
+        resolve(value);
+      };
+
       video.onloadeddata = () => {
         video.currentTime = video.duration * 0.1; // 10% into video
       };
@@ -321,7 +362,7 @@ export class MediaBrowser {
         // would make the canvas size NaN and emit a broken thumbnail. Fail
         // gracefully like the onerror path instead.
         const longest = Math.max(width, height);
-        if (!(longest > 0)) { resolve(''); return; }
+        if (!(longest > 0)) { settle(''); return; }
         const canvas = document.createElement('canvas');
         const scale = 160 / longest;
         canvas.width = width * scale;
@@ -331,10 +372,10 @@ export class MediaBrowser {
         setHighQualityScaling(ctx);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        settle(canvas.toDataURL('image/jpeg', 0.7));
       };
 
-      video.onerror = () => resolve('');
+      video.onerror = () => settle('');
       video.src = url;
     });
   }

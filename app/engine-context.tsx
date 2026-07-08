@@ -172,11 +172,23 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
   const appRef = useRef<ArtoneApp | null>(null);
   const [state, setState] = useState<EngineState>(createDefaultState);
   const rafRef = useRef<number>(0);
-  const cancelledRef = useRef(false);
 
   // エンジン初期化 (1 回のみ)
   useEffect(() => {
-    cancelledRef.current = false;
+    // REGRESSION fix: this used to be a ref shared across every effect
+    // invocation. Under React 18 StrictMode's dev-mode double-invoke
+    // (mount -> cleanup -> mount), the cleanup set the shared ref to
+    // cancelled, but the immediately-following second mount reset it back
+    // to false -- so when the FIRST invocation's in-flight initEngine()
+    // finally resolved, its cancelled() check read the *shared* ref (now
+    // false again) and proceeded anyway: it called onReady, overwrote
+    // appRef.current, and started an untracked requestAnimationFrame loop
+    // racing with the second invocation's own app/RAF loop. Scoping the
+    // flag to a local variable per effect invocation means each
+    // invocation's cancellation state is independent, so a genuinely
+    // cancelled (unmounted) invocation stays cancelled regardless of
+    // what any later invocation does.
+    let cancelled = false;
 
     initEngine(
       config ?? {},
@@ -195,17 +207,17 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
           warnings: caps.warnings,
           capabilityTier: caps.tier as EngineState['capabilityTier'],
         }));
-        const tick = createPlaybackTick(appRef, rafRef, setState, () => cancelledRef.current);
+        const tick = createPlaybackTick(appRef, rafRef, setState, () => cancelled);
         rafRef.current = requestAnimationFrame(tick);
       },
       (msg) => setState((s) => ({ ...s, error: msg })),
-      () => cancelledRef.current
+      () => cancelled
     ).catch((err: Error) => {
-      if (!cancelledRef.current) setState((s) => ({ ...s, error: err.message }));
+      if (!cancelled) setState((s) => ({ ...s, error: err.message }));
     });
 
     return () => {
-      cancelledRef.current = true;
+      cancelled = true;
       cancelAnimationFrame(rafRef.current);
       appRef.current?.dispose?.();
       appRef.current = null;

@@ -183,12 +183,21 @@ export function findPrevKeyframeIndex(keyframes: Keyframe[], time: number): numb
 // Module-level cache: the same 4 control points produce the same closure, so
 // memoize to avoid re-creating the Newton-Raphson closure on every interpolate()
 // call (called 60×/s per animated property during playback).
+// Bounded: while dragging a keyframe's Bezier handle, control points change
+// continuously (a new float key on nearly every pointermove), so an
+// unbounded cache would grow forever and never release old entries. Evict
+// the oldest (Map preserves insertion order) once the cap is exceeded.
+const _BEZIER_CACHE_MAX = 500;
 const _bezierCache = new Map<string, (t: number) => number>();
 
 function cubicBezier(p1x: number, p1y: number, p2x: number, p2y: number): (t: number) => number {
   const key = `${p1x},${p1y},${p2x},${p2y}`;
   const cached = _bezierCache.get(key);
   if (cached) return cached;
+  if (_bezierCache.size >= _BEZIER_CACHE_MAX) {
+    const oldestKey = _bezierCache.keys().next().value;
+    if (oldestKey !== undefined) _bezierCache.delete(oldestKey);
+  }
 
   // Newton-Raphson iteration to find t for given x
   const cx = 3 * p1x;
@@ -222,6 +231,11 @@ function cubicBezier(p1x: number, p1y: number, p2x: number, p2y: number): (t: nu
   const fn = (x: number): number => sampleCurveY(solveCurveX(x));
   _bezierCache.set(key, fn);
   return fn;
+}
+
+/** Test-only accessor for the module-private Bezier closure cache size. */
+export function _getBezierCacheSizeForTesting(): number {
+  return _bezierCache.size;
 }
 
 // ============================================================
@@ -353,6 +367,11 @@ export class KeyframeAnimator {
     if (keyframe) {
       Object.assign(keyframe, updates);
       property.keyframes.sort((a, b) => a.time - b.time);
+      // REGRESSION fix: moving a keyframe's time (dragging it in the UI) used
+      // to leave animation.duration at its old value, so a keyframe dragged
+      // past the previous ceiling silently fell outside the reported
+      // duration.
+      this.recalculateDuration(animation);
       this.notify();
     }
   }
@@ -364,8 +383,23 @@ export class KeyframeAnimator {
     const property = animation.properties.get(propertyName);
     if (property) {
       property.keyframes = property.keyframes.filter(k => k.id !== keyframeId);
+      // REGRESSION fix: deleting the keyframe that defined the current
+      // ceiling used to leave animation.duration stale (too large) since
+      // nothing ever re-scanned the remaining keyframes.
+      this.recalculateDuration(animation);
       this.notify();
     }
+  }
+
+  /** Recomputes animation.duration as the max keyframe time across all of its properties. */
+  private recalculateDuration(animation: Animation): void {
+    let max = 0;
+    for (const property of animation.properties.values()) {
+      for (const kf of property.keyframes) {
+        if (kf.time > max) max = kf.time;
+      }
+    }
+    animation.duration = max;
   }
 
   // ============================================================

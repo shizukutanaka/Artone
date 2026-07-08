@@ -6,7 +6,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { KeyframeAnimator, findPrevKeyframeIndex, type EasingType } from '../animation/keyframe-animator';
+import {
+  KeyframeAnimator, findPrevKeyframeIndex, type EasingType,
+  _getBezierCacheSizeForTesting,
+} from '../animation/keyframe-animator';
 
 // ============================================================
 // Easing function boundary conditions
@@ -555,5 +558,89 @@ describe('getValue equivalence after binary-search refactor', () => {
     expect(anim.getValue(id, 'x', 1)).toBeCloseTo(100, 6); // exactly on middle kf
     expect(anim.getValue(id, 'x', 0)).toBeCloseTo(0, 6);
     expect(anim.getValue(id, 'x', 2)).toBeCloseTo(50, 6);
+  });
+});
+
+// ============================================================
+// Bezier closure cache bound
+// ============================================================
+
+describe('cubicBezier module cache — REGRESSION: bounded, not unbounded', () => {
+  it('does not grow past its cap while dragging distinct handle values', () => {
+    // Before fix: every distinct (outX,outY,inX,inY) combination cached a new
+    // Newton-Raphson closure forever. A user dragging a Bezier handle
+    // generates a new float value on nearly every pointermove, so this grew
+    // without bound over the course of an editing session.
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+
+    for (let i = 0; i < 700; i++) {
+      const outX = 0.0001 + i * 0.0009; // 700 distinct values -> 700 distinct cache keys
+      anim.addKeyframe(id, 'x', 0, 0, 'bezier', { outX, outY: 0.2 });
+      anim.addKeyframe(id, 'x', 1, 100, 'bezier', { inX: 0.5, inY: 0.5 });
+      anim.getValue(id, 'x', 0.5);
+    }
+
+    expect(_getBezierCacheSizeForTesting()).toBeLessThanOrEqual(500);
+  });
+});
+
+// ============================================================
+// animation.duration recalculation
+// ============================================================
+
+describe('animation.duration — REGRESSION: stays in sync after update/delete', () => {
+  it('updateKeyframe recomputes duration when a keyframe is dragged past the old ceiling', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addKeyframe(id, 'x', 0, 0, 'linear');
+    const kf = anim.addKeyframe(id, 'x', 5, 100, 'linear')!;
+    expect(anim.getAnimation(id)!.duration).toBe(5);
+
+    // Before fix: dragging this keyframe out to time=20 left duration at 5.
+    anim.updateKeyframe(id, 'x', kf.id, { time: 20 });
+    expect(anim.getAnimation(id)!.duration).toBe(20);
+  });
+
+  it('updateKeyframe lowers duration when the last keyframe is dragged earlier', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addKeyframe(id, 'x', 0, 0, 'linear');
+    const kf = anim.addKeyframe(id, 'x', 10, 100, 'linear')!;
+    expect(anim.getAnimation(id)!.duration).toBe(10);
+
+    anim.updateKeyframe(id, 'x', kf.id, { time: 3 });
+    expect(anim.getAnimation(id)!.duration).toBe(3);
+  });
+
+  it('deleteKeyframe recomputes duration when the ceiling-defining keyframe is removed', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addKeyframe(id, 'x', 0, 0, 'linear');
+    anim.addKeyframe(id, 'x', 4, 50, 'linear');
+    const last = anim.addKeyframe(id, 'x', 12, 100, 'linear')!;
+    expect(anim.getAnimation(id)!.duration).toBe(12);
+
+    // Before fix: deleting the last (ceiling-defining) keyframe left
+    // duration stuck at 12 even though no keyframe reaches that far anymore.
+    anim.deleteKeyframe(id, 'x', last.id);
+    expect(anim.getAnimation(id)!.duration).toBe(4);
+  });
+
+  it('duration accounts for the max across all properties, not just the last-edited one', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addProperty(id, 'y', 0);
+    anim.addKeyframe(id, 'x', 8, 100, 'linear');
+    const yKf = anim.addKeyframe(id, 'y', 15, 100, 'linear')!;
+    expect(anim.getAnimation(id)!.duration).toBe(15);
+
+    anim.deleteKeyframe(id, 'y', yKf.id);
+    expect(anim.getAnimation(id)!.duration).toBe(8);
   });
 });

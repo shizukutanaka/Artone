@@ -137,10 +137,28 @@ export class I18nManager {
   async init(): Promise<void> {
     await this.loadLocale(this.config.defaultLocale);
     if (this.currentLocale !== this.config.defaultLocale) {
-      await this.loadLocale(this.currentLocale).catch(() => {
-        // フォールバック
-        this.currentLocale = this.config.defaultLocale;
-      });
+      // REGRESSION fix: navigator.language is almost always region-qualified
+      // (en-US, fr-FR, de-DE, pt-BR, ...), but only base-language files exist
+      // on disk (see i18n/*.json — no en-US.json etc.). Loading the raw
+      // detected tag directly 404'd for virtually every non-Japanese
+      // browser, and the catch reset currentLocale all the way back to
+      // defaultLocale ('ja') instead of the correct base language (e.g.
+      // 'en') that would have loaded successfully. Try the same reduction
+      // chain buildFallbackChain() already uses for key lookup (detected
+      // tag -> family -> base language -> configured fallback) and adopt
+      // whichever locale actually has a file, before giving up entirely.
+      let resolved: LocaleCode | null = null;
+      for (const candidate of this.buildFallbackChain(this.currentLocale)) {
+        if (candidate === this.config.defaultLocale) continue; // already loaded above
+        try {
+          await this.loadLocale(candidate);
+          resolved = candidate;
+          break;
+        } catch {
+          // try the next candidate in the chain
+        }
+      }
+      this.currentLocale = resolved ?? this.config.defaultLocale;
     }
     if (this.config.preload) {
       await Promise.allSettled(

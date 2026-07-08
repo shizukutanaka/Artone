@@ -405,6 +405,13 @@ export class CollaborationEngine {
       path, op, value,
       clock: Object.fromEntries(this.vectorClock)
     });
+    // REGRESSION fix: every other mutating method (addComment, resolveComment,
+    // deleteComment, addAnnotation, createVersion, restoreVersion, etc.) calls
+    // notify() so subscribers re-render. applyOperation mutated docState and
+    // broadcast the change but never notified local subscribers, so a UI bound
+    // via subscribe() would not reflect a local edit until some unrelated
+    // action happened to trigger notify().
+    this.notify();
   }
 
   /**

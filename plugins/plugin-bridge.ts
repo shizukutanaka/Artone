@@ -249,6 +249,21 @@ export class PluginBridge {
     // Abort any active UI listeners (message + document mousemove/mouseup).
     this.uiCleanups.get(instanceId)?.abort();
     this.uiCleanups.delete(instanceId);
+
+    // REGRESSION fix: unloading an instance used to leave its id in any
+    // PluginChain.plugins array it belonged to. getChainInput/getChainOutput
+    // index into that array via this.instances.get(...), so a stale id left
+    // a chain silently non-functional (undefined input/output) instead of
+    // falling back to its remaining, still-loaded neighbors, and every
+    // subsequent reorderChain/addToChain/removeFromChain carried the dead id
+    // forward permanently.
+    for (const chain of this.chains.values()) {
+      const idx = chain.plugins.indexOf(instanceId);
+      if (idx >= 0) {
+        chain.plugins.splice(idx, 1);
+        this.reconnectChain(chain);
+      }
+    }
   }
   
   // ==================== Parameter Control ====================
@@ -384,7 +399,17 @@ export class PluginBridge {
   reorderChain(chainId: string, fromIndex: number, toIndex: number): void {
     const chain = this.chains.get(chainId);
     if (!chain) return;
-    
+    // REGRESSION fix: unlike addToChain/removeFromChain, this performed no
+    // bounds validation. An out-of-range fromIndex made splice(fromIndex, 1)
+    // remove nothing, so `removed` was undefined -- which the second splice
+    // then inserted as a literal element, permanently corrupting the chain's
+    // plugin list (every later index-based lookup/reorder would operate on
+    // an array containing a stray `undefined` entry).
+    if (
+      fromIndex < 0 || fromIndex >= chain.plugins.length ||
+      toIndex < 0 || toIndex >= chain.plugins.length
+    ) return;
+
     const [removed] = chain.plugins.splice(fromIndex, 1);
     chain.plugins.splice(toIndex, 0, removed);
     this.reconnectChain(chain);

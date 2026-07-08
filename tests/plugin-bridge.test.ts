@@ -327,6 +327,67 @@ describe('PluginBridge — chains', () => {
     const chainId = bridge.createChain('C');
     expect(bridge.getChainInput(chainId)).toBeUndefined();
   });
+
+  it('REGRESSION: unloadPlugin removes the instance id from every chain it belongs to', () => {
+    // Before fix: unloadPlugin() only removed the instance from
+    // this.instances, leaving its id in chain.plugins. getChainInput/Output
+    // index into instances via chain.plugins[0]/[length-1], so a chain
+    // whose first plugin was unloaded became silently non-functional
+    // (undefined input) instead of falling back to its remaining plugins.
+    const chainId = bridge.createChain('C');
+    const a = injectInstance(bridge);
+    const b = injectInstance(bridge);
+    bridge.addToChain(chainId, a.id);
+    bridge.addToChain(chainId, b.id);
+
+    bridge.unloadPlugin(a.id);
+
+    expect(bridge.getChain(chainId)!.plugins).toEqual([b.id]);
+  });
+
+  it('REGRESSION: unloadPlugin removes a mid-chain id from multiple chains', () => {
+    const chainA = bridge.createChain('A');
+    const chainB = bridge.createChain('B');
+    const shared = injectInstance(bridge);
+    const other = injectInstance(bridge);
+    bridge.addToChain(chainA, shared.id);
+    bridge.addToChain(chainA, other.id);
+    bridge.addToChain(chainB, shared.id);
+
+    bridge.unloadPlugin(shared.id);
+
+    expect(bridge.getChain(chainA)!.plugins).toEqual([other.id]);
+    expect(bridge.getChain(chainB)!.plugins).toEqual([]);
+  });
+
+  it('REGRESSION: reorderChain ignores an out-of-range fromIndex instead of corrupting the array', () => {
+    // Before fix: an out-of-range fromIndex made splice(fromIndex, 1) remove
+    // nothing (removed = undefined), which the second splice then inserted
+    // as a literal element -- permanently corrupting chain.plugins with a
+    // stray `undefined` entry.
+    const chainId = bridge.createChain('C');
+    const a = injectInstance(bridge);
+    const b = injectInstance(bridge);
+    bridge.addToChain(chainId, a.id);
+    bridge.addToChain(chainId, b.id);
+
+    bridge.reorderChain(chainId, 5, 0); // fromIndex out of range
+
+    expect(bridge.getChain(chainId)!.plugins).toEqual([a.id, b.id]);
+    expect(bridge.getChain(chainId)!.plugins).not.toContain(undefined);
+  });
+
+  it('REGRESSION: reorderChain ignores an out-of-range toIndex', () => {
+    const chainId = bridge.createChain('C');
+    const a = injectInstance(bridge);
+    const b = injectInstance(bridge);
+    bridge.addToChain(chainId, a.id);
+    bridge.addToChain(chainId, b.id);
+
+    bridge.reorderChain(chainId, 0, 9);
+
+    expect(bridge.getChain(chainId)!.plugins).toEqual([a.id, b.id]);
+  });
 });
 
 // ============================================================

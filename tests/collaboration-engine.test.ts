@@ -569,6 +569,17 @@ describe('subscribe()', () => {
     expect(fn).toHaveBeenCalled();
   });
 
+  it('REGRESSION: listener called on applyOperation', async () => {
+    // Before fix: every other mutating method called notify(), but
+    // applyOperation mutated docState/broadcast the change and never did --
+    // a UI bound via subscribe() would not reflect a local CRDT edit.
+    const engine = await connected();
+    const fn = vi.fn();
+    engine.subscribe(fn);
+    engine.applyOperation(['title'], 'set', 'New Title');
+    expect(fn).toHaveBeenCalled();
+  });
+
   it('listener called on deleteComment', async () => {
     const engine = await connected();
     const c = engine.addComment('bye');

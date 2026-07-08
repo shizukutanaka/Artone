@@ -60,7 +60,13 @@ export class ColorContrast {
   }
 
   static parseRGB(rgb: string): [number, number, number] | null {
-    const m = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)/);
+    // "rgba?\(" — was "rgb\(" only, which cannot match an "rgba(...)" string
+    // at all ("rgb(" is never a substring of "rgba(": the "(" follows the
+    // "a", not the "b"). parseColor() dispatches here for any string
+    // starting with "rgb", including "rgba", and findBackground() explicitly
+    // tries to parse near-opaque rgba backgrounds (alpha >= 0.99) as opaque
+    // — both silently failed and treated the color as unparseable.
+    const m = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
     if (!m) return null;
     return [parseInt(m[1]), parseInt(m[2]), parseInt(m[3])];
   }

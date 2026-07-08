@@ -868,11 +868,20 @@ export class HistoryManager {
     
     // 新しいブランチをRedo
     if (branchId !== 'main') {
-      const newBranch = this.branches.get(branchId)!;
-      newBranch.commands.forEach(() => {
-        // Note: Would need to reconstruct commands from snapshots
+      // REGRESSION fix: HistoryBranch.commands is always [] (nothing ever
+      // pushes into it — see createBranch), and even if populated it
+      // couldn't help since CommandSnapshot has no live redo() function.
+      // Switching back into a branch never actually replayed its edits;
+      // the live value stayed at whatever "undo the current branch" above
+      // left it at. The real Command objects (with live undo/redo
+      // closures) are still sitting in the shared `this.commands` array —
+      // undo() never removes them, exactly like a normal undo/redo pair —
+      // so redo them directly from this branch's own parentPosition
+      // through the end of the array.
+      while (this.position < this.commands.length - 1) {
         this.position++;
-      });
+        this.commands[this.position].redo();
+      }
     }
     
     this.currentBranch = branchId;

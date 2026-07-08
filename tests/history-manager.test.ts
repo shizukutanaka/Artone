@@ -214,6 +214,35 @@ describe('HistoryManager — command merging', () => {
 });
 
 // ============================================================
+// Branches
+// ============================================================
+
+describe('HistoryManager — branches', () => {
+  it('REGRESSION: switchBranch() replays a branch\'s own edits when switching back into it', () => {
+    // Before fix: HistoryBranch.commands was always [] (nothing ever pushed
+    // into it), and even populated it couldn't help since CommandSnapshot
+    // has no live redo() function. The "redo the new branch" half of
+    // switchBranch() iterated that always-empty array and only bumped
+    // `position` per element -- switching back into a branch never actually
+    // replayed its edits; the live value stayed at whatever undoing the
+    // branch left it at.
+    const hm = makeManager();
+    const cell = { value: 0 };
+
+    hm.execute(counterCmd(cell, 1)); // main: 0 -> 1
+
+    const branchId = hm.createBranch('feature');
+    hm.execute(counterCmd(cell, 10)); // branch: 1 -> 11
+
+    hm.switchBranch('main');
+    expect(cell.value).toBe(1); // branch edit correctly undone
+
+    hm.switchBranch(branchId);
+    expect(cell.value).toBe(11); // branch edit must be reapplied, not lost
+  });
+});
+
+// ============================================================
 // Group operations
 // ============================================================
 

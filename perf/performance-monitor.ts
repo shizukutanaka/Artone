@@ -758,6 +758,14 @@ export class AutoQualityAdjuster {
         this.qualityLevel = Math.max(0.5, this.qualityLevel - 0.1);
         this.adjustmentCooldown = this.cooldownFrames;
         break;
+      // 'good' and 'optimal' both recover quality gradually. Before this
+      // fix, 'good' had no case at all: a quality reduction applied during
+      // a critical/warning spike often settles performance into 'good'
+      // (comfortably fine, but not within 2fps of target) rather than
+      // jumping straight to 'optimal' — with no case handling that level,
+      // quality got stuck at the reduced value forever, with no path back
+      // to 1.0 short of performance becoming near-perfect on its own.
+      case 'good':
       case 'optimal':
         if (this.qualityLevel < 1.0) {
           this.qualityLevel = Math.min(1.0, this.qualityLevel + 0.05);

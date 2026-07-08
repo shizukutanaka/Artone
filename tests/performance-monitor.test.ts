@@ -519,7 +519,7 @@ describe('FrametimeGraph', () => {
 // ============================================================
 
 describe('AutoQualityAdjuster — warning and optimal branches', () => {
-  function makeMonitor(level: 'optimal' | 'warning' | 'critical'): PerformanceMonitor {
+  function makeMonitor(level: 'optimal' | 'good' | 'warning' | 'critical'): PerformanceMonitor {
     const mon = new PerformanceMonitor();
     vi.spyOn(mon, 'getPerformanceLevel').mockReturnValue(level);
     return mon;
@@ -561,6 +561,37 @@ describe('AutoQualityAdjuster — warning and optimal branches', () => {
     (adj as unknown as { adjustmentCooldown: number }).adjustmentCooldown = 0;
     const q = adj.update();
     expect(q).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it('REGRESSION: quality recovers under sustained "good" performance (was stuck forever)', () => {
+    // Before fix: the switch had no case for 'good' at all, so once quality
+    // was reduced by a critical/warning spike, performance settling into
+    // 'good' (comfortably fine, but not within 2fps of target — a very
+    // plausible outcome of the reduction itself) left quality permanently
+    // stuck, with no path back to 1.0 short of performance becoming
+    // near-perfect on its own.
+    const adj = new AutoQualityAdjuster(makeMonitor('good'));
+    (adj as unknown as { qualityLevel: number }).qualityLevel = 0.5;
+    (adj as unknown as { adjustmentCooldown: number }).adjustmentCooldown = 0;
+    const q = adj.update();
+    expect(q).toBeCloseTo(0.55, 2); // 0.5 + 0.05, same recovery step as 'optimal'
+  });
+
+  it('REGRESSION: repeated "good" ticks eventually recover quality to 1.0', () => {
+    // Recovery only advances once per 60-frame cooldown window, so reaching
+    // 1.0 from 0.5 (10 steps of +0.05) needs >= 10*60 = 600 ticks.
+    const mon = makeMonitor('good');
+    const adj = new AutoQualityAdjuster(mon);
+    (adj as unknown as { qualityLevel: number }).qualityLevel = 0.5;
+    for (let i = 0; i < 700; i++) adj.update();
+    expect(adj.getQualityLevel()).toBe(1.0);
+  });
+
+  it('"good" does not reduce quality (only optimal/good recover, they never degrade)', () => {
+    const adj = new AutoQualityAdjuster(makeMonitor('good'));
+    const before = adj.getQualityLevel();
+    const q = adj.update();
+    expect(q).toBeGreaterThanOrEqual(before);
   });
 });
 

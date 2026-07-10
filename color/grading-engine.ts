@@ -54,6 +54,15 @@ export interface Curves {
   lumVsSat: CurvePoint[];
 }
 
+/**
+ * Secondary color-correction qualifier: a node with `enabled` only grades
+ * pixels whose HSL falls inside [hueCenter±hueWidth/2, satLow-satHigh,
+ * lumLow-lumHigh], with a soft ramp outside each hard range (0 at the end
+ * of the ramp, 1 inside the hard range). hueCenter/hueWidth are in degrees
+ * (0-360); every `*Soft` field, including hueSoft, is a fraction (0-1) of
+ * its dimension's full domain (hueSoft=0.1 -> 36° of falloff; sat/lumSoft
+ * are already directly on the [0,1] domain they soften).
+ */
 export interface HSLQualifier {
   enabled: boolean;
   hueCenter: number;
@@ -68,6 +77,17 @@ export interface HSLQualifier {
   invert: boolean;
 }
 
+/**
+ * Geometric mask restricting a node's grade to a region of the frame.
+ * x/y/width/height are fractions of the frame's width/height (center
+ * position and full extent, e.g. x=0.5,y=0.5 = frame center); rotation is
+ * in degrees; softness is a fraction (0-1) of the shape's own half-extent
+ * over which the mask ramps from 1 (inside) to 0 (outside). Multiple
+ * enabled windows on the same node combine via union (a pixel is affected
+ * if inside ANY of them). 'polygon' is approximated by its axis-aligned
+ * bounding box (true point-in-polygon softness is not implemented).
+ * 'gradient' is a linear ramp along the window's local x-axis.
+ */
 export interface PowerWindow {
   id: string;
   type: 'circle' | 'rectangle' | 'polygon' | 'gradient';
@@ -157,6 +177,127 @@ const DEFAULT_QUALIFIER: HSLQualifier = {
   lumSoft: 0.1,
   invert: false
 };
+
+// ============================================================
+// HSL Qualifier / Power Window mask math (pure, unit-testable)
+// ============================================================
+
+/** RGB (0-1 each) -> HSL. h in [0,360), s/l in [0,1]. Achromatic pixels get h=0,s=0. */
+export function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  const d = mx - mn;
+  const l = (mx + mn) * 0.5;
+  if (d < 0.00001) return { h: 0, s: 0, l };
+
+  const s = d / (1 - Math.abs(2 * l - 1));
+  let h: number;
+  if (mx === r)      h = ((g - b) / d) % 6;
+  else if (mx === g) h = (b - r) / d + 2;
+  else               h = (r - g) / d + 4;
+  h *= 60;
+  if (h < 0) h += 360;
+  return { h, s, l };
+}
+
+/** 1 inside [center±halfWidth], 0 beyond [center±(halfWidth+softDeg)], linear ramp between. Circular (wraps at 360°). */
+function hueRangeMatch(hueDeg: number, center: number, halfWidth: number, softDeg: number): number {
+  let diff = Math.abs(hueDeg - center) % 360;
+  if (diff > 180) diff = 360 - diff;
+  if (diff <= halfWidth) return 1;
+  const soft = Math.max(softDeg, 0.00001);
+  if (diff >= halfWidth + soft) return 0;
+  return 1 - (diff - halfWidth) / soft;
+}
+
+/** 1 inside [low, high], 0 beyond [low-soft, high+soft], linear ramp between. */
+function rangeMatch(value: number, low: number, high: number, soft: number): number {
+  if (value >= low && value <= high) return 1;
+  const s = Math.max(soft, 0.00001);
+  if (value < low) return value <= low - s ? 0 : 1 - (low - value) / s;
+  return value >= high + s ? 0 : 1 - (value - high) / s;
+}
+
+/** Combined HSL qualifier match in [0,1] for one pixel's (already 0-1 normalized) RGB. 1 (fully selected) when disabled. */
+export function computeQualifierMask(q: HSLQualifier, r: number, g: number, b: number): number {
+  if (!q.enabled) return 1;
+  const { h, s, l } = rgbToHsl(r, g, b);
+  const hueMatch = hueRangeMatch(h, q.hueCenter, q.hueWidth / 2, q.hueSoft * 360);
+  const satMatch = rangeMatch(s, q.satLow, q.satHigh, q.satSoft);
+  const lumMatch = rangeMatch(l, q.lumLow, q.lumHigh, q.lumSoft);
+  const mask = hueMatch * satMatch * lumMatch;
+  return q.invert ? 1 - mask : mask;
+}
+
+/**
+ * Power window mask in [0,1] for one pixel at (px,py) in a `width`x`height`
+ * frame. 'circle' is a true (possibly non-uniformly-scaled) ellipse test;
+ * 'rectangle' is a box (Chebyshev-distance) test; both share the same
+ * rotate-then-normalize setup. 'polygon' falls back to its axis-aligned
+ * bounding box (see PowerWindow doc comment); 'gradient' is a linear ramp
+ * along the window's local (rotated) x-axis.
+ */
+export function computeWindowMask(
+  win: PowerWindow,
+  px: number, py: number,
+  width: number, height: number,
+): number {
+  if (!win.enabled) return 1;
+
+  const cx = win.x * width;
+  const cy = win.y * height;
+  const halfW = Math.max(win.width * width / 2, 0.00001);
+  const halfH = Math.max(win.height * height / 2, 0.00001);
+  const rad = (win.rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = px + 0.5 - cx;
+  const dy = py + 0.5 - cy;
+  // Rotate the pixel offset into the window's local (unrotated) frame.
+  const lx = dx * cos + dy * sin;
+  const ly = -dx * sin + dy * cos;
+  const nx = lx / halfW;
+  const ny = ly / halfH;
+
+  let mask: number;
+  if (win.type === 'gradient') {
+    mask = Math.max(0, Math.min(1, (nx + 1) / 2));
+  } else {
+    const dist = win.type === 'rectangle' || win.type === 'polygon'
+      ? Math.max(Math.abs(nx), Math.abs(ny)) // box distance (polygon approximated by its bbox)
+      : Math.sqrt(nx * nx + ny * ny);         // elliptical distance
+    const soft = Math.max(win.softness, 0.00001);
+    const inner = Math.max(1 - soft, 0);
+    if (dist <= inner) mask = 1;
+    else if (dist >= 1) mask = 0;
+    else mask = (1 - dist) / (1 - inner);
+  }
+
+  return win.invert ? 1 - mask : mask;
+}
+
+/**
+ * Combined per-pixel mask: qualifier (if enabled) times the union (max) of
+ * all enabled windows (1 if none are enabled) — both must "pass" for full
+ * effect, matching a qualifier further restricted to a region.
+ */
+function combineNodeMask(
+  qualifier: HSLQualifier,
+  enabledWindows: PowerWindow[],
+  r: number, g: number, b: number,
+  px: number, py: number, width: number, height: number,
+): number {
+  let mask = qualifier.enabled ? computeQualifierMask(qualifier, r, g, b) : 1;
+  if (enabledWindows.length > 0) {
+    let windowMask = 0;
+    for (const win of enabledWindows) {
+      const m = computeWindowMask(win, px, py, width, height);
+      if (m > windowMask) windowMask = m; // union: inside ANY window
+    }
+    mask *= windowMask;
+  }
+  return mask;
+}
 
 // ============================================================
 // Deep-clone helpers — prevent DEFAULT_* constant aliasing
@@ -533,7 +674,13 @@ export class ColorGradingEngine {
       if (
         correctors.length === 1 &&
         !correctors[0].lut &&
-        this.isIdentityCurves(correctors[0].curves)
+        this.isIdentityCurves(correctors[0].curves) &&
+        // The WGSL wheels shader has no HSL-qualifier/power-window
+        // equivalent (see the section below processCPU) — route any node
+        // using either feature through CPU instead, rather than silently
+        // grading full-frame on GPU.
+        !correctors[0].qualifier.enabled &&
+        !correctors[0].windows.some((win) => win.enabled)
       ) {
         return this.processGPU(input, correctors[0].wheels);
       }
@@ -698,6 +845,12 @@ export class ColorGradingEngine {
       const node = grade.nodes.get(nodeId);
       if (!node?.enabled || node.type !== 'corrector') continue;
 
+      // A qualifier/window-masked node needs the pre-grade pixels to blend
+      // back against; copy only when this node actually uses either
+      // feature (the common, unmasked case pays zero extra cost).
+      const isMasked = node.qualifier.enabled || node.windows.some((win) => win.enabled);
+      const original = isMasked ? data.slice() : null;
+
       this.applyWheels(data, node.wheels);
 
       // Apply per-channel curves (monotone cubic spline)
@@ -714,6 +867,12 @@ export class ColorGradingEngine {
       // Apply 3D LUT last (same order as DaVinci: wheels → curves → LUT)
       if (node.lut) {
         applyLUTToBuffer(data, node.lut);
+      }
+
+      // Restrict this node's effect to the qualifier/window mask, blending
+      // back toward the pre-grade pixels wherever the mask is less than 1.
+      if (isMasked && original) {
+        this.blendWithMask(data, original, node, w, h);
       }
     }
 
@@ -829,6 +988,58 @@ export class ColorGradingEngine {
       data[i]     = Math.max(0, Math.min(255, r * 255));
       data[i + 1] = Math.max(0, Math.min(255, g * 255));
       data[i + 2] = Math.max(0, Math.min(255, b * 255));
+    }
+  }
+
+  // ============================================================
+  // HSL Qualifiers / Power Windows
+  // ============================================================
+  //
+  // REGRESSION fix: ColorNode.qualifier and ColorNode.windows were fully
+  // modeled (real defaults, export/import round-trip) but never actually
+  // read anywhere — a node with an enabled qualifier or power window graded
+  // the ENTIRE frame with no isolation at all, silently. These masks are
+  // computed on the CPU path only (see the processFrame() eligibility check
+  // below, which now routes any node using either feature away from the
+  // GPU fast-path, since the GPU shader has no equivalent implementation --
+  // color/CLAUDE.md requires CPU/GPU consistency, and this keeps that
+  // consistent by simply not using the GPU path for grades it can't
+  // represent, rather than risking a CPU/GPU divergence).
+
+  /**
+   * Applies node.qualifier/node.windows by blending `data` (already fully
+   * graded by applyWheels/curves/LUT) back toward `original` wherever the
+   * combined mask is less than 1. No-op (no-op meaning data is left as the
+   * fully-graded result) for pixels the mask fully selects.
+   */
+  private blendWithMask(
+    data: Uint8ClampedArray,
+    original: Uint8ClampedArray,
+    node: ColorNode,
+    width: number,
+    height: number,
+  ): void {
+    const { qualifier } = node;
+    const enabledWindows = node.windows.filter((win) => win.enabled);
+
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        const i = (py * width + px) * 4;
+        // The qualifier selects by the ORIGINAL (pre-grade) color, not the
+        // graded one — matching how a hardware/software vectorscope
+        // qualifier samples the source image.
+        const mask = combineNodeMask(
+          qualifier, enabledWindows,
+          original[i] / 255, original[i + 1] / 255, original[i + 2] / 255,
+          px, py, width, height,
+        );
+
+        if (mask >= 1) continue; // fully selected — data already holds the graded result
+        data[i]     = original[i]     + (data[i]     - original[i])     * mask;
+        data[i + 1] = original[i + 1] + (data[i + 1] - original[i + 1]) * mask;
+        data[i + 2] = original[i + 2] + (data[i + 2] - original[i + 2]) * mask;
+        // Alpha (i+3) is never touched by grading.
+      }
     }
   }
 

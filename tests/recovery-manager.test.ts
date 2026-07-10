@@ -333,6 +333,24 @@ describe('RecoveryManager — enforceLimit', () => {
     expect(snaps.some(s => s.id === id)).toBe(true);
   });
 
+  it('REGRESSION: caps maxSnapshots per project, not globally', async () => {
+    // Before fix: enforceLimit() read getSnapshots() with no projectId and
+    // used one shared counter, so maxSnapshots was a single budget split
+    // across every project. Two active projects could starve each other
+    // down to fewer than maxSnapshots survivors each, even though neither
+    // individually exceeded the configured cap.
+    const mgr = makeManager({ maxSnapshots: 2 });
+    await mgr.init();
+    for (let i = 0; i < 3; i++) {
+      await mgr.saveSnapshot('manual', 'project-a', 'A', makeData({ playhead: i }));
+      await mgr.saveSnapshot('manual', 'project-b', 'B', makeData({ playhead: i }));
+    }
+    const snapsA = await mgr.getSnapshots('project-a');
+    const snapsB = await mgr.getSnapshots('project-b');
+    expect(snapsA.length).toBe(2);
+    expect(snapsB.length).toBe(2);
+  });
+
   it('deletes many excess snapshots in a single transaction (atomic prune)', async () => {
     // recovery/CLAUDE.md mandates transactional deletion. Build up 6 snapshots
     // under a high cap, then tighten the cap so the next save must prune 5 at

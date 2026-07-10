@@ -435,11 +435,16 @@ export class RecoveryManager {
     // newest-first): age-expired, plus everything past the cap among survivors.
     const snapshots = await this.getSnapshots();
     const toDelete: string[] = [];
-    let kept = 0;
+    // REGRESSION fix: maxSnapshots must cap snapshots PER PROJECT, not
+    // globally. A single shared counter meant one project's frequent saves
+    // could starve every other project's budget down to zero survivors even
+    // though each individually stayed well under maxSnapshots.
+    const keptPerProject = new Map<string, number>();
     for (const s of snapshots) {
-      if (now - s.timestamp > maxAge) toDelete.push(s.id);
-      else if (kept >= maxSnapshots) toDelete.push(s.id);
-      else kept++;
+      if (now - s.timestamp > maxAge) { toDelete.push(s.id); continue; }
+      const kept = keptPerProject.get(s.projectId) ?? 0;
+      if (kept >= maxSnapshots) { toDelete.push(s.id); continue; }
+      keptPerProject.set(s.projectId, kept + 1);
     }
     if (toDelete.length === 0) return;
 

@@ -308,6 +308,22 @@ describe('calculatePanGains()', () => {
     const gains = engine.calculatePanGains(panner({ x: -0.5, y: 1 }));
     expect(gains.get('L')!).toBeGreaterThan(gains.get('Ls')!);
   });
+
+  it('REGRESSION: changing lfeAmount does not change the normalized gain of other (spatial bed) channels', () => {
+    // Before fix: LFE's gain (panner.lfeAmount) was included in the power
+    // sum used to derive the normalizer, even though it was then excluded
+    // from the loop that actually applies the normalizer. Turning the LFE
+    // send up or down therefore changed the relative loudness of every
+    // OTHER channel even though nothing about the panning position changed.
+    const position = { x: -0.4, y: 0.8, z: 0.1, spread: 0.6, divergence: 0.9 };
+    const lowLFE = engine.calculatePanGains({ ...position, lfeAmount: 0.05 });
+    const highLFE = engine.calculatePanGains({ ...position, lfeAmount: 0.95 });
+
+    for (const label of engine.getChannels().map(c => c.label)) {
+      if (label === 'LFE') continue;
+      expect(highLFE.get(label)!).toBeCloseTo(lowLFE.get(label)!, 10);
+    }
+  });
 });
 
 // ============================================================

@@ -335,9 +335,19 @@ export class SurroundAudioEngine {
     }
     
     // Normalize gains
-    const total = Array.from(gains.values()).reduce((sum, g) => sum + g * g, 0);
+    // REGRESSION fix: LFE's gain (panner.lfeAmount) is unrelated to spatial
+    // position, but was still included in the power sum used to derive the
+    // normalizer -- so turning the LFE send up or down changed the relative
+    // loudness of every OTHER (spatial bed) channel even though nothing
+    // about the panning position changed. Exclude it from the sum too,
+    // matching how it's already excluded from the loop that applies the
+    // normalizer below.
+    let total = 0;
+    for (const [label, gain] of gains) {
+      if (label !== 'LFE') total += gain * gain;
+    }
     const normalizer = total > 0 ? 1 / Math.sqrt(total) : 1;
-    
+
     for (const [label, gain] of gains) {
       if (label !== 'LFE') {
         gains.set(label, gain * normalizer);

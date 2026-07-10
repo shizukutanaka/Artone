@@ -78,7 +78,13 @@ export interface EngineActions {
   save(): Promise<void>;
   undo(): void;
   redo(): void;
-  importFiles(files: File[]): Promise<void>;
+  /**
+   * Imports each file into the engine. Returns the subset that failed (by
+   * reference, so callers can filter their own `files` array) — a caller
+   * that unconditionally treats every input file as "imported" after this
+   * resolves would show a UI entry for media the engine never actually has.
+   */
+  importFiles(files: File[]): Promise<Set<File>>;
   exportProject(preset?: string): Promise<void>;
   setProjectName(name: string): void;
   clearError(): void;
@@ -264,13 +270,15 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
       },
       async importFiles(files: File[]) {
         const app = appRef.current;
-        if (!app) return;
+        if (!app) return new Set(files);
         const errors: string[] = [];
+        const failed = new Set<File>();
         for (const f of files) {
           try {
             await app.importMedia(f);
           } catch (e) {
             errors.push(`${f.name}: ${(e as Error).message}`);
+            failed.add(f);
           }
         }
         if (errors.length > 0) {
@@ -278,6 +286,7 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
         } else {
           setState((s) => ({ ...s, hasUnsavedChanges: true }));
         }
+        return failed;
       },
       async exportProject(preset?: string) {
         try {

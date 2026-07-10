@@ -86,6 +86,17 @@ export function applyClipSelectionEdit(clips: TimelineClip[], next: Selection): 
   );
 }
 
+/**
+ * Files whose engine import actually succeeded, i.e. `files` minus
+ * `failed`. handleImport() must only add these to the local Media
+ * Browser/timeline state — a file the engine failed to import has no real
+ * backing media, so showing it as a normal, selectable clip would be a
+ * silent divergence between the UI and the actual project state.
+ */
+export function filterImportedFiles(files: File[], failed: Set<File>): File[] {
+  return files.filter((f) => !failed.has(f));
+}
+
 /** Routes app.emit commands to UI state. Extracted to keep EditorUI complexity low. */
 function dispatchAppCommand(
   name: string,
@@ -303,8 +314,14 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
 
   /** Import files into engine AND add them to the local media browser and timeline. */
   const handleImport = useCallback(async (files: File[]) => {
-    await actions.importFiles(files);
-    for (const file of files) {
+    // REGRESSION fix: this used to unconditionally add every file below
+    // regardless of whether the engine import actually succeeded --
+    // `engine.error` would show an "Import failed" toast, but the failed
+    // file still showed up as a normal, selectable clip in the Media
+    // Browser/timeline with no real backing media, and no way for the
+    // user to tell the two apart.
+    const failed = await actions.importFiles(files);
+    for (const file of filterImportedFiles(files, failed)) {
       const type: MediaItem['type'] =
         file.type.startsWith('video') ? 'video' :
         file.type.startsWith('audio') ? 'audio' : 'image';

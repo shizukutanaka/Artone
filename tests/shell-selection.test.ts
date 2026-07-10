@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { applyClipSelectionEdit } from '../app/shell';
+import { applyClipSelectionEdit, filterImportedFiles } from '../app/shell';
 import type { TimelineClip } from '../app/TimelineView';
 import type { Selection } from '../app/Inspector';
 
@@ -71,5 +71,34 @@ describe('applyClipSelectionEdit', () => {
     const next = clipSelection({ id: 'ghost', name: 'Ghost' });
     const updated = applyClipSelectionEdit(clips, next);
     expect(updated).toEqual(clips);
+  });
+});
+
+describe('filterImportedFiles', () => {
+  function makeFile(name: string): File {
+    return new File(['x'], name);
+  }
+
+  it('REGRESSION: excludes files the engine failed to import', () => {
+    // Before fix: handleImport() unconditionally added every file to the
+    // Media Browser/timeline regardless of whether the engine import
+    // actually succeeded -- a file with e.g. an unsupported codec would
+    // show up as a normal, selectable clip with no real backing media.
+    const good = makeFile('clip.mp4');
+    const bad = makeFile('corrupt.mp4');
+    const result = filterImportedFiles([good, bad], new Set([bad]));
+    expect(result).toEqual([good]);
+  });
+
+  it('returns all files unchanged when none failed', () => {
+    const a = makeFile('a.mp4');
+    const b = makeFile('b.mp4');
+    expect(filterImportedFiles([a, b], new Set())).toEqual([a, b]);
+  });
+
+  it('returns an empty array when every file failed', () => {
+    const a = makeFile('a.mp4');
+    const b = makeFile('b.mp4');
+    expect(filterImportedFiles([a, b], new Set([a, b]))).toEqual([]);
   });
 });

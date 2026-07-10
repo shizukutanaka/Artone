@@ -51,3 +51,44 @@ describe('ArtoneApp.initialize() — keyboard shortcut wiring (headless/React pa
     expect(cb).toHaveBeenCalledOnce();
   });
 });
+
+describe('ArtoneApp.initialize() — init failure / recovery status visibility', () => {
+  // REGRESSION: initialize() collected sub-module init failures into an
+  // `errors` array and called `this.emit?.('init:partial', { errors })`, but
+  // (a) the caller (engine-context.tsx) used to assign `app.emit` only in
+  // its onReady callback, which runs strictly after this await resolves --
+  // so the emit fired while `this.emit` was still undefined, a silent
+  // no-op; and (b) `errors` was an array of `{module, error}` objects, not
+  // the `string[]` the (also-fixed) shell.tsx consumer expects. This test
+  // exercises main.ts's half of the contract: if a listener is attached
+  // before initialize() is awaited (the corrected order), it must receive a
+  // readable, string-formatted error list.
+  it('REGRESSION: emits a formatted init:partial event when a sub-module fails to init', async () => {
+    const app = new ArtoneApp();
+    app.project.init = async () => { throw new Error('boom'); };
+    const emitSpy = vi.fn();
+    app.emit = emitSpy; // assigned BEFORE initialize(), mirroring the fixed engine-context.tsx order
+
+    await app.initialize();
+
+    expect(emitSpy).toHaveBeenCalledWith('init:partial', expect.objectContaining({
+      errors: expect.arrayContaining([expect.stringContaining('project: boom')]),
+    }));
+  });
+
+  it('REGRESSION: a RecoveryManager status change to "error" is surfaced as a recoveryError event', async () => {
+    const app = new ArtoneApp();
+    await app.initialize();
+    const emitSpy = vi.fn();
+    app.emit = emitSpy;
+
+    // Force writeSnapshot's JSON.stringify to throw, driving RecoveryManager's
+    // internal status to 'error' via the same path a real quota/serialization
+    // failure would take.
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    await app.recovery.saveSnapshot('manual', 'proj1', 'Test', circular as never);
+
+    expect(emitSpy).toHaveBeenCalledWith('recoveryError');
+  });
+});

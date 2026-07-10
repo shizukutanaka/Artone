@@ -87,6 +87,8 @@ export interface EngineActions {
   importFiles(files: File[]): Promise<Set<File>>;
   exportProject(preset?: string): Promise<void>;
   setProjectName(name: string): void;
+  /** Surfaces a message via the same error UI as failed imports/exports. */
+  setError(message: string): void;
   clearError(): void;
   /** エンジンインスタンス直接アクセス (Pro 機能用) */
   getApp(): ArtoneApp | null;
@@ -126,8 +128,8 @@ interface EngineProviderProps {
 /** エンジン初期化ロジック。副作用を分離してテスト容易性を高める。 */
 async function initEngine(
   config: Partial<AppConfig>,
+  setState: React.Dispatch<React.SetStateAction<EngineState>>,
   onReady: (app: ArtoneApp, caps: { warnings: string[]; tier: string }) => void,
-  _onError: (msg: string) => void,
   cancelled: () => boolean
 ) {
   const { detectCapabilities } = await import('./capabilities');
@@ -141,6 +143,20 @@ async function initEngine(
     ...config,
     hardwareAcceleration: config.hardwareAcceleration !== false && caps.webgpu,
   });
+
+  // REGRESSION fix: app.emit must be wired BEFORE calling initialize() --
+  // ArtoneApp.initialize() emits 'init:partial' synchronously at the very
+  // end of its own body (if project/audio/recovery/shortcuts/autosave setup
+  // failed), and that call happens entirely before this function's caller
+  // (onReady) used to run. With emit assigned only inside onReady, the event
+  // fired into `this.emit?.(...)` while emit was still undefined -- a no-op
+  // -- so init failures were silently dropped no matter what listened for
+  // them downstream.
+  let cmdSeq = 0;
+  app.emit = (name: string, payload?: unknown) => {
+    setState((s) => ({ ...s, lastCommand: { cmd: { name, payload }, seq: ++cmdSeq } }));
+  };
+
   await app.initialize();
 
   if (cancelled()) {
@@ -198,13 +214,9 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
 
     initEngine(
       config ?? {},
+      setState,
       (app, caps) => {
         appRef.current = app;
-        // Wire up app.emit so keyboard-shortcut events reach the React layer
-        let cmdSeq = 0;
-        app.emit = (name: string, payload?: unknown) => {
-          setState((s) => ({ ...s, lastCommand: { cmd: { name, payload }, seq: ++cmdSeq } }));
-        };
         setState((s) => ({
           ...s,
           isReady: true,
@@ -216,7 +228,6 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
         const tick = createPlaybackTick(appRef, rafRef, setState, () => cancelled);
         rafRef.current = requestAnimationFrame(tick);
       },
-      (msg) => setState((s) => ({ ...s, error: msg })),
       () => cancelled
     ).catch((err: Error) => {
       if (!cancelled) setState((s) => ({ ...s, error: err.message }));
@@ -297,6 +308,9 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
       },
       setProjectName(name: string) {
         setState((s) => ({ ...s, projectName: name, hasUnsavedChanges: true }));
+      },
+      setError(message: string) {
+        setState((s) => ({ ...s, error: message }));
       },
       clearError() {
         setState((s) => ({ ...s, error: null }));

@@ -222,7 +222,8 @@
     },
     "generic": "خطأ: {message}",
     "init": {
-      "title": "خطأ في التهيئة"
+      "title": "خطأ في التهيئة",
+      "partial": "فشل بعض الميزات في البدء: {message}"
     },
     "details": "تفاصيل الخطأ",
     "restart": "إعادة تشغيل",
@@ -237,7 +238,8 @@
     "restore": "استعادة",
     "discard": "تجاهل",
     "autoSave": "حفظ تلقائي",
-    "restorePrompt": "تم اكتشاف عمل غير محفوظ من {time}. هل تريد الاستعادة؟"
+    "restorePrompt": "تم اكتشاف عمل غير محفوظ من {time}. هل تريد الاستعادة؟",
+    "autoSaveFailed": "الحفظ التلقائي لا يعمل. قد لا يتم حفظ تغييراتك."
   },
   "performance": {
     "fps": "FPS: {value}",

@@ -4,10 +4,23 @@
  * # AI generated (reviewed)
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { applyClipSelectionEdit, filterImportedFiles, dispatchAppCommand } from '../app/shell';
 import type { TimelineClip } from '../app/TimelineView';
 import type { Selection } from '../app/Inspector';
+import { setupI18n } from '../i18n/i18n-manager';
+import en from '../i18n/en.json';
+
+// dispatchAppCommand's init:partial/recoveryError cases call t(), which
+// requires setupI18n() to have run; loadLocale() fetches over the network,
+// so stub fetch just long enough to seed real translations for this file.
+beforeAll(async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => en })) as unknown as typeof fetch;
+  const mgr = setupI18n({ defaultLocale: 'en', fallbackLocale: 'en', loadPath: '/i18n/{locale}.json' });
+  await mgr.init();
+  globalThis.fetch = originalFetch;
+});
 
 function makeClips(): TimelineClip[] {
   return [
@@ -107,7 +120,8 @@ describe('dispatchAppCommand — togglePanel', () => {
   function callTogglePanel(payload: unknown) {
     const setActivePanel = vi.fn();
     const importFiles = vi.fn();
-    dispatchAppCommand('togglePanel', payload, setActivePanel, importFiles);
+    const setError = vi.fn();
+    dispatchAppCommand('togglePanel', payload, { setActivePanel, importFiles, setError });
     return setActivePanel;
   }
 
@@ -127,5 +141,38 @@ describe('dispatchAppCommand — togglePanel', () => {
     const updater = setActivePanel.mock.calls[0][0] as (prev: string | null) => string | null;
     expect(updater(null)).toBe('effects');
     expect(updater('effects')).toBe(null); // toggling the same panel again closes it
+  });
+});
+
+describe('dispatchAppCommand — init:partial / recoveryError', () => {
+  // REGRESSION: before this fix, ArtoneApp.initialize()'s 'init:partial'
+  // event (emitted when e.g. recovery.init() or setupAutoSave() throws) and
+  // a RecoveryManager 'error' status transition had no case in this switch
+  // -- they silently fell into `default` and the user got zero indication
+  // that their session was not being crash-protected.
+  function call(name: string, payload: unknown) {
+    const setActivePanel = vi.fn();
+    const importFiles = vi.fn();
+    const setError = vi.fn();
+    dispatchAppCommand(name, payload, { setActivePanel, importFiles, setError });
+    return setError;
+  }
+
+  it('REGRESSION: init:partial surfaces the collected errors via setError', () => {
+    const setError = call('init:partial', { errors: ['recovery.init failed: quota exceeded'] });
+    expect(setError).toHaveBeenCalledOnce();
+    expect(setError.mock.calls[0][0]).toContain('quota exceeded');
+  });
+
+  it('init:partial is a no-op when the errors array is empty', () => {
+    const setError = call('init:partial', { errors: [] });
+    expect(setError).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: recoveryError surfaces a user-facing message via setError', () => {
+    const setError = call('recoveryError', undefined);
+    expect(setError).toHaveBeenCalledOnce();
+    expect(setError.mock.calls[0][0]).toEqual(expect.any(String));
+    expect((setError.mock.calls[0][0] as string).length).toBeGreaterThan(0);
   });
 });

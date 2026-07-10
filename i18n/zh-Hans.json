@@ -222,7 +222,8 @@
     },
     "generic": "错误：{message}",
     "init": {
-      "title": "初始化错误"
+      "title": "初始化错误",
+      "partial": "部分功能启动失败：{message}"
     },
     "details": "错误详情",
     "restart": "重新启动",
@@ -237,7 +238,8 @@
     "restore": "恢复",
     "discard": "丢弃",
     "autoSave": "自动保存",
-    "restorePrompt": "检测到来自 {time} 的未保存工作。是否恢复？"
+    "restorePrompt": "检测到来自 {time} 的未保存工作。是否恢复？",
+    "autoSaveFailed": "自动保存未正常工作，您的更改可能不会被保存。"
   },
   "performance": {
     "fps": "FPS：{value}",

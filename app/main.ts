@@ -134,6 +134,8 @@ export class ArtoneApp {
   private playbackStartWallTime = 0;
   /** Timeline frame at the moment play() was called, so elapsed wall-time maps to the right frame. */
   private playbackStartFrame = 0;
+  /** Unsubscribes from RecoveryManager status changes; set in initialize(), torn down in dispose(). */
+  private recoveryStatusUnsubscribe: (() => void) | null = null;
 
   // Crash snapshots (error / unhandledrejection / beforeunload) and the periodic
   // auto-save timer are owned by RecoveryManager (transactional IndexedDB). The
@@ -253,9 +255,9 @@ export class ArtoneApp {
 
     // 初期化結果をイベントで通知 (UI が表示可能)
     if (errors.length > 0) {
-      log.warn(`init completed with ${errors.length} error(s):`,
-        errors.map((e) => `${e.module}: ${e.error}`));
-      this.emit?.('init:partial', { errors });
+      const formatted = errors.map((e) => `${e.module}: ${(e.error as Error)?.message ?? e.error}`);
+      log.warn(`init completed with ${errors.length} error(s):`, formatted);
+      this.emit?.('init:partial', { errors: formatted });
     }
   }
 
@@ -579,8 +581,16 @@ export class ArtoneApp {
     try { this.setupAutoSave(); this.setupCrashRecovery(); } catch (e) { errors.push({ module: 'autosave', error: e }); }
     if (errors.length > 0) {
       log.warn(`headless init: ${errors.length} error(s)`);
-      this.emit?.('init:partial', { errors });
+      this.emit?.('init:partial', { errors: errors.map((e) => `${e.module}: ${(e.error as Error)?.message ?? e.error}`) });
     }
+    // REGRESSION fix: RecoveryManager.getStatus()/subscribe() existed but
+    // nothing ever consumed them — if auto-save started failing every cycle
+    // (e.g. IndexedDB quota exceeded) the user got zero indication that their
+    // session was no longer crash-protected. Surface it the same way as any
+    // other engine error.
+    this.recoveryStatusUnsubscribe = this.recovery.subscribe((status) => {
+      if (status === 'error') this.emit?.('recoveryError');
+    });
   }
 
   getCurrentTime(): number {
@@ -674,6 +684,9 @@ export class ArtoneApp {
 
   dispose(): void {
     this.stopPlaybackLoop();
+
+    this.recoveryStatusUnsubscribe?.();
+    this.recoveryStatusUnsubscribe = null;
 
     // RecoveryManager owns the auto-save timer + crash listeners; dispose() stops
     // the timer and closes the IndexedDB connection.

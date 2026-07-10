@@ -97,13 +97,20 @@ export function filterImportedFiles(files: File[], failed: Set<File>): File[] {
   return files.filter((f) => !failed.has(f));
 }
 
+/** Callbacks dispatchAppCommand may invoke, grouped to stay within the 3-arg function limit. */
+export interface DispatchAppCommandHandlers {
+  setActivePanel: React.Dispatch<React.SetStateAction<string | null>>;
+  importFiles: (files: File[]) => void;
+  setError: (message: string) => void;
+}
+
 /** Routes app.emit commands to UI state. Extracted to keep EditorUI complexity low. */
 export function dispatchAppCommand(
   name: string,
   payload: unknown,
-  setActivePanel: React.Dispatch<React.SetStateAction<string | null>>,
-  importFiles: (files: File[]) => void,
+  handlers: DispatchAppCommandHandlers,
 ): void {
+  const { setActivePanel, importFiles, setError } = handlers;
   switch (name) {
     case 'togglePanel':
       // REGRESSION fix: 'timeline' and 'media' (F5/F6) have no case in the
@@ -140,6 +147,23 @@ export function dispatchAppCommand(
           document.documentElement.requestFullscreen().catch(() => undefined);
         }
       }
+      break;
+    case 'init:partial': {
+      // REGRESSION fix: ArtoneApp.initialize() collects init failures
+      // (project/audio/recovery/shortcuts/autosave) into an `errors` array
+      // and emits this event, but nothing ever consumed it -- the user got
+      // zero indication that e.g. recovery.init() failed and their session
+      // would not be crash-protected.
+      const errors = (payload as { errors?: string[] } | undefined)?.errors;
+      if (errors && errors.length > 0) {
+        setError(t('error.init.partial', { message: errors.join('; ') }));
+      }
+      break;
+    }
+    case 'recoveryError':
+      // Emitted when RecoveryManager's status subscription reports 'error'
+      // (e.g. auto-save started failing mid-session) -- previously silent.
+      setError(t('recovery.autoSaveFailed'));
       break;
     default:
       // Future extensibility: addMarker, nextMarker, prevMarker, toggleSnap, etc.
@@ -409,8 +433,11 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     // imported via the shortcut/menu "showImport" command also appear in
     // the media browser and get an auto-placed timeline clip — previously
     // this silently imported into the engine only, looking like a no-op.
-    dispatchAppCommand(cmd.cmd.name, cmd.cmd.payload, setActivePanel,
-      (files) => { handleImport(files).catch(() => undefined); });
+    dispatchAppCommand(cmd.cmd.name, cmd.cmd.payload, {
+      setActivePanel,
+      importFiles: (files) => { handleImport(files).catch(() => undefined); },
+      setError: (message) => actions.setError(message),
+    });
   }, [engine.lastCommand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // コマンドパレット — エンジンの実アクションを渡す

@@ -222,7 +222,8 @@
     },
     "generic": "錯誤：{message}",
     "init": {
-      "title": "初始化錯誤"
+      "title": "初始化錯誤",
+      "partial": "部分功能啟動失敗：{message}"
     },
     "details": "錯誤詳情",
     "restart": "重新啟動",
@@ -237,7 +238,8 @@
     "restore": "復原",
     "discard": "捨棄",
     "autoSave": "自動儲存",
-    "restorePrompt": "偵測到來自 {time} 的未儲存工作。是否還原？"
+    "restorePrompt": "偵測到來自 {time} 的未儲存工作。是否還原？",
+    "autoSaveFailed": "自動儲存功能未正常運作，您的變更可能不會被儲存。"
   },
   "performance": {
     "fps": "FPS：{value}",

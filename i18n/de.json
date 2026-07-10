@@ -222,7 +222,8 @@
     },
     "generic": "Fehler: {message}",
     "init": {
-      "title": "Initialisierungsfehler"
+      "title": "Initialisierungsfehler",
+      "partial": "Einige Funktionen konnten nicht gestartet werden: {message}"
     },
     "details": "Fehlerdetails",
     "restart": "Neu starten",
@@ -237,7 +238,8 @@
     "restore": "Wiederherstellen",
     "discard": "Verwerfen",
     "autoSave": "Auto-Speichern",
-    "restorePrompt": "Nicht gespeicherte Arbeit von {time} gefunden. Wiederherstellen?"
+    "restorePrompt": "Nicht gespeicherte Arbeit von {time} gefunden. Wiederherstellen?",
+    "autoSaveFailed": "Automatisches Speichern funktioniert nicht. Änderungen werden möglicherweise nicht gespeichert."
   },
   "performance": {
     "fps": "FPS: {value}",

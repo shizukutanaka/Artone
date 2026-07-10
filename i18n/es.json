@@ -222,7 +222,8 @@
     },
     "generic": "Error: {message}",
     "init": {
-      "title": "Error de inicialización"
+      "title": "Error de inicialización",
+      "partial": "Algunas funciones no se pudieron iniciar: {message}"
     },
     "details": "Detalles del error",
     "restart": "Reiniciar",
@@ -237,7 +238,8 @@
     "restore": "Restaurar",
     "discard": "Descartar",
     "autoSave": "Autoguardado",
-    "restorePrompt": "Trabajo no guardado detectado desde {time}. ¿Restaurar?"
+    "restorePrompt": "Trabajo no guardado detectado desde {time}. ¿Restaurar?",
+    "autoSaveFailed": "El autoguardado no está funcionando. Es posible que tus cambios no se guarden."
   },
   "performance": {
     "fps": "FPS: {value}",

@@ -222,7 +222,8 @@
     },
     "generic": "Erro: {message}",
     "init": {
-      "title": "Erro de inicialização"
+      "title": "Erro de inicialização",
+      "partial": "Alguns recursos falharam ao iniciar: {message}"
     },
     "details": "Detalhes do erro",
     "restart": "Reiniciar",
@@ -237,7 +238,8 @@
     "restore": "Restaurar",
     "discard": "Descartar",
     "autoSave": "Auto-salvar",
-    "restorePrompt": "Trabalho não salvo detectado de {time}. Restaurar?"
+    "restorePrompt": "Trabalho não salvo detectado de {time}. Restaurar?",
+    "autoSaveFailed": "O salvamento automático não está funcionando. Suas alterações podem não ser salvas."
   },
   "performance": {
     "fps": "FPS: {value}",

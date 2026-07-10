@@ -222,7 +222,8 @@
     },
     "generic": "Erreur : {message}",
     "init": {
-      "title": "Erreur d'initialisation"
+      "title": "Erreur d'initialisation",
+      "partial": "Certaines fonctionnalités n'ont pas pu démarrer : {message}"
     },
     "details": "Détails de l'erreur",
     "restart": "Redémarrer",
@@ -237,7 +238,8 @@
     "restore": "Restaurer",
     "discard": "Abandonner",
     "autoSave": "Sauvegarde auto",
-    "restorePrompt": "Travail non enregistré détecté depuis {time}. Restaurer ?"
+    "restorePrompt": "Travail non enregistré détecté depuis {time}. Restaurer ?",
+    "autoSaveFailed": "La sauvegarde automatique ne fonctionne pas. Vos modifications risquent de ne pas être enregistrées."
   },
   "performance": {
     "fps": "FPS : {value}",

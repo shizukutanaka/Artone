@@ -222,7 +222,8 @@
     },
     "generic": "Error: {message}",
     "init": {
-      "title": "Initialization Error"
+      "title": "Initialization Error",
+      "partial": "Some features failed to start: {message}"
     },
     "unexpected": {
       "title": "Unexpected Error",
@@ -237,7 +238,8 @@
     "restore": "Restore",
     "discard": "Discard",
     "autoSave": "Auto-save",
-    "restorePrompt": "Unsaved work detected from {time}. Restore?"
+    "restorePrompt": "Unsaved work detected from {time}. Restore?",
+    "autoSaveFailed": "Auto-save is not working. Your changes may not be saved."
   },
   "performance": {
     "fps": "FPS: {value}",

@@ -222,7 +222,8 @@
     },
     "generic": "エラーが発生しました: {message}",
     "init": {
-      "title": "初期化エラー"
+      "title": "初期化エラー",
+      "partial": "一部機能の起動に失敗しました: {message}"
     },
     "unexpected": {
       "title": "予期しないエラー",
@@ -237,7 +238,8 @@
     "restore": "復元",
     "discard": "破棄",
     "autoSave": "自動保存",
-    "restorePrompt": "{time} の未保存の作業が見つかりました。復元しますか？"
+    "restorePrompt": "{time} の未保存の作業が見つかりました。復元しますか？",
+    "autoSaveFailed": "自動保存が機能していません。変更が保存されない可能性があります。"
   },
   "performance": {
     "fps": "FPS: {value}",

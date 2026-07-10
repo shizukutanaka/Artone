@@ -106,6 +106,20 @@ describe('RecoveryManager — saveSnapshot', () => {
     expect(b).toBeTruthy();
   });
 
+  it('REGRESSION: throttles a crash-snapshot storm (rapid repeated crash saves)', async () => {
+    // Before fix: only 'auto' saves were throttled. A repeating error (e.g.
+    // an unhandled rejection that keeps firing, or a bug that throws in a
+    // loop) calls saveSnapshot('crash', ...) once per event with no upper
+    // bound -- each successful write also runs enforceLimit(), so a burst of
+    // near-identical crash snapshots could blow past maxSnapshots and evict
+    // genuinely useful older backups (e.g. the last good pre-crash auto-save)
+    // in favor of dozens of duplicates of the same failing moment.
+    const first = await mgr.saveSnapshot('crash', 'p', 'P', makeData());
+    const second = await mgr.saveSnapshot('crash', 'p', 'P', makeData());
+    expect(first).toBeTruthy();
+    expect(second).toBeNull();
+  });
+
   it('computes a checksum for the snapshot', async () => {
     await mgr.saveSnapshot('manual', 'p', 'P', makeData());
     const snaps = await mgr.getSnapshots('p');

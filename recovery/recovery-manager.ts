@@ -82,6 +82,8 @@ export class RecoveryManager {
   private status: RecoveryStatus = 'idle';
   private autoSaveTimer: number | null = null;
   private lastSaveTime = 0;
+  /** Separate throttle clock for 'crash' snapshots (see saveSnapshot). */
+  private lastCrashSaveTime = 0;
   private listeners: Set<(status: RecoveryStatus) => void> = new Set();
   private crashFlag = 'artone_crash_flag';
   /** Guards against attaching crash-detection listeners more than once. */
@@ -235,9 +237,24 @@ export class RecoveryManager {
     if (type === 'auto' && now - this.lastSaveTime < 5000) {
       return null;
     }
+    // REGRESSION fix: 'crash' snapshots were exempt from any throttle (by
+    // design, so a single genuine crash is never dropped) -- but a repeating
+    // error (e.g. a thrown-in-a-loop bug, or a rejection that keeps firing)
+    // calls saveCrashSnapshot() on every 'error'/'unhandledrejection' event
+    // with no upper bound on frequency. Each write also runs enforceLimit(),
+    // whose eviction is purely count/age-based: a burst of near-identical
+    // crash snapshots can blow past maxSnapshots and evict genuinely useful
+    // older backups (including the last good pre-crash auto-save) in favor
+    // of dozens of near-duplicate snapshots of the same failing moment.
+    // Throttle crash saves too, just on a much shorter, still-generous
+    // window than auto-saves so a real crash is still captured promptly.
+    if (type === 'crash' && now - this.lastCrashSaveTime < 2000) {
+      return null;
+    }
 
     this.setStatus('saving');
     this.lastSaveTime = now;
+    if (type === 'crash') this.lastCrashSaveTime = now;
 
     try {
       const dataStr = JSON.stringify(data);

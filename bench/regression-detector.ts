@@ -109,7 +109,7 @@ export class BenchmarkRunner {
       await spec.run();
     }
 
-    // 自動反復決定: 1秒以下なら100回、それ以外は10回
+    // 自動反復決定 (probe 実測に基づく4段階): <10ms→1000回, <100ms→100回, <1000ms→30回, それ以外→10回
     let iterations = spec.iterations ?? 0;
     if (iterations === 0) {
       const probeStart = performance.now();
@@ -203,9 +203,17 @@ export class RegressionDetector {
       const p95Delta = base.p95Ms > 0 ? ((cur.p95Ms - base.p95Ms) / base.p95Ms) * 100 : meanDelta;
       const delta = Math.max(meanDelta, p95Delta);
 
-      if (delta > t.minor) {
+      // REGRESSION fix: THRESHOLDS' own doc comment says "5%以上で minor, 15%
+      // major, 30% critical" (5/15/30 percent OR MORE), but these comparisons
+      // used strict `>` -- a delta of exactly 5.0% was not registered as a
+      // regression at all, exactly 15.0% classified as 'minor' instead of
+      // 'major', and exactly 30.0% classified as 'major' instead of
+      // 'critical' (which would NOT fail CI, since only 'critical'
+      // regressions fail the build). Use >= to match the documented
+      // "or more" semantics at each boundary.
+      if (delta >= t.minor) {
         const severity =
-          delta > t.critical ? 'critical' : delta > t.major ? 'major' : 'minor';
+          delta >= t.critical ? 'critical' : delta >= t.major ? 'major' : 'minor';
         regressions.push({
           name: cur.name,
           baselineMeanMs: base.meanMs,
@@ -230,6 +238,16 @@ export class RegressionDetector {
     const passed = !regressions.some((r) => r.severity === 'critical');
 
     return { baseline, current, regressions, improvements, passed };
+  }
+
+  /**
+   * Names of current results absent from the baseline — these are silently
+   * skipped by detect() ("新規ベンチは比較対象外") and so have zero regression
+   * protection until the baseline is regenerated. Exposed so callers (the CI
+   * runner) can surface the gap instead of leaving it invisible.
+   */
+  findMissingBaseline(baseline: BenchmarkBaseline, current: BenchmarkResult[]): string[] {
+    return current.filter((r) => !baseline.results[r.name]).map((r) => r.name);
   }
 
   formatReport(report: RegressionReport): string {

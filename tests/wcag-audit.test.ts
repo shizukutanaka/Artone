@@ -160,6 +160,30 @@ describe('A11yAuditor — image alt text', () => {
   });
 });
 
+describe('A11yAuditor — REGRESSION: large-text AA-only contrast must be flagged as not-AAA', () => {
+  it('flags large text at AA-only contrast (ratio in [3, 4.5)) instead of counting it as passed', () => {
+    // Before fix: checkColorContrast()'s guard was
+    // `level === 'A' || (level === 'AA' && !isLarge)`. Large text can only
+    // ever resolve to 'AAA' | 'AA' | 'FAIL' (ColorContrast.level's
+    // isLargeText branch never returns 'A'), so `level === 'AA' && !isLarge`
+    // was never true for large text -- an AA-only large-text element (e.g.
+    // gray-on-white at ~3.1:1, well below the 4.5:1 AAA requirement for
+    // large text) silently fell through to `this.passed++` and was reported
+    // as a passing check.
+    const host = makeHost(
+      '<p id="txt" style="color: rgb(137,137,137); background-color: rgb(255,255,255); font-size: 24px;">Large text</p>'
+    );
+    const auditor = new A11yAuditor(host);
+    const report = auditor.audit();
+    const contrastIssue = report.issues.find(
+      (i) => i.rule === 'wcag-1.4.6' && i.element.includes('#txt')
+    );
+    expect(contrastIssue).toBeTruthy();
+    expect(contrastIssue?.severity).toBe('major');
+    expect(contrastIssue?.message).toContain('AA');
+  });
+});
+
 describe('A11yAuditor — REGRESSION: near-opaque rgba() background resolution', () => {
   it('correctly resolves a near-opaque rgba() background instead of skipping to a lighter ancestor', () => {
     // Before fix: findBackground() explicitly tries to treat alpha >= 0.99

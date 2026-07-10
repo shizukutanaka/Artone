@@ -179,7 +179,16 @@ export class A11yAuditor {
           message: `Contrast ratio ${ratio.toFixed(2)}:1 fails WCAG AAA (need ${isLarge ? '4.5' : '7'}:1)`,
           fix: 'Increase color contrast between text and background',
         });
-      } else if (level === 'A' || (level === 'AA' && !isLarge)) {
+      } else if (level !== 'AAA') {
+        // REGRESSION fix: the previous condition was `level === 'A' ||
+        // (level === 'AA' && !isLarge)`, which only flagged large text when
+        // it was AA-only if !isLarge -- but large text can only ever be
+        // 'AAA' | 'AA' | 'FAIL' (see ColorContrast.level's isLargeText
+        // branch), so `level === 'AA' && !isLarge` was never true for large
+        // text at all. Large text with ratio in [3, 4.5) (AA but not AAA)
+        // silently fell through to `this.passed++` below -- exactly the
+        // "achieves AA but not AAA" case this rule exists to catch. Any
+        // non-FAIL, non-AAA level (large or normal text) must be flagged.
         this.issues.push({
           severity: 'major',
           rule: 'wcag-1.4.6',

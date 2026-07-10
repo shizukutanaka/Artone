@@ -170,6 +170,23 @@ describe('RegressionDetector', () => {
     expect(report.improvements).toHaveLength(0);
   });
 
+  it('findMissingBaseline() reports benchmarks detect() silently skips', () => {
+    // REGRESSION: detect() silently `continue`s past any current result
+    // absent from baseline.results, with zero visible signal. If the suite
+    // grows and nobody re-runs bench:baseline, those benchmarks stay
+    // permanently unprotected -- findMissingBaseline() lets the CI runner
+    // surface that gap instead of leaving it invisible.
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100)]);
+    const current = [makeResult('a', 105), makeResult('new-bench', 5), makeResult('another-new', 3)];
+    expect(detector.findMissingBaseline(baseline, current)).toEqual(['new-bench', 'another-new']);
+  });
+
+  it('findMissingBaseline() returns empty when every current result has a baseline entry', () => {
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100)]);
+    const current = [makeResult('a', 105)];
+    expect(detector.findMissingBaseline(baseline, current)).toEqual([]);
+  });
+
   it('detect() classifies minor regression correctly', () => {
     // 10% slower → above minor(5%), below major(15%)
     const baseline = makeBaseline('1.0.0', [makeResult('a', 100)]);
@@ -193,6 +210,37 @@ describe('RegressionDetector', () => {
     // 35% slower → above critical(30%)
     const baseline = makeBaseline('1.0.0', [makeResult('a', 100)]);
     const current = [makeResult('a', 135)];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions[0].severity).toBe('critical');
+    expect(report.passed).toBe(false);
+  });
+
+  it('REGRESSION: an exact +5% delta registers as a (minor) regression, not nothing', () => {
+    // THRESHOLDS' own doc comment: "5%以上で minor" (5% OR MORE). The old
+    // `delta > t.minor` comparison required strictly greater than 5, so an
+    // exact 5.0% regression was silently not registered as a regression at
+    // all. Hold p95 delta equal to mean delta so max(meanDelta, p95Delta)
+    // lands exactly on the boundary being tested.
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100, { p95Ms: 100 })]);
+    const current = [makeResult('a', 105, { p95Ms: 105 })];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions).toHaveLength(1);
+    expect(report.regressions[0].severity).toBe('minor');
+  });
+
+  it('REGRESSION: an exact +15% delta classifies as major, not minor', () => {
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100, { p95Ms: 100 })]);
+    const current = [makeResult('a', 115, { p95Ms: 115 })];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions[0].severity).toBe('major');
+  });
+
+  it('REGRESSION: an exact +30% delta classifies as critical and fails CI', () => {
+    // Before fix, exactly +30% classified as 'major' (not >30), so a
+    // regression that hit the critical threshold exactly would NOT fail the
+    // build even though it meets the documented "30% or more" bar.
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100, { p95Ms: 100 })]);
+    const current = [makeResult('a', 130, { p95Ms: 130 })];
     const report = detector.detect(baseline, current);
     expect(report.regressions[0].severity).toBe('critical');
     expect(report.passed).toBe(false);

@@ -873,6 +873,21 @@ export function buildWasmProcessorCode(): string {
           this.inputView = null;
           this.outputView = null;
           this.viewBuffer = null;
+          // REGRESSION fix: setParameter() used to construct a fresh
+          // TextEncoder AND let .encode() allocate a new Uint8Array on
+          // every call. setParameter can run continuously during
+          // automation playback (driven by port.onmessage), so both
+          // allocated on this real-time thread on every automated
+          // parameter change -- violating this module's own "起動時のみ
+          // アロケート / 動的アロケート禁止" rule for the same reason
+          // process() itself was already made allocation-free. Allocate
+          // the encoder and a reusable scratch buffer once, here, and use
+          // encodeInto() (writes into the existing buffer, no allocation)
+          // instead of encode() (always allocates a new Uint8Array).
+          // Parameter ids are short identifiers (e.g. "gain", "mix"); 64
+          // bytes is generous headroom.
+          this._textEncoder = new TextEncoder();
+          this._idEncodeBuf = new Uint8Array(64);
 
           this.port.onmessage = (e) => {
             const { type, data } = e.data;
@@ -929,10 +944,15 @@ export function buildWasmProcessorCode(): string {
         setParameter(id, value) {
           // Use the stored export references; wasmInstance is never set in this processor.
           if (this.wasmSetParameter && this.wasmAllocString) {
-            const idBytes = new TextEncoder().encode(id);
-            const idPtr = this.wasmAllocString(idBytes.length);
-            new Uint8Array(this.wasmMemory.buffer, idPtr, idBytes.length).set(idBytes);
-            this.wasmSetParameter(idPtr, idBytes.length, value);
+            const { written } = this._textEncoder.encodeInto(id, this._idEncodeBuf);
+            // Allocate/copy the fixed scratch-buffer size (not the encoded
+            // length) so the copy below is a single whole-buffer .set() with
+            // no subarray/slice view needed on either side; wasmSetParameter
+            // is still told the real encoded length, so trailing unused
+            // bytes are never read.
+            const idPtr = this.wasmAllocString(this._idEncodeBuf.length);
+            new Uint8Array(this.wasmMemory.buffer, idPtr, this._idEncodeBuf.length).set(this._idEncodeBuf);
+            this.wasmSetParameter(idPtr, written, value);
           }
         }
 

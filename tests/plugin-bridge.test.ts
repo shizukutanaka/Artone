@@ -1144,3 +1144,76 @@ describe('WasmPluginProcessor — real-time process()', () => {
     expect(src).toContain('this.viewBuffer');                       // view caching present
   });
 });
+
+// ============================================================
+// WasmPluginProcessor.setParameter — REGRESSION: allocation-free
+// ============================================================
+
+type ParamProcessor = {
+  setParameter(id: string, value: number): void;
+  [k: string]: unknown;
+};
+
+/** Build a processor wired to capture setParameter's WASM-side calls. */
+function makeParamProcessor(): { p: ParamProcessor; calls: Array<{ id: string; value: number }> } {
+  const Proc = instantiateWorkletProcessor();
+  const p = new Proc({}) as unknown as ParamProcessor;
+  const mem = new WebAssembly.Memory({ initial: 1 });
+  p.wasmMemory = mem;
+  const calls: Array<{ id: string; value: number }> = [];
+  p.wasmAllocString = (): number => 1000; // fixed scratch offset in WASM memory
+  p.wasmSetParameter = (ptr: number, len: number, value: number): void => {
+    const bytes = new Uint8Array(mem.buffer, ptr, len);
+    calls.push({ id: new TextDecoder().decode(bytes), value });
+  };
+  return { p, calls };
+}
+
+describe('WasmPluginProcessor.setParameter() — REGRESSION: allocation-free per call', () => {
+  it('constructs at most one TextEncoder for the processor\'s lifetime, not one per setParameter call', () => {
+    // Before fix: every call did `new TextEncoder().encode(id)`, allocating
+    // both a new encoder AND a new Uint8Array on the real-time audio
+    // thread -- reachable continuously during automation playback (driven
+    // by port.onmessage), violating this codebase's "起動時のみアロケート"
+    // rule for AudioWorkletProcessor the same way process() itself was
+    // already fixed to respect. A plain identity check on p._textEncoder
+    // would false-pass on the old code too (the property simply doesn't
+    // exist there, so undefined === undefined trivially) -- count actual
+    // constructor invocations instead via a spy on the global TextEncoder.
+    let constructCount = 0;
+    const RealTextEncoder = globalThis.TextEncoder;
+    class CountingTextEncoder extends RealTextEncoder {
+      constructor(...args: []) { super(...args); constructCount++; }
+    }
+    vi.stubGlobal('TextEncoder', CountingTextEncoder);
+    try {
+      const { p } = makeParamProcessor();
+      const afterConstruct = constructCount;
+
+      for (let i = 0; i < 20; i++) p.setParameter('gain', i * 0.1);
+
+      expect(afterConstruct).toBeGreaterThanOrEqual(1); // sanity: was constructed at all
+      expect(constructCount).toBe(afterConstruct); // none of the 20 calls constructed another
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('still delivers the correct parameter id and value to the WASM side', () => {
+    const { p, calls } = makeParamProcessor();
+    p.setParameter('gain', 0.5);
+    p.setParameter('mix', 0.8);
+    expect(calls).toEqual([
+      { id: 'gain', value: 0.5 },
+      { id: 'mix', value: 0.8 },
+    ]);
+  });
+
+  it('source constructs TextEncoder once (in the constructor), not inside setParameter', () => {
+    const src = buildWasmProcessorCode();
+    const setParamBody = src.slice(src.indexOf('setParameter(id, value)'));
+    expect(setParamBody).not.toMatch(/new TextEncoder\(\)/);
+    expect(setParamBody).toContain('encodeInto');
+    expect(src).toContain('this._textEncoder = new TextEncoder()');
+  });
+});

@@ -561,6 +561,71 @@ describe('PluginBridge — processOffline', () => {
     // 3 blocks → process called 3 times
     expect(processFn).toHaveBeenCalledTimes(3);
   });
+
+  it('REGRESSION: clamps channel iteration to the plugin descriptor, not the AudioBuffer channel count', async () => {
+    // Before fix: the input copy loop iterated inputBuffer.numberOfChannels
+    // unconditionally, unlike the real-time process() path which clamps to
+    // Math.min(channels, 2). Bouncing a >stereo AudioBuffer (e.g. 5.1
+    // surround) through a stereo (inputs:2) plugin wrote channel-2..N sample
+    // blocks at inputPtr + ch*blockSize*4 for ch up to numberOfChannels-1 --
+    // memory a real 2-channel plugin never reserves and never expects
+    // touched. Memory layout below places an untouched "guard" region
+    // immediately after the assumed 2-channel input area, which only the
+    // unclamped excess-channel writes could ever reach.
+    const BLOCK = 128;
+    const length = BLOCK;
+    const channels = 6; // 5.1 surround AudioBuffer, but the plugin is stereo (inputs:2/outputs:2)
+
+    const inputPtr = 0;
+    const guardPtr = 2 * BLOCK * 4; // where descriptor.inputs=2's region ends; ch=2..5 writes land here without the clamp
+    const guardChannels = channels - 2;
+    const outputPtr = guardPtr + guardChannels * BLOCK * 4; // placed after the guard, so legit output copy never touches it
+
+    const processFn = vi.fn();
+    const inst = injectInstance(bridge, makeDescriptor({ inputs: 2, outputs: 2 }));
+    (inst.wasmInstance as unknown as { exports: Record<string, unknown> }).exports = {
+      process: processFn,
+      getInputBuffer: vi.fn().mockReturnValue(inputPtr),
+      getOutputBuffer: vi.fn().mockReturnValue(outputPtr),
+      memory: { buffer: new ArrayBuffer(outputPtr + 2 * BLOCK * 4) },
+    };
+    const memoryBuffer = (inst.wasmInstance.exports as unknown as { memory: { buffer: ArrayBuffer } }).memory.buffer;
+
+    const outChannelData = Array.from({ length: channels }, () => new Float32Array(length));
+    const outputBufferMock = {
+      numberOfChannels: channels,
+      length,
+      sampleRate: 44100,
+      getChannelData: vi.fn((ch: number) => outChannelData[ch]),
+    };
+    (bridge as unknown as { audioContext: { createBuffer: ReturnType<typeof vi.fn> } }).audioContext = {
+      createBuffer: vi.fn().mockReturnValue(outputBufferMock),
+    };
+
+    const inputChannelData = Array.from({ length: channels }, (_, ch) => new Float32Array(length).fill(ch + 1));
+    const inputBuffer = {
+      numberOfChannels: channels,
+      length,
+      sampleRate: 44100,
+      getChannelData: vi.fn((ch: number) => inputChannelData[ch]),
+    } as unknown as AudioBuffer;
+
+    // Guard region: only reachable by an unclamped excess-channel write.
+    // Fill it with a sentinel and snapshot that value (as a plain array, not
+    // a live view) so the post-call comparison actually detects a mutation
+    // rather than trivially comparing the same backing memory to itself.
+    const guardView = new Float32Array(memoryBuffer, guardPtr, guardChannels * BLOCK);
+    guardView.fill(-999);
+    const guardSnapshot = Array.from(guardView);
+
+    await bridge.processOffline(inst.id, inputBuffer);
+
+    expect(Array.from(guardView)).toEqual(guardSnapshot);
+    // Only the first 2 (descriptor.outputs) output channels get written;
+    // channels 2..5 must remain untouched (still their initial zeros).
+    expect(outChannelData[2].every((v) => v === 0)).toBe(true);
+    expect(outChannelData[5].every((v) => v === 0)).toBe(true);
+  });
 });
 
 // ============================================================

@@ -477,22 +477,37 @@ export class PluginBridge {
     const blockSize = this.BLOCK_SIZE;
     const numBlocks = Math.ceil(inputBuffer.length / blockSize);
     
+    // REGRESSION fix: the real-time AudioWorkletProcessor.process() path
+    // clamps its channel loop (`Math.min(inCh.length, 2)` / `Math.min(outputs[0].length, 2)`)
+    // because the WASM side only ever reserves `descriptor.inputs`/`.outputs`
+    // channels' worth of buffer space per block. This offline path had no
+    // equivalent clamp: it iterated the *AudioBuffer's own* channel count,
+    // so bouncing a >stereo AudioBuffer (e.g. 5.1/7.1 surround) through any
+    // of the built-in plugins (all declared inputs:2/outputs:2) wrote
+    // channel-3..N sample blocks at inputPtr/outputPtr offsets past the
+    // 2-channel region the plugin actually reserved -- silently corrupting
+    // adjacent WASM linear memory (no RangeError, since the backing
+    // WebAssembly.Memory is far larger than the reserved region) instead of
+    // throwing or truncating safely.
+    const inChannels = Math.min(inputBuffer.numberOfChannels, instance.descriptor.inputs);
+    const outChannels = Math.min(outputBuffer.numberOfChannels, instance.descriptor.outputs);
+
     for (let block = 0; block < numBlocks; block++) {
       const offset = block * blockSize;
       const frames = Math.min(blockSize, inputBuffer.length - offset);
-      
+
       // Copy input
-      for (let ch = 0; ch < inputBuffer.numberOfChannels; ch++) {
+      for (let ch = 0; ch < inChannels; ch++) {
         const inputData = inputBuffer.getChannelData(ch).subarray(offset, offset + frames);
         const wasmInput = new Float32Array(memory.buffer, inputPtr + ch * blockSize * 4, blockSize);
         wasmInput.set(inputData);
       }
-      
+
       // Process
       exports.process(frames);
-      
+
       // Copy output
-      for (let ch = 0; ch < outputBuffer.numberOfChannels; ch++) {
+      for (let ch = 0; ch < outChannels; ch++) {
         const outputData = outputBuffer.getChannelData(ch);
         const wasmOutput = new Float32Array(memory.buffer, outputPtr + ch * blockSize * 4, blockSize);
         outputData.set(wasmOutput.subarray(0, frames), offset);

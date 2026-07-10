@@ -4,8 +4,8 @@
  * # AI generated (reviewed)
  */
 
-import { describe, it, expect } from 'vitest';
-import { applyClipSelectionEdit, filterImportedFiles } from '../app/shell';
+import { describe, it, expect, vi } from 'vitest';
+import { applyClipSelectionEdit, filterImportedFiles, dispatchAppCommand } from '../app/shell';
 import type { TimelineClip } from '../app/TimelineView';
 import type { Selection } from '../app/Inspector';
 
@@ -100,5 +100,32 @@ describe('filterImportedFiles', () => {
     const a = makeFile('a.mp4');
     const b = makeFile('b.mp4');
     expect(filterImportedFiles([a, b], new Set([a, b]))).toEqual([]);
+  });
+});
+
+describe('dispatchAppCommand — togglePanel', () => {
+  function callTogglePanel(payload: unknown) {
+    const setActivePanel = vi.fn();
+    const importFiles = vi.fn();
+    dispatchAppCommand('togglePanel', payload, setActivePanel, importFiles);
+    return setActivePanel;
+  }
+
+  it('REGRESSION: does not open the right sidebar for "timeline" (F5) or "media" (F6) -- neither has a panel body', () => {
+    // Before fix: setActivePanel was called unconditionally for any
+    // payload, so pressing F5/F6 opened a titled right-sidebar panel whose
+    // body switch has no case for 'timeline'/'media' -- a confusing,
+    // completely empty panel (those are always-visible sections of their
+    // own: the main TimelineView and the left-side MediaBrowser).
+    expect(callTogglePanel('timeline')).not.toHaveBeenCalled();
+    expect(callTogglePanel('media')).not.toHaveBeenCalled();
+  });
+
+  it('still opens the sidebar for a panel with real body content (e.g. "effects")', () => {
+    const setActivePanel = callTogglePanel('effects');
+    expect(setActivePanel).toHaveBeenCalledOnce();
+    const updater = setActivePanel.mock.calls[0][0] as (prev: string | null) => string | null;
+    expect(updater(null)).toBe('effects');
+    expect(updater('effects')).toBe(null); // toggling the same panel again closes it
   });
 });

@@ -98,7 +98,7 @@ export function filterImportedFiles(files: File[], failed: Set<File>): File[] {
 }
 
 /** Routes app.emit commands to UI state. Extracted to keep EditorUI complexity low. */
-function dispatchAppCommand(
+export function dispatchAppCommand(
   name: string,
   payload: unknown,
   setActivePanel: React.Dispatch<React.SetStateAction<string | null>>,
@@ -106,6 +106,15 @@ function dispatchAppCommand(
 ): void {
   switch (name) {
     case 'togglePanel':
+      // REGRESSION fix: 'timeline' and 'media' (F5/F6) have no case in the
+      // right-sidebar body switch below -- those two are always-visible,
+      // dedicated sections of their own (the main TimelineView and the
+      // left-side MediaBrowser), not right-sidebar content. Opening the
+      // sidebar for them produced a title bar over a completely empty
+      // body. Until/unless there's a real "hide the timeline/media
+      // browser" feature to wire this to, treat those two ids as a no-op
+      // instead of showing a broken empty panel.
+      if (payload === 'timeline' || payload === 'media') break;
       setActivePanel((p) => (p === payload ? null : (payload as string)));
       break;
     case 'showExport':
@@ -631,7 +640,8 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
                 <ExportPanel onExport={actions.exportProject} />
               )}
               {(activePanel === 'color' || activePanel === 'audio' ||
-                activePanel === 'captions' || activePanel === 'text') && (
+                activePanel === 'captions' || activePanel === 'text' ||
+                activePanel === 'effects') && (
                 <PlaceholderPanel name={panelTitle(activePanel)} />
               )}
             </div>

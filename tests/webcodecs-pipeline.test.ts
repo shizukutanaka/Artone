@@ -675,8 +675,30 @@ describe('VideoPipeline — processors and stats', () => {
 
 describe('FrameProcessors', () => {
   it('grayscale returns a VideoFrame', async () => {
-    const out = await FrameProcessors.grayscale(fakeFrame());
+    const out = await FrameProcessors.grayscale()(fakeFrame());
     expect(out).toBeInstanceOf(VideoFrame);
+  });
+
+  it('REGRESSION: each grayscale() factory call owns an independent canvas, not a shared module-level one', async () => {
+    // Before fix: grayscale was a single shared FrameProcessor backed by a
+    // MODULE-LEVEL canvas/ctx -- the only processor here not following the
+    // lazy-init-per-closure pattern every other processor uses. Two
+    // concurrent pipelines calling it in parallel would race on the same
+    // canvas (one's drawImage()/getImageData() clobbered by the other's
+    // drawImage() before pixels were read back). Each factory call must now
+    // create and own its own OffscreenCanvas.
+    const ctorSpy = globalThis.OffscreenCanvas as unknown as { mock: { calls: unknown[] } };
+    const callsBefore = ctorSpy.mock.calls.length;
+
+    const a = FrameProcessors.grayscale();
+    const b = FrameProcessors.grayscale();
+    await a(fakeFrame(64, 48));
+    await b(fakeFrame(64, 48));
+
+    // Two independent factory instances, each processing one frame, must
+    // each construct their own canvas -- a shared module-level canvas would
+    // only construct once in total (reused across both calls).
+    expect(ctorSpy.mock.calls.length - callsBefore).toBe(2);
   });
 
   it('brightnessContrast returns a processor that yields a VideoFrame', async () => {

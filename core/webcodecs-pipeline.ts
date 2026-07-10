@@ -786,33 +786,41 @@ export class VideoPipeline {
 // Built-in Frame Processors
 // ============================================================
 
-// Module-level canvas for grayscale — reused across frames (grayscale has no
-// configuration params so a single shared instance is sufficient).
-// new VideoFrame(canvas, …) snapshots pixel state synchronously, so the canvas
-// can be reused immediately after the call returns.
-let _grayscaleCanvas: OffscreenCanvas | null = null;
-let _grayscaleCtx: OffscreenCanvasRenderingContext2D | null = null;
-
 export const FrameProcessors = {
-  // Grayscale conversion
-  grayscale: async (frame: VideoFrame): Promise<VideoFrame> => {
-    const w = frame.displayWidth, h = frame.displayHeight;
-    if (!_grayscaleCanvas || _grayscaleCanvas.width !== w || _grayscaleCanvas.height !== h) {
-      _grayscaleCanvas = new OffscreenCanvas(w, h);
-      // willReadFrequently: pixels are read back via getImageData below.
-      _grayscaleCtx = _grayscaleCanvas.getContext('2d', { willReadFrequently: true })!;
-    }
-    _grayscaleCtx!.drawImage(frame, 0, 0);
-    const imageData = _grayscaleCtx!.getImageData(0, 0, w, h);
-    const data = imageData.data;
+  // Grayscale conversion. A factory (called as `FrameProcessors.grayscale()`)
+  // like every other processor below, even though it takes no configuration
+  // params — REGRESSION fix: this used to be a plain FrameProcessor backed by
+  // a MODULE-LEVEL shared canvas/ctx (`_grayscaleCanvas`/`_grayscaleCtx`), the
+  // only processor here not using the lazy-init-per-closure pattern. Two
+  // concurrent grayscale() calls (e.g. two pipelines, or two overlapping
+  // pipeline stages, processing frames in parallel) raced on the same
+  // canvas/context: pipeline A's drawImage()/getImageData() could be
+  // clobbered by pipeline B's drawImage() before A finished reading pixels
+  // back, corrupting output. Each factory call now gets its own canvas.
+  grayscale: () => {
+    let canvas: OffscreenCanvas | null = null;
+    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    // new VideoFrame(canvas, …) snapshots pixel state synchronously, so the
+    // canvas can be reused immediately after the call returns.
+    return async (frame: VideoFrame): Promise<VideoFrame> => {
+      const w = frame.displayWidth, h = frame.displayHeight;
+      if (!canvas || canvas.width !== w || canvas.height !== h) {
+        canvas = new OffscreenCanvas(w, h);
+        // willReadFrequently: pixels are read back via getImageData below.
+        ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      }
+      ctx!.drawImage(frame, 0, 0);
+      const imageData = ctx!.getImageData(0, 0, w, h);
+      const data = imageData.data;
 
-    for (let i = 0; i < data.length; i += 4) {
-      const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-      data[i] = data[i + 1] = data[i + 2] = gray;
-    }
+      for (let i = 0; i < data.length; i += 4) {
+        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+        data[i] = data[i + 1] = data[i + 2] = gray;
+      }
 
-    _grayscaleCtx!.putImageData(imageData, 0, 0);
-    return new VideoFrame(_grayscaleCanvas, { timestamp: frame.timestamp });
+      ctx!.putImageData(imageData, 0, 0);
+      return new VideoFrame(canvas, { timestamp: frame.timestamp });
+    };
   },
 
   // Brightness/Contrast adjustment

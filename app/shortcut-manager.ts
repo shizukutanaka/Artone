@@ -272,6 +272,18 @@ export class ShortcutManager {
       const callback = this.callbacks.get(shortcut.action);
       if (callback) {
         event.preventDefault();
+        // REGRESSION fix: app/shell.tsx also installs its own `window`
+        // keydown listener for a subset of these same combos (Space/
+        // Cmd+Z/Cmd+Shift+Z/Cmd+S), calling the equivalent engine action
+        // through the React layer. Since this listener is on `document`
+        // (attached in the constructor) and shell.tsx's is on `window`,
+        // this one always runs first in the bubble phase -- without
+        // stopping propagation, the SAME keypress reached BOTH handlers:
+        // undo/redo ran twice, save() ran twice, and Space toggled
+        // playback twice (self-cancelling, so it could never actually
+        // start playback). Stop the event here once a registered shortcut
+        // actually handles it, so no other listener double-fires it.
+        event.stopPropagation();
         callback();
       }
     }

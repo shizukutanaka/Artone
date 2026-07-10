@@ -176,6 +176,38 @@ describe('ShortcutManager — context and callback', () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
+  it('REGRESSION: stops propagation once a registered shortcut fires, so no outer listener double-handles the same keypress', () => {
+    // Before fix: app/shell.tsx installs its own `window` keydown listener
+    // for a subset of these same combos (Space/Cmd+Z/Cmd+Shift+Z/Cmd+S),
+    // calling the equivalent engine action through the React layer.
+    // ShortcutManager's own listener is on `document` (fires first in the
+    // bubble phase), but never stopped propagation -- so the SAME keypress
+    // reached both handlers: undo/redo ran twice, save() ran twice, and
+    // Space toggled playback twice (self-cancelling).
+    const cb = vi.fn();
+    sm.registerCallback('play', cb);
+    const outerListener = vi.fn();
+    window.addEventListener('keydown', outerListener);
+    try {
+      document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+      expect(cb).toHaveBeenCalledOnce();
+      expect(outerListener).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('keydown', outerListener);
+    }
+  });
+
+  it('does not stop propagation when no shortcut matches (unrelated keys still reach outer listeners)', () => {
+    const outerListener = vi.fn();
+    window.addEventListener('keydown', outerListener);
+    try {
+      document.dispatchEvent(new KeyboardEvent('keydown', { code: 'F13', bubbles: true }));
+      expect(outerListener).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener('keydown', outerListener);
+    }
+  });
+
   it('ignores keydown from input element', () => {
     const cb = vi.fn();
     sm.registerCallback('play', cb);

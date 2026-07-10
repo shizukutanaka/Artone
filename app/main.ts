@@ -263,6 +263,16 @@ export class ArtoneApp {
     const sm = this.shortcuts;
     const tl = this.timeline;
 
+    // REGRESSION fix: ShortcutManager.activeContext defaults to 'global',
+    // and nothing ever called setContext() anywhere in the app -- every
+    // shortcut registered with context:'timeline' (split, in/out points,
+    // zoom, markers, tools, snap-toggle -- the large majority of non-global
+    // shortcuts) was permanently unreachable, even though its callback was
+    // correctly registered. This app has a single, always-active editing
+    // surface (no separate per-panel focus tracking), so the timeline
+    // context is the natural default to activate at startup.
+    sm.setContext('timeline');
+
     sm.registerCallback('play',         () => this.togglePlayback());
     sm.registerCallback('stop',         () => this.pause());
     sm.registerCallback('frameForward', () => tl.stepFrame(true));

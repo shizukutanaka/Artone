@@ -188,9 +188,11 @@ describe('License Analyzer', () => {
   });
 
   it('handles SPDX expressions (OR/AND)', () => {
-    // OR で結ばれた式: 最強 (制約多い側) を採用
-    expect(LicenseAnalyzer.categorize('MIT OR GPL-3.0')).toBe('strong-copyleft');
+    // OR は licensee の選択肢 (最弱/最も許容的な方を採用) — AND は全項を
+    // 同時に満たす必要があるため最強 (制約多い側) を採用。
+    expect(LicenseAnalyzer.categorize('MIT OR GPL-3.0')).toBe('permissive');
     expect(LicenseAnalyzer.categorize('Apache-2.0 OR MIT')).toBe('permissive');
+    expect(LicenseAnalyzer.categorize('MIT AND GPL-3.0')).toBe('strong-copyleft');
   });
 
   it('rejects unknown licenses', () => {

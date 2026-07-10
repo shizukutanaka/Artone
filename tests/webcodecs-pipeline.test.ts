@@ -240,11 +240,14 @@ function makeFakeCodec(
     decode(): void { /* output is delivered on flush */ }
     encode(): void { /* output is delivered on flush */ }
     async flush(): Promise<void> {
+      // Outputs are delivered before the error, mirroring a real codec that
+      // successfully produces some frames/chunks and only fails partway
+      // through the batch (e.g. a later corrupted chunk).
+      for (const item of emit()) this.init.output(item);
       if (flushError) {
         this.init.error(flushError);
         throw flushError;
       }
-      for (const item of emit()) this.init.output(item);
     }
     close(): void { this.state = 'closed'; }
   };
@@ -280,6 +283,29 @@ describe('VideoPipeline — batch decode/encode completion & cleanup', () => {
     const p = configuredDecoder();
     await expect(p.decodeFrames([chunk()])).rejects.toThrow('decode fail');
     expect(instances[0].state).toBe('closed');
+  });
+
+  it('REGRESSION: decodeFrames closes already-produced frames when flush rejects after some output', async () => {
+    // Before fix: frames emitted via output() before flush() rejects were
+    // simply discarded on the throw path — never closed, leaking their
+    // GPU/media resources.
+    const instances: Array<{ state: string }> = [];
+    const early1 = fakeFrame();
+    const early2 = fakeFrame();
+    vi.stubGlobal('VideoDecoder', makeFakeCodec(() => [early1, early2], instances, new Error('decode fail')));
+    const p = configuredDecoder();
+    await expect(p.decodeFrames([chunk(), chunk()])).rejects.toThrow('decode fail');
+    expect(early1.close).toHaveBeenCalled();
+    expect(early2.close).toHaveBeenCalled();
+  });
+
+  it('REGRESSION: decodeFrame closes an already-produced frame when flush rejects after output', async () => {
+    const instances: Array<{ state: string }> = [];
+    const early = fakeFrame();
+    vi.stubGlobal('VideoDecoder', makeFakeCodec(() => [early], instances, new Error('decode fail')));
+    const p = configuredDecoder();
+    await expect(p.decodeFrame(chunk())).rejects.toThrow('decode fail');
+    expect(early.close).toHaveBeenCalled();
   });
 
   it('decodeFrame returns the first frame and closes extras', async () => {
@@ -444,6 +470,32 @@ describe('VideoPipeline — extractFrameAtTime (timestamp seeking)', () => {
     const p = configuredDecoder();
     const frame = await p.extractFrameAtTime(clip(), 999_000_000);
     expect(frame?.timestamp).toBe(10_100_000);
+  });
+
+  it('REGRESSION: closes the selected frame when flush rejects after it was already chosen', async () => {
+    // Before fix: the output callback already closes every non-selected
+    // frame immediately, so at most one frame (`best`) is ever unclosed at a
+    // time -- but if flush() rejected after `best` was set, the function
+    // re-threw without closing it, leaking that one frame.
+    const selected = { timestamp: 10_066_000, close: vi.fn() };
+    class FailingSeekDecoder {
+      state = 'unconfigured';
+      private init: FakeInit;
+      constructor(init: FakeInit) { this.init = init; }
+      configure(): void { this.state = 'configured'; }
+      decode(): void { /* no-op */ }
+      async flush(): Promise<void> {
+        this.init.output(selected);
+        const err = new Error('decode fail');
+        this.init.error(err);
+        throw err;
+      }
+      close(): void { this.state = 'closed'; }
+    }
+    vi.stubGlobal('VideoDecoder', FailingSeekDecoder);
+    const p = configuredDecoder();
+    await expect(p.extractFrameAtTime(clip(), 10_066_000)).rejects.toThrow('decode fail');
+    expect(selected.close).toHaveBeenCalled();
   });
 });
 

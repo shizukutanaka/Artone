@@ -416,6 +416,15 @@ export class VideoPipeline {
       decoder.configure(config);
       decoder.decode(chunk);
       await decoder.flush();
+    } catch (e) {
+      // REGRESSION fix: flush() can reject AFTER output() already fired one
+      // or more times (e.g. a corrupted chunk following valid ones). Without
+      // this catch, the function re-threw before ever reaching the code
+      // below that closes/returns the accumulated frames -- they were simply
+      // discarded with no owner left to close them, leaking their GPU/media
+      // resources.
+      for (const f of frames) f.close();
+      throw e;
     } finally {
       closeQuietly(decoder);
     }
@@ -453,6 +462,11 @@ export class VideoPipeline {
         decoder.decode(chunk);
       }
       await decoder.flush();
+    } catch (e) {
+      // See decodeFrame: flush() rejecting after some outputs already fired
+      // must not leak those already-decoded frames.
+      for (const f of frames) f.close();
+      throw e;
     } finally {
       closeQuietly(decoder);
     }
@@ -680,6 +694,19 @@ export class VideoPipeline {
       // its forward reference; that later frame is discarded by the selector.
       if (i < chunks.length) decoder.decode(chunks[i]);
       await decoder.flush();
+    } catch (e) {
+      // See decodeFrame: the output callback already closes every
+      // non-selected frame immediately, so at most one frame (`best`) is
+      // ever unclosed at a time. If flush() rejects after `best` was set,
+      // it would otherwise leak that one frame. Read into a const first --
+      // `best` is reassigned inside the output closure above, which defeats
+      // TypeScript's control-flow narrowing on the `let` binding directly.
+      // TypeScript narrows `best` to `null` here because its only reassignment
+      // (inside the `output` closure above) is invisible to control-flow
+      // analysis in this outer scope -- an explicit cast is needed since the
+      // compiler can't see what we know is possible at runtime.
+      (best as VideoFrame | null)?.close();
+      throw e;
     } finally {
       closeQuietly(decoder);
     }

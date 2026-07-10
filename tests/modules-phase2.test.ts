@@ -126,6 +126,7 @@ describe('MemoryProfiler', () => {
 // ============================================================
 
 import { I18nManager, i18n as getI18n, type LocaleCode } from '../i18n/i18n-manager';
+import { ALL_TIER1_TIER2 } from '../i18n/locales';
 import enJson from '../i18n/en.json';
 import jaJson from '../i18n/ja.json';
 
@@ -187,6 +188,23 @@ describe('I18nManager', () => {
   it('isRTL() returns false for ja', () => {
     const i18n = makeI18n('ja');
     expect(i18n.isRTL()).toBe(false);
+  });
+
+  it('REGRESSION: isRTL() returns true for every locale locales.ts marks rtl:true', () => {
+    // Before fix: RTL_LANGUAGES was a hand-maintained Set kept independently
+    // of locales.ts's own per-locale `rtl` field, and the two were never
+    // synchronized -- locales.ts's 'ckb' (Sorani Kurdish, rtl:true) had no
+    // matching entry here, so isRTL() silently returned false for it despite
+    // the codebase's own locale metadata saying otherwise.
+    for (const locale of ALL_TIER1_TIER2.filter((l) => l.rtl)) {
+      expect(makeI18n(locale.code).isRTL()).toBe(true);
+    }
+  });
+
+  it('isRTL() still returns true for legacy RTL codes not in locales.ts (yi/ji/iw/ps/sd)', () => {
+    for (const code of ['yi', 'ji', 'iw', 'ps', 'sd']) {
+      expect(makeI18n(code).isRTL()).toBe(true);
+    }
   });
 
   it('getAvailableLocales() includes en and ja', () => {

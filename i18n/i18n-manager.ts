@@ -13,6 +13,8 @@
  * - 動的読み込みで初期バンドル軽量化
  */
 
+import { ALL_TIER1_TIER2 } from './locales';
+
 export type LocaleCode = string; // BCP 47 (例: 'ja', 'en-US', 'zh-Hans')
 
 // Memoised key splits: lookup() is called on every t() call (every UI string render).
@@ -78,9 +80,20 @@ const LANGUAGE_FAMILY: Record<string, string> = {
 
 /**
  * RTL (右→左) 言語リスト。
+ *
+ * REGRESSION fix: this used to be a hand-maintained list kept independently
+ * of locales.ts's own per-locale `rtl` field -- the two were never
+ * synchronized, and locales.ts's 'ckb' (Sorani Kurdish, rtl:true) had been
+ * added without a matching update here, so isRTL() silently returned false
+ * for it. Derive the locales.ts-covered half from ALL_TIER1_TIER2 (single
+ * source of truth going forward), keeping a short manual list only for
+ * codes real browsers report via navigator.language that aren't in
+ * locales.ts's officially supported locale set (legacy/alternate ISO codes
+ * and languages not yet tier-classified).
  */
-const RTL_LANGUAGES = new Set([
-  'ar', 'he', 'fa', 'ur', 'yi', 'ji', 'iw', 'ku', 'ps', 'sd',
+const RTL_LANGUAGES = new Set<string>([
+  'yi', 'ji', 'iw', 'ps', 'sd',
+  ...ALL_TIER1_TIER2.filter((l) => l.rtl).map((l) => l.code),
 ]);
 
 export class I18nManager {

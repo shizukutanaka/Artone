@@ -905,6 +905,53 @@ describe('HistoryManager — autoPersist endGroup() path', () => {
   });
 });
 
+describe('HistoryManager — REGRESSION: undo()/redo()/goToPosition() must persist position', () => {
+  // Before fix: only execute()/endGroup() called saveToDB(). undo(), redo(),
+  // and goToPosition() mutated `this.position` without ever persisting it --
+  // so the one piece of state undo/CLAUDE.md claims survives a reload
+  // (`position`) went stale the moment the user's last action before
+  // closing the tab was an undo/redo/jump rather than a fresh edit.
+  function spyOnSaveToDB(h: HistoryManager) {
+    return vi.spyOn(h as unknown as { saveToDB(): Promise<void> }, 'saveToDB');
+  }
+
+  it('undo() persists the new position', () => {
+    const h = new HistoryManager({ autoPersist: true, maxCommands: 100 });
+    h.execute(makeCmd('a', () => {}, () => {}));
+    const spy = spyOnSaveToDB(h);
+    h.undo();
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('redo() persists the new position', () => {
+    const h = new HistoryManager({ autoPersist: true, maxCommands: 100 });
+    h.execute(makeCmd('a', () => {}, () => {}));
+    h.undo();
+    const spy = spyOnSaveToDB(h);
+    h.redo();
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('goToPosition() persists the new position', () => {
+    const h = new HistoryManager({ autoPersist: true, maxCommands: 100 });
+    h.execute(makeCmd('a', () => {}, () => {}));
+    h.execute(makeCmd('b', () => {}, () => {}));
+    const spy = spyOnSaveToDB(h);
+    h.goToPosition(0);
+    expect(spy).toHaveBeenCalledOnce();
+  });
+
+  it('undo()/redo()/goToPosition() do NOT persist when autoPersist is false', () => {
+    const h = new HistoryManager({ autoPersist: false, maxCommands: 100 });
+    h.execute(makeCmd('a', () => {}, () => {}));
+    const spy = spyOnSaveToDB(h);
+    h.undo();
+    h.redo();
+    h.goToPosition(0);
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
 // ─── merge path (execute replaces last command via canMergeWith/merge) ─────────
 
 describe('HistoryManager — execute() merge path', () => {

@@ -563,6 +563,20 @@ describe('AutoQualityAdjuster — warning and optimal branches', () => {
     expect(q).toBeGreaterThanOrEqual(0.5);
   });
 
+  it('REGRESSION: "warning" never raises quality when already below its 0.5 floor', () => {
+    // Before fix: `Math.max(0.5, qualityLevel - 0.1)` forced qualityLevel UP
+    // to 0.5 in one step whenever it was already below 0.5 (only reachable
+    // via repeated 'critical' hits down to critical's own floor of 0.25) --
+    // a bigger, wrong-direction jump from a state ('warning') that is still
+    // degraded, not recovering. 'warning' must only ever decrease quality or
+    // leave it unchanged, never increase it.
+    const adj = new AutoQualityAdjuster(makeMonitor('warning'));
+    (adj as unknown as { qualityLevel: number }).qualityLevel = 0.25;
+    (adj as unknown as { adjustmentCooldown: number }).adjustmentCooldown = 0;
+    const q = adj.update();
+    expect(q).toBe(0.25);
+  });
+
   it('REGRESSION: quality recovers under sustained "good" performance (was stuck forever)', () => {
     // Before fix: the switch had no case for 'good' at all, so once quality
     // was reduced by a critical/warning spike, performance settling into

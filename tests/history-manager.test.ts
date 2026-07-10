@@ -240,6 +240,35 @@ describe('HistoryManager — branches', () => {
     hm.switchBranch(branchId);
     expect(cell.value).toBe(11); // branch edit must be reapplied, not lost
   });
+
+  it('REGRESSION: switchBranch() does not double-undo commands already undone inside the branch', () => {
+    // Before fix: switching away from a branch sliced
+    // `this.commands.slice(parentPosition + 1)` -- to the END of the array,
+    // not to the current position -- and undid every one of those commands.
+    // If the user had already called undo() one or more times while still
+    // inside the branch, the commands between position+1 and the array end
+    // were already undone; switchBranch() undid them a SECOND time,
+    // corrupting the live value.
+    const hm = makeManager();
+    const cell = { value: 0 };
+
+    hm.execute(counterCmd(cell, 1)); // main: 0 -> 1
+
+    hm.createBranch('feature');
+    hm.execute(counterCmd(cell, 10)); // branch: 1 -> 11
+    hm.execute(counterCmd(cell, 100)); // branch: 11 -> 111
+
+    hm.undo(); // undo the +100 within the branch: 111 -> 11
+    expect(cell.value).toBe(11);
+
+    hm.switchBranch('main');
+    // Only the still-applied +10 command should be undone here (111 -> 11
+    // was already handled by the explicit undo() above). Before the fix,
+    // the already-undone +100 command's undo() fired again on top of the
+    // +10 command's undo(), landing on a doubly-corrupted value (-99)
+    // instead of the correct 1.
+    expect(cell.value).toBe(1);
+  });
 });
 
 // ============================================================

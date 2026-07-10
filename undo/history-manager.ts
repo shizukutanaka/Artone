@@ -766,12 +766,20 @@ export class HistoryManager {
   // ----- Undo -----
   undo(): boolean {
     if (!this.canUndo()) return false;
-    
+
     const command = this.commands[this.position];
     command.undo();
     this.position--;
-    
+
     this.notifyListeners();
+    // REGRESSION fix: only execute()/endGroup() persisted `position` to
+    // IndexedDB — undo()/redo() (and goToPosition() below) never did. The
+    // persisted position went stale the moment a user's last action before
+    // reload was an undo/redo/jump rather than a fresh edit (e.g. undo three
+    // steps, close the tab: the DB still records the pre-undo position).
+    if (this.config.autoPersist) {
+      this.saveToDB();
+    }
     return true;
   }
 
@@ -782,12 +790,15 @@ export class HistoryManager {
   // ----- Redo -----
   redo(): boolean {
     if (!this.canRedo()) return false;
-    
+
     this.position++;
     const command = this.commands[this.position];
     command.redo();
-    
+
     this.notifyListeners();
+    if (this.config.autoPersist) {
+      this.saveToDB();
+    }
     return true;
   }
 
@@ -859,8 +870,18 @@ export class HistoryManager {
     if (this.currentBranch !== 'main') {
       const currentBranch = this.branches.get(this.currentBranch);
       if (currentBranch) {
-        // Undo branch commands
-        const branchCommands = this.commands.slice(currentBranch.parentPosition + 1);
+        // REGRESSION fix: this used to slice from parentPosition+1 to the
+        // END of the commands array, then undo all of them — but if the
+        // user had already called undo() one or more times while still
+        // inside this branch (this.position < commands.length - 1), the
+        // commands between this.position+1 and the array end were already
+        // undone. Undoing them again here silently double-applied their
+        // undo() (e.g. a counter/offset command decremented twice),
+        // corrupting live state. Only the commands still actually "applied"
+        // — from parentPosition+1 through the CURRENT position — need to be
+        // undone; slice's end bound must track this.position, not the
+        // array length.
+        const branchCommands = this.commands.slice(currentBranch.parentPosition + 1, this.position + 1);
         branchCommands.reverse().forEach(cmd => cmd.undo());
         this.position = currentBranch.parentPosition;
       }
@@ -926,6 +947,9 @@ export class HistoryManager {
     }
 
     this.notifyListeners();
+    if (this.config.autoPersist) {
+      this.saveToDB();
+    }
   }
 
   // ----- クリア -----

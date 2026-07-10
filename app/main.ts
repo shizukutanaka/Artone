@@ -503,9 +503,14 @@ export class ArtoneApp {
       const snapshot = await this.recovery.getLatestSnapshot();
       if (!snapshot) return;
 
-      // Only offer recovery for snapshots less than 1 hour old; older ones are
-      // pruned by RecoveryManager.cleanup() on its own schedule.
-      if (Date.now() - snapshot.timestamp > 3600000) return;
+      // REGRESSION fix: this used to hardcode a 1-hour cutoff, independent of
+      // RecoveryManager's actual retention window (config.maxAge, 7 days by
+      // default). A snapshot 3 hours old is still very much alive in
+      // IndexedDB (enforceLimit() only purges past maxAge) but this check
+      // silently stopped offering it to the user well before it was ever
+      // actually deleted -- valid recovery data the user could still restore
+      // was simply never surfaced. Use the manager's real retention window.
+      if (Date.now() - snapshot.timestamp > this.recovery.getMaxAge()) return;
 
       const shouldRecover = await this.showRecoveryDialog(snapshot.timestamp);
       if (!shouldRecover) return;

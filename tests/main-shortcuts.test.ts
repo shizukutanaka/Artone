@@ -13,6 +13,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ArtoneApp } from '../app/main';
+import type { RecoverySnapshot } from '../recovery/recovery-manager';
 
 type ShortcutManagerPrivate = { callbacks: Map<string, () => void> };
 
@@ -90,5 +91,50 @@ describe('ArtoneApp.initialize() — init failure / recovery status visibility',
     await app.recovery.saveSnapshot('manual', 'proj1', 'Test', circular as never);
 
     expect(emitSpy).toHaveBeenCalledWith('recoveryError');
+  });
+});
+
+describe('ArtoneApp.checkRecovery() — retention-window cutoff', () => {
+  // REGRESSION: checkRecovery() used to hardcode a 1-hour cutoff for
+  // offering crash recovery, independent of RecoveryManager's actual
+  // retention window (config.maxAge, 7 days by default). A snapshot 3 hours
+  // old is still very much alive in IndexedDB (enforceLimit() only purges
+  // past maxAge) but the old check silently stopped offering it long before
+  // it was ever deleted -- valid, restorable data the user could still
+  // recover was never surfaced.
+  function makeSnapshot(ageMs: number): RecoverySnapshot {
+    return {
+      id: 'snap1',
+      timestamp: Date.now() - ageMs,
+      type: 'crash',
+      projectId: 'p1',
+      projectName: 'P',
+      data: {} as RecoverySnapshot['data'],
+      checksum: 'x',
+    };
+  }
+
+  it('REGRESSION: offers recovery for a snapshot older than 1hr but within the 7-day default maxAge', async () => {
+    const app = new ArtoneApp();
+    vi.spyOn(app.recovery, 'getLatestSnapshot').mockResolvedValue(makeSnapshot(3 * 60 * 60 * 1000));
+    const dialogSpy = vi
+      .spyOn(app as unknown as { showRecoveryDialog: (t: number) => Promise<boolean> }, 'showRecoveryDialog')
+      .mockResolvedValue(false);
+
+    await (app as unknown as { checkRecovery: () => Promise<void> }).checkRecovery();
+
+    expect(dialogSpy).toHaveBeenCalled();
+  });
+
+  it('does not offer recovery for a snapshot older than the configured maxAge', async () => {
+    const app = new ArtoneApp();
+    vi.spyOn(app.recovery, 'getLatestSnapshot').mockResolvedValue(makeSnapshot(app.recovery.getMaxAge() + 1000));
+    const dialogSpy = vi
+      .spyOn(app as unknown as { showRecoveryDialog: (t: number) => Promise<boolean> }, 'showRecoveryDialog')
+      .mockResolvedValue(false);
+
+    await (app as unknown as { checkRecovery: () => Promise<void> }).checkRecovery();
+
+    expect(dialogSpy).not.toHaveBeenCalled();
   });
 });

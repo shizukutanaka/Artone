@@ -108,6 +108,11 @@ export class RecoveryManager {
     };
   }
 
+  /** Configured retention window (ms) — how long a snapshot survives enforceLimit()'s age purge. */
+  getMaxAge(): number {
+    return this.config.maxAge;
+  }
+
   // ----- 初期化 -----
 
   /** DB が null なら例外。init() 前の操作を防ぐ。 */

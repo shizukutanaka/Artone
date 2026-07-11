@@ -85,7 +85,13 @@ const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v', 'ogv'];
 const AUDIO_EXTENSIONS = ['mp3', 'wav', 'ogg', 'aac', 'm4a', 'flac', 'wma'];
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
 
-function getMediaType(filename: string): MediaType | null {
+/**
+ * Classify a file as video/audio/image by its extension (case-insensitive),
+ * or null if unrecognized. Exported so the DropZone can accept the same set
+ * of containers the file picker does, even when the browser reports an empty
+ * or nonstandard MIME type for them (common for .mkv/.mov/.avi).
+ */
+export function getMediaType(filename: string): MediaType | null {
   const ext = filename.split('.').pop()?.toLowerCase() || '';
   
   if (VIDEO_EXTENSIONS.includes(ext)) return 'video';

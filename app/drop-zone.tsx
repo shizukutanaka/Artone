@@ -8,11 +8,35 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { color, space, radius, z } from './design-system';
 import { t } from '../i18n/i18n-manager';
+import { getMediaType } from '../media/media-browser';
 
 interface DropZoneProps {
   onFilesDropped: (files: File[]) => void;
   accept?: string;
   children: React.ReactNode;
+}
+
+/**
+ * Whether a dropped file should be accepted for the given `accept` spec
+ * (a comma-separated MIME list like "video/*,audio/*,image/*").
+ *
+ * A file passes if its MIME matches the spec, OR — as a fallback — its
+ * extension classifies it as a media type whose category is in the spec.
+ * The fallback exists because browsers frequently report an empty ('') or
+ * nonstandard (application/x-*) MIME for common containers like .mkv/.mov/
+ * .avi; the file picker (via the `accept` attribute) admits those by
+ * extension, so drag-drop must accept the same set or the two import paths
+ * silently diverge (the picker works, the drop is ignored with no error).
+ */
+export function acceptsFile(file: File, accept: string): boolean {
+  const types = accept.split(',').map((s) => s.trim()).filter(Boolean);
+  const mimeOk = types.some((tp) =>
+    tp.endsWith('/*') ? file.type.startsWith(tp.replace('/*', '/')) : file.type === tp
+  );
+  if (mimeOk) return true;
+  const category = getMediaType(file.name); // 'video' | 'audio' | 'image' | null
+  if (!category) return false;
+  return types.includes(`${category}/*`) || types.includes(category);
 }
 
 export const DropZone: React.FC<DropZoneProps> = ({
@@ -41,10 +65,7 @@ export const DropZone: React.FC<DropZoneProps> = ({
     e.preventDefault();
     setIsDragging(false);
     counter.current = 0;
-    const types = accept.split(',').map((t) => t.trim());
-    const files = Array.from(e.dataTransfer.files).filter((f) =>
-      types.some((t) => t.endsWith('/*') ? f.type.startsWith(t.replace('/*', '/')) : f.type === t)
-    );
+    const files = Array.from(e.dataTransfer.files).filter((f) => acceptsFile(f, accept));
     if (files.length > 0) onFilesDropped(files);
   }, [onFilesDropped, accept]);
 

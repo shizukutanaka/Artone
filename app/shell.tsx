@@ -17,6 +17,7 @@ import { FirstRunExperience, type FirstRunResult, type ExperienceLevel } from '.
 import { CommandPalette, createDefaultCommands, type PaletteItem } from './command-palette';
 import { safeStorageGet, safeStorageSet, formatTimecode } from './utils';
 import { DropZone } from './drop-zone';
+import { ErrorBoundary } from './error-boundary';
 import { EngineProvider, useEngine, configFromFirstRun } from './engine-context';
 import { t } from '../i18n/i18n-manager';
 import { Inspector, type Selection } from './Inspector';
@@ -257,6 +258,23 @@ export const ArtoneShell: React.FC = () => {
     </EngineProvider>
   );
 };
+
+/**
+ * Application root: ArtoneShell wrapped in an ErrorBoundary.
+ *
+ * entry.tsx renders this (not ArtoneShell directly) so any uncaught error
+ * anywhere in the React tree hits the boundary's recovery UI instead of
+ * unmounting the whole app to a blank white screen. Extracted here (rather
+ * than inlined in entry.tsx) because entry.tsx runs bootstrap side effects
+ * on import — getElementById('#app'), setupI18n().init(), createRoot() —
+ * which make it untestable in isolation; this component has none, so the
+ * "shell is wrapped by a boundary" contract can be unit-tested directly.
+ */
+export const AppRoot: React.FC = () => (
+  <ErrorBoundary>
+    <ArtoneShell />
+  </ErrorBoundary>
+);
 
 // ============================================================
 // EditorUI — エンジン接続済みの本体

@@ -9,7 +9,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { setupI18n } from '../i18n/i18n-manager';
 import { createLogger } from './logger';
-import { ArtoneShell } from './shell';
+import { AppRoot } from './shell';
 
 const log = createLogger('Entry');
 
@@ -32,7 +32,7 @@ setupI18n({
     const root = createRoot(container);
     root.render(
       <React.StrictMode>
-        <ArtoneShell />
+        <AppRoot />
       </React.StrictMode>
     );
   });

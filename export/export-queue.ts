@@ -327,12 +327,24 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
   }
 
   function cancelAll(): void {
-    const pendingCopy = [...pending];
     pending = [];
-    for (const job of pendingCopy) {
-      job.status = 'cancelled';
-      job.completedAt = Date.now();
-      notify(job);
+    const now = Date.now();
+    // REGRESSION fix: this used to iterate only the `pending` array, so a job
+    // in retry back-off — status 'pending' but NOT in the array, waiting on
+    // scheduleRetry's setTimeout — was missed. When its timer fired,
+    // scheduleRetry saw status still 'pending' (not 'cancelled') and re-queued
+    // it, so the job executed anyway despite cancelAll(). Iterate every job
+    // and cancel all that are still 'pending' (both array-queued and
+    // retry-limbo); active jobs are intentionally left running per this
+    // method's contract ("active 中のジョブは継続"). A cancelled retry-limbo
+    // job's setTimeout still fires and decrements scheduledRetries, but
+    // scheduleRetry's 'cancelled' guard now short-circuits the re-queue.
+    for (const job of jobs.values()) {
+      if (job.status === 'pending') {
+        job.status = 'cancelled';
+        job.completedAt = now;
+        notify(job);
+      }
     }
   }
 

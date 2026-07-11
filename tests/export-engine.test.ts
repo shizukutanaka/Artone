@@ -97,6 +97,41 @@ describe('EXPORT_PRESETS', () => {
     const p = EXPORT_PRESETS.find(p => p.id === 'instagram-feed')!;
     expect(p.config.width).toBe(p.config.height);
   });
+
+  it('REGRESSION: every avc1 preset declares an H.264 level sufficient for its resolution×fps', () => {
+    // H.264 Annex A Table A-1: MaxMBPS (macroblocks/sec) and MaxFS (frame
+    // size in macroblocks) per level_idc. A preset whose resolution×fps
+    // exceeds its declared level's limits is rejected by a conformant
+    // VideoEncoder.isConfigSupported() (or emits a stream whose SPS level
+    // contradicts the container). Several presets declared levels far too
+    // low: youtube-1080p/4k@60 (L4.0/L5.1) and the 720p/1080²/1080×1920
+    // social presets (all L3.0, whose 1,620 MaxFS is below even 720p's
+    // 3,600 MBs).
+    const LEVEL_LIMITS: Record<number, { maxMBPS: number; maxFS: number }> = {
+      0x1e: { maxMBPS: 40_500, maxFS: 1_620 },     // 3.0
+      0x1f: { maxMBPS: 108_000, maxFS: 3_600 },    // 3.1
+      0x20: { maxMBPS: 216_000, maxFS: 5_120 },    // 3.2
+      0x28: { maxMBPS: 245_760, maxFS: 8_192 },    // 4.0
+      0x29: { maxMBPS: 245_760, maxFS: 8_192 },    // 4.1
+      0x2a: { maxMBPS: 522_240, maxFS: 8_704 },    // 4.2
+      0x32: { maxMBPS: 589_824, maxFS: 22_080 },   // 5.0
+      0x33: { maxMBPS: 983_040, maxFS: 36_864 },   // 5.1
+      0x34: { maxMBPS: 2_073_600, maxFS: 36_864 }, // 5.2
+    };
+    for (const p of EXPORT_PRESETS) {
+      const codec = p.config.codec;
+      if (!codec.startsWith('avc1.')) continue;
+      const levelIdc = parseInt(codec.slice(-2), 16);
+      const limits = LEVEL_LIMITS[levelIdc];
+      expect(limits, `${p.id}: unknown level_idc 0x${levelIdc.toString(16)}`).toBeTruthy();
+      const fs = Math.ceil(p.config.width / 16) * Math.ceil(p.config.height / 16);
+      const mbps = fs * p.config.fps;
+      expect(fs, `${p.id}: frame size ${fs} MBs exceeds level MaxFS ${limits!.maxFS}`)
+        .toBeLessThanOrEqual(limits!.maxFS);
+      expect(mbps, `${p.id}: ${mbps} MB/s exceeds level MaxMBPS ${limits!.maxMBPS}`)
+        .toBeLessThanOrEqual(limits!.maxMBPS);
+    }
+  });
 });
 
 // ============================================================

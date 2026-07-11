@@ -124,7 +124,11 @@ export const EXPORT_PRESETS: ExportPreset[] = [
     description: '4K UHD for YouTube',
     config: {
       format: 'mp4',
-      codec: 'avc1.640033',
+      // High L5.2 (0x34). 4K60 = 240×135 MBs × 60 = 1,944,000 MB/s, which
+      // exceeds L5.1's (0x33) MaxMBPS of 983,040 — a conformant encoder's
+      // isConfigSupported() rejects the too-low level. L5.2's 2,073,600
+      // covers it. (Was avc1.640033 = L5.1.)
+      codec: 'avc1.640034',
       width: 3840,
       height: 2160,
       fps: 60,
@@ -140,7 +144,11 @@ export const EXPORT_PRESETS: ExportPreset[] = [
     description: '1080p HD for YouTube',
     config: {
       format: 'mp4',
-      codec: 'avc1.640028',
+      // High L4.2 (0x2A). 1080p60 = 120×68 MBs × 60 = 489,600 MB/s, which
+      // exceeds L4.0's (0x28) MaxMBPS of 245,760 — a conformant encoder's
+      // isConfigSupported() rejects the too-low level. L4.2's 522,240
+      // covers it. (Was avc1.640028 = L4.0.)
+      codec: 'avc1.64002A',
       width: 1920,
       height: 1080,
       fps: 60,
@@ -156,7 +164,10 @@ export const EXPORT_PRESETS: ExportPreset[] = [
     description: 'Optimized for Twitter',
     config: {
       format: 'mp4',
-      codec: 'avc1.4D001E',
+      // Main L3.1 (0x1F). 720p30 = 80×45 = 3,600 MBs/frame, which exceeds
+      // L3.0's (0x1E) MaxFS of 1,620 (and its 40,500 MaxMBPS). L3.1's
+      // MaxFS 3,600 / MaxMBPS 108,000 cover it exactly. (Was avc1.4D001E = L3.0.)
+      codec: 'avc1.4D001F',
       width: 1280,
       height: 720,
       fps: 30,
@@ -172,7 +183,10 @@ export const EXPORT_PRESETS: ExportPreset[] = [
     description: '1:1 Square for Instagram',
     config: {
       format: 'mp4',
-      codec: 'avc1.4D001E',
+      // Main L3.2 (0x20). 1080² = 68×68 = 4,624 MBs/frame, exceeding L3.1's
+      // (0x1F) MaxFS of 3,600. L3.2's MaxFS 5,120 / MaxMBPS 216,000 cover it.
+      // (Was avc1.4D001E = L3.0, whose 1,620 MaxFS was far too small.)
+      codec: 'avc1.4D0020',
       width: 1080,
       height: 1080,
       fps: 30,
@@ -188,7 +202,10 @@ export const EXPORT_PRESETS: ExportPreset[] = [
     description: '9:16 Vertical for Reels/TikTok',
     config: {
       format: 'mp4',
-      codec: 'avc1.4D001E',
+      // Main L4.0 (0x28). 1080×1920 = 68×120 = 8,160 MBs/frame, exceeding
+      // L3.2's (0x20) MaxFS of 5,120. L4.0's MaxFS 8,192 / MaxMBPS 245,760
+      // cover it. (Was avc1.4D001E = L3.0.)
+      codec: 'avc1.4D0028',
       width: 1080,
       height: 1920,
       fps: 30,

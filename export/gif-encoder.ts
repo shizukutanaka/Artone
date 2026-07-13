@@ -308,12 +308,32 @@ function u16LE(value: number): [number, number] {
   return [value & 0xFF, (value >> 8) & 0xFF];
 }
 
-function gifHeader(width: number, height: number, globalPalette: RGB[]): number[] {
+/**
+ * GIF color tables must be a power-of-two size in {2,4,...,256} — the GCT/LCT
+ * packed byte's 3-bit "size" field N encodes an actual table size of
+ * 2^(N+1). By convention the LZW minimum code size (also derived from N) is
+ * never below 2 (some decoders reject 1), so tables are floored at 4 entries.
+ *
+ * REGRESSION fix: gifHeader/frameBlock used to hardcode the size field (and
+ * lzwCompress's minCodeSize) for a 256-entry table regardless of the actual
+ * palette length. For any GifEncodeOptions.numColors < 256 (a documented,
+ * public 2-256 range), the header/image-descriptor declared a 256-entry
+ * (768-byte) color table while only numColors*3 bytes were actually written
+ * — a decoder reads the following stream bytes as palette data, producing a
+ * corrupt file.
+ */
+function colorTableSize(requestedColors: number): { n: number; size: number } {
+  let n = 1; // size 4 — the LZW-min-code-size-2 floor
+  while ((1 << (n + 1)) < requestedColors && n < 7) n++;
+  return { n, size: 1 << (n + 1) };
+}
+
+function gifHeader(width: number, height: number, globalPalette: RGB[], n: number): number[] {
   const out = [
     0x47, 0x49, 0x46, 0x38, 0x39, 0x61, // "GIF89a"
     ...u16LE(width),
     ...u16LE(height),
-    0xF7, // global color table present, 256 entries (bit pattern: 1 111 0 111)
+    0x80 | (n << 4) | n, // GCT flag=1, color resolution=N, sort=0, size=N
     0x00, // background color index
     0x00, // pixel aspect ratio
   ];
@@ -331,13 +351,17 @@ function netscapeExtension(loopCount: number): number[] {
   ];
 }
 
-function frameBlock(
-  width: number,
-  height: number,
-  localPalette: RGB[],
-  indices: Uint8Array,
-  delayCs: number
-): number[] {
+interface FrameBlockInput {
+  width: number;
+  height: number;
+  localPalette: RGB[];
+  indices: Uint8Array;
+  delayCs: number;
+  /** Color table size field (table size = 2^(n+1)); see colorTableSize(). */
+  n: number;
+}
+
+function frameBlock({ width, height, localPalette, indices, delayCs, n }: FrameBlockInput): number[] {
   const out = [
     // Graphic Control Extension
     0x21, 0xF9, 0x04,
@@ -350,15 +374,16 @@ function frameBlock(
     0x2C,
     ...u16LE(0), ...u16LE(0),         // left, top
     ...u16LE(width), ...u16LE(height),
-    0x87,               // local color table present, 256 entries (1 000 0 111)
+    0x80 | n,           // local color table present, size = 2^(n+1) entries
   ];
 
-  // Local Color Table (256 × 3 bytes)
+  // Local Color Table (2^(n+1) × 3 bytes — must match localPalette.length exactly)
   for (const [r, g, b] of localPalette) out.push(r, g, b);
 
-  // LZW Image Data (minCodeSize = 8 for a 256-entry palette)
-  const lzwData = lzwCompress(indices, 8);
-  out.push(8); // LZW minimum code size
+  // LZW Image Data (minCodeSize derived from the same N as the color table size)
+  const minCodeSize = n + 1;
+  const lzwData = lzwCompress(indices, minCodeSize);
+  out.push(minCodeSize); // LZW minimum code size
 
   for (let offset = 0; offset < lzwData.length; offset += 255) {
     const blockSize = Math.min(255, lzwData.length - offset);
@@ -383,7 +408,12 @@ function frameBlock(
 export function encodeGif(frames: GifFrameInput[], opts: GifEncodeOptions = {}): Uint8Array {
   if (frames.length === 0) throw new Error('GIF encoder: at least one frame required');
 
-  const numColors = Math.min(256, Math.max(2, opts.numColors ?? 256));
+  const requestedColors = Math.min(256, Math.max(2, opts.numColors ?? 256));
+  // Color table size (and LZW minCodeSize) must be a power of two — see
+  // colorTableSize()'s doc comment. medianCut is asked for exactly
+  // `tableSize` entries so the palette length always matches what the
+  // header/image-descriptor declare.
+  const { n, size: tableSize } = colorTableSize(requestedColors);
   const dither = opts.dither ?? true;
   const loopCount = opts.loopCount ?? 0;
 
@@ -401,7 +431,7 @@ export function encodeGif(frames: GifFrameInput[], opts: GifEncodeOptions = {}):
       sampled.push([imageData.data[i * 4], imageData.data[i * 4 + 1], imageData.data[i * 4 + 2]]);
     }
 
-    const palette = medianCut(sampled, numColors);
+    const palette = medianCut(sampled, tableSize);
     const lut = buildLUT(palette);
     const indices = dither
       ? mapPixelsDithered(imageData.data, imageData.width, imageData.height, palette, lut)
@@ -412,10 +442,12 @@ export function encodeGif(frames: GifFrameInput[], opts: GifEncodeOptions = {}):
 
   // Assemble GIF89a binary
   const parts: number[][] = [
-    gifHeader(width, height, processed[0].palette),
+    gifHeader(width, height, processed[0].palette, n),
   ];
   if (frames.length > 1) parts.push(netscapeExtension(loopCount));
-  for (const f of processed) parts.push(frameBlock(width, height, f.palette, f.indices, f.delayCs));
+  for (const f of processed) {
+    parts.push(frameBlock({ width, height, localPalette: f.palette, indices: f.indices, delayCs: f.delayCs, n }));
+  }
   parts.push([0x3B]); // GIF trailer
 
   const totalLength = parts.reduce((s, p) => s + p.length, 0);

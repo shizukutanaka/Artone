@@ -234,9 +234,14 @@ class ProxyEncoder {
 
     // Decode source -> resize -> encode
     const video = document.createElement('video');
+    // REGRESSION fix: crossOrigin must be set BEFORE src -- it configures the
+    // CORS mode for the load `src` triggers, so setting it afterward has no
+    // effect on the in-flight request. A cross-origin source would then taint
+    // the canvas drawImage() below draws into, making `new VideoFrame(canvas, …)`
+    // throw SecurityError instead of encoding.
+    video.crossOrigin = 'anonymous';
     video.src = sourceUrl;
     video.muted = true;
-    video.crossOrigin = 'anonymous';
     await new Promise<void>((res, rej) => {
       const METADATA_TIMEOUT_MS = 30_000;
       const timer = setTimeout(() => {
@@ -438,7 +443,16 @@ export class ProxyWorkflow {
       job.completedAt = Date.now();
       job.progress = 1;
       job.outputBlob = blob;
-      job.outputUrl = URL.createObjectURL(blob);
+      // REGRESSION fix: this used to call URL.createObjectURL(blob) directly
+      // and store the result only on job.outputUrl -- never registered in
+      // blobUrlCache, so clearAll()/deleteProxy() (which only revoke entries
+      // in that cache) never revoked it. Every completed job leaked one
+      // object URL for the app's lifetime. mapping.proxyId === job.id (see
+      // above), so reuse the same cache resolveUrl() already reads from —
+      // this also means a later resolveUrl() call for the same proxy returns
+      // this exact URL instead of minting a second one for the same blob.
+      job.outputUrl = this.blobUrlCache.get(job.id) ?? URL.createObjectURL(blob);
+      this.blobUrlCache.set(job.id, job.outputUrl);
       this.notifyListeners(job);
     } catch (e) {
       if (!this.active.has(job.id)) return;

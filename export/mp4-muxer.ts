@@ -313,9 +313,28 @@ function buildAvc1(width: number, height: number, sps: Uint8Array, pps: Uint8Arr
  * Reused as-is for both the MP4 esds box below and WebM's CodecPrivate
  * element (export-engine.ts) — Matroska embeds AAC using this same
  * MPEG-4 AudioSpecificConfig per the Matroska codec spec.
+ *
+ * REGRESSION fix: a sampleRate outside FREQ_INDEX's 13 standard rates used to
+ * fall back to samplingFreqIndex=15 ("explicit frequency"), but per the spec
+ * that value requires 24 additional explicit-frequency bits following the
+ * 4-bit index — bits this function's fixed 2-byte layout has no room for.
+ * The result was a truncated, structurally invalid AudioSpecificConfig: a
+ * decoder reading index 15 expects the next 24 bits to be a frequency, not
+ * (as written here) the channelConfig/flag bits of a normal ASC — every
+ * subsequent bit is misinterpreted. export/CLAUDE.md: "データ損失は致命的" —
+ * fail loud with a clear error instead of emitting a silently-corrupt track.
+ *
+ * @throws if `sampleRate` is not one of the 13 rates AAC-LC's fixed-length
+ *   sampling-frequency-index table supports
  */
 export function buildAacAudioSpecificConfig(sampleRate: number, channels: number): Uint8Array {
-  const freqIndex = FREQ_INDEX[sampleRate] ?? 15;  // 15 = explicit frequency
+  const freqIndex = FREQ_INDEX[sampleRate];
+  if (freqIndex === undefined) {
+    throw new Error(
+      `buildAacAudioSpecificConfig: unsupported AAC sample rate ${sampleRate}Hz ` +
+      `(must be one of: ${Object.keys(FREQ_INDEX).join(', ')})`
+    );
+  }
   const asc = new Uint8Array(2);
   asc[0] = (2 << 3) | (freqIndex >> 1);       // AAC-LC (objectType=2)
   asc[1] = ((freqIndex & 1) << 7) | (channels << 3);
@@ -336,7 +355,16 @@ function buildMp4a(sampleRate: number, channels: number): Uint8Array {
     u16(16),              // sample size = 16 bits
     u16(0),               // pre_defined
     u16(0),               // reserved
-    u32((sampleRate & 0xFFFF) << 16),  // sampleRate 16.16 fixed-point
+    // sampleRate 16.16 fixed-point. REGRESSION fix: `(sampleRate & 0xFFFF)
+    // << 16` silently WRAPPED any rate above 65535 (e.g. 96000 -> 96000 &
+    // 0xFFFF = 30464, declaring ~30464Hz for a 96000Hz track) -- and 96000/
+    // 88200 are both real, standard AAC rates this file's own FREQ_INDEX
+    // table already supports, so this was reachable with ordinary high-res
+    // audio, not just exotic input. This legacy 16-bit-integer-part field
+    // cannot represent a rate above 65535 at all; per common ISOBMFF muxer
+    // practice, write 0 for those (decoders read the real rate from the
+    // AudioSpecificConfig in esds below, which is always correct).
+    u32(sampleRate <= 0xFFFF ? sampleRate << 16 : 0),
     esds,
   ]);
 }

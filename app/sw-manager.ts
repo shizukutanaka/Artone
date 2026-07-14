@@ -16,6 +16,16 @@ export interface CacheInfo {
 
 export type CacheStatus = Record<string, CacheInfo>;
 
+/**
+ * Whether the Service Worker should be registered for the current build.
+ * Production only — registering in dev would let the SW's cache-first
+ * strategy serve a stale bundle over Vite's HMR-served modules, and dev
+ * builds have no `dist/sw.js` to register against in the first place.
+ */
+export function shouldRegisterServiceWorker(isProd: boolean): boolean {
+  return isProd && 'serviceWorker' in navigator;
+}
+
 export class ServiceWorkerManager {
   private registration: ServiceWorkerRegistration | null = null;
   private updateAvailable = false;

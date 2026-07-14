@@ -9,7 +9,38 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ServiceWorkerManager } from '../app/sw-manager';
+import { ServiceWorkerManager, shouldRegisterServiceWorker } from '../app/sw-manager';
+
+describe('shouldRegisterServiceWorker', () => {
+  const originalDescriptor = Object.getOwnPropertyDescriptor(navigator, 'serviceWorker');
+
+  afterEach(() => {
+    if (originalDescriptor) {
+      Object.defineProperty(navigator, 'serviceWorker', originalDescriptor);
+    } else {
+      delete (navigator as unknown as { serviceWorker?: unknown }).serviceWorker;
+    }
+  });
+
+  it('REGRESSION: returns false outside production (dev builds must not register the SW)', () => {
+    // Before this feature existed, nothing gated registration on env at
+    // all -- entry.tsx simply never called register(), so "offline-capable"
+    // never actually held. This guard exists so dev's HMR-served modules
+    // aren't intercepted by the SW's cache-first strategy.
+    Object.defineProperty(navigator, 'serviceWorker', { value: {}, configurable: true });
+    expect(shouldRegisterServiceWorker(false)).toBe(false);
+  });
+
+  it('returns true in production when the browser supports Service Workers', () => {
+    Object.defineProperty(navigator, 'serviceWorker', { value: {}, configurable: true });
+    expect(shouldRegisterServiceWorker(true)).toBe(true);
+  });
+
+  it('returns false in production when the browser has no Service Worker support', () => {
+    delete (navigator as unknown as { serviceWorker?: unknown }).serviceWorker;
+    expect(shouldRegisterServiceWorker(true)).toBe(false);
+  });
+});
 
 class FakeWorker extends EventTarget {
   state: string = 'installing';

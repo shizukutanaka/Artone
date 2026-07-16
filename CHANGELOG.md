@@ -7,6 +7,11 @@ Artone v3 の全変更を記録。
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-07-16
+
+大規模品質改善リリース。全25ディレクトリの体系的監査により、セキュリティ2件 + バグ修正40件超を実施。
+回帰テストを大幅拡充 (4477 → 4670件、+193件)。全修正は git stash による regress-then-fix 検証済み。
+
 ### Security
 - **`plugins/plugin-manager.ts` サンドボックスが `Worker` 生成を許してしまうエスケープ経路を遮断** (セキュリティ境界ゾーン)。`lockdownSandboxGlobals` は `fetch`/`XMLHttpRequest`/`eval`/`indexedDB` 等を deny-by-default にしていたが `Worker` だけが漏れており、悪意あるプラグインがサンドボックス内から**さらにネストした Worker を生成すると、そこは制限のない新しいグローバルスコープ**(fetch/eval 使い放題) になり、遮断が完全に無効化されていた。`denied` 配列に `Worker`/`Notification` を追加。
 - **`plugins/plugin-bridge.ts` プラグイン UI iframe に `sandbox` 属性が無くフル権限で動作していたバグを修正** (セキュリティ境界ゾーン)。`openPluginUI()` が `uiUrl` を読み込む iframe を `sandbox` 属性なしで生成しており、プラグイン供給コンテンツがトップレベルナビゲーション乗っ取り・ポップアップ・任意スクリプト実行を無制限に行えた。`sandbox="allow-scripts"` を設定 (`allow-same-origin` は意図的に付与しない — 同一オリジンで提供されるプラグイン UI と組み合わせると遮断が実質無効化されるため)。副作用として iframe のオリジンが opaque になり既存の origin 文字列比較による postMessage 検証が機能しなくなるため、`e.source !== iframe.contentWindow` によるウィンドウ同一性比較に置換 (opaque オリジンでも正しく機能し、より頑健)。

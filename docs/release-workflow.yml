@@ -1,0 +1,57 @@
+# Artone — GitHub Release 作成ワークフロー (テンプレート)
+#
+# CLAUDE.md のリリース手順「tag → GitHub Release」を実行する workflow_dispatch
+# ワークフロー。docs/ci-workflow.yml と同様、リポジトリ管理者が
+# `.github/workflows/release.yml` へコピーして有効化する
+# (Claude Code セッションの GitHub App には `workflows` 権限が無く、
+# .github/workflows/ 配下への push が拒否されるためここに置いている)。
+#
+# 有効化後の使い方: Actions タブ → release → Run workflow → tag に v3.1.0 等を入力。
+# 指定タグを起動 ref (通常 main) の HEAD に作成し、CHANGELOG.md の該当
+# バージョンセクションをリリースノートとして GitHub Release を発行する。
+#
+# 代替 (手動): GitHub UI の Releases → "Draft a new release" → タグ v3.1.0 を
+# 新規作成 (target: main) → タイトル "Artone v3.1.0" → CHANGELOG の [3.1.0]
+# セクションを本文に貼り付けて Publish。
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'リリースタグ (例: v3.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract release notes from CHANGELOG
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          # CHANGELOG.md の "## [VERSION]" 見出しから次の "## [" 見出しの手前までを抽出
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { on=1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "詳細は CHANGELOG.md を参照。" > /tmp/release-notes.md
+          fi
+
+      - name: Create tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "Artone $TAG" \
+            --notes-file /tmp/release-notes.md

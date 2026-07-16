@@ -56,8 +56,10 @@ export class WebGLFallbackRenderer {
   private positionBuffer: WebGLBuffer | null = null;
   private texCoordBuffer: WebGLBuffer | null = null;
   private uniforms: Record<string, WebGLUniformLocation | null> = {};
+  private attribs: { posLoc: number; texLoc: number } = { posLoc: -1, texLoc: -1 };
   private frameCount = 0;
   private lastFrameTime = 0;
+  private readonly matBuf = new Float32Array(9);
   // GPU context loss (driver crash, GPU reset, tab backgrounding on mobile) is a
   // normal event that MUST be handled or the renderer silently dies. Critically,
   // preventDefault() on the lost event is required or the browser never fires the
@@ -106,6 +108,10 @@ export class WebGLFallbackRenderer {
 
   /** WebGL 2.0 コンテキストを初期化。成功時 true。 */
   initialize(canvas: HTMLCanvasElement | OffscreenCanvas): boolean {
+    if (this.gl !== null) {
+      log.warn('WebGLFallbackRenderer already initialized — call destroy() before re-initializing');
+      return false;
+    }
     const gl = canvas.getContext('webgl2', {
       alpha: true,
       premultipliedAlpha: true,
@@ -154,6 +160,10 @@ export class WebGLFallbackRenderer {
       transform: gl.getUniformLocation(program, 'u_transform'),
       texture: gl.getUniformLocation(program, 'u_texture'),
       opacity: gl.getUniformLocation(program, 'u_opacity'),
+    };
+    this.attribs = {
+      posLoc: gl.getAttribLocation(program, 'a_position'),
+      texLoc: gl.getAttribLocation(program, 'a_texCoord'),
     };
 
     this.setupGeometry();
@@ -250,15 +260,15 @@ export class WebGLFallbackRenderer {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source as TexImageSource);
   }
 
-  /** transform を 3x3 行列に変換 (列優先) */
+  /** transform を 3x3 行列に変換 (列優先) — pre-allocated buffer, reused every call */
   private buildMatrix(t: LayerTransform): Float32Array {
     const cos = Math.cos(t.rotation);
     const sin = Math.sin(t.rotation);
-    return new Float32Array([
-      t.scaleX * cos, t.scaleX * sin, 0,
-      -t.scaleY * sin, t.scaleY * cos, 0,
-      t.x, t.y, 1,
-    ]);
+    const m = this.matBuf;
+    m[0] = t.scaleX * cos;  m[1] = t.scaleX * sin;  m[2] = 0;
+    m[3] = -t.scaleY * sin; m[4] = t.scaleY * cos;  m[5] = 0;
+    m[6] = t.x;             m[7] = t.y;              m[8] = 1;
+    return m;
   }
 
   /** レイヤーを合成してキャンバスに描画 */
@@ -270,13 +280,12 @@ export class WebGLFallbackRenderer {
 
     const start = performance.now();
 
-    gl.viewport(0, 0, (this.canvas as HTMLCanvasElement).width, (this.canvas as HTMLCanvasElement).height);
+    gl.viewport(0, 0, this.canvas!.width, this.canvas!.height);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(program);
 
-    const posLoc = gl.getAttribLocation(program, 'a_position');
-    const texLoc = gl.getAttribLocation(program, 'a_texCoord');
+    const { posLoc, texLoc } = this.attribs;
 
     for (const layer of layers) {
       const texture = this.textures.get(layer.id);

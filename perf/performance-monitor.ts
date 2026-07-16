@@ -167,7 +167,8 @@ class RollingStats {
   percentile(p: number): number {
     if (this.values.length === 0) return 0;
     const sorted = [...this.values].sort((a, b) => a - b);
-    const index = Math.floor(sorted.length * (p / 100));
+    const pClamped = Math.max(0, Math.min(100, p));
+    const index = Math.floor(sorted.length * (pClamped / 100));
     return sorted[Math.min(index, sorted.length - 1)];
   }
 }
@@ -754,9 +755,27 @@ export class AutoQualityAdjuster {
         this.adjustmentCooldown = this.cooldownFrames;
         break;
       case 'warning':
-        this.qualityLevel = Math.max(0.5, this.qualityLevel - 0.1);
+        // REGRESSION fix: `Math.max(0.5, qualityLevel - 0.1)` was meant as
+        // "decrease by 0.1, but never below the 0.5 floor" -- but if
+        // qualityLevel had already dropped under 0.5 via repeated 'critical'
+        // hits (down to its own floor of 0.25), Math.max forced it back UP
+        // to 0.5 in a single step: a bigger, wrong-direction jump than the
+        // fine-grained (+0.05) recovery path uses, triggered by a state
+        // ('warning') that is still degraded, not recovering. Wrapping in
+        // an outer Math.min ensures 'warning' only ever decreases quality
+        // (or leaves it unchanged once already at/below its own floor) —
+        // it must never raise it.
+        this.qualityLevel = Math.min(this.qualityLevel, Math.max(0.5, this.qualityLevel - 0.1));
         this.adjustmentCooldown = this.cooldownFrames;
         break;
+      // 'good' and 'optimal' both recover quality gradually. Before this
+      // fix, 'good' had no case at all: a quality reduction applied during
+      // a critical/warning spike often settles performance into 'good'
+      // (comfortably fine, but not within 2fps of target) rather than
+      // jumping straight to 'optimal' — with no case handling that level,
+      // quality got stuck at the reduced value forever, with no path back
+      // to 1.0 short of performance becoming near-perfect on its own.
+      case 'good':
       case 'optimal':
         if (this.qualityLevel < 1.0) {
           this.qualityLevel = Math.min(1.0, this.qualityLevel + 0.05);

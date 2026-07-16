@@ -43,8 +43,8 @@ describe('ShortcutManager — defaults', () => {
   let sm: ShortcutManager;
   beforeEach(() => { sm = makeManager(); });
 
-  it('loads 58 default shortcuts', () => {
-    expect(sm.getAllShortcuts()).toHaveLength(58);
+  it('loads 60 default shortcuts', () => {
+    expect(sm.getAllShortcuts()).toHaveLength(60);
   });
 
   it('all shortcuts have i18n description keys starting with shortcut.action.', () => {
@@ -176,6 +176,38 @@ describe('ShortcutManager — context and callback', () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
+  it('REGRESSION: stops propagation once a registered shortcut fires, so no outer listener double-handles the same keypress', () => {
+    // Before fix: app/shell.tsx installs its own `window` keydown listener
+    // for a subset of these same combos (Space/Cmd+Z/Cmd+Shift+Z/Cmd+S),
+    // calling the equivalent engine action through the React layer.
+    // ShortcutManager's own listener is on `document` (fires first in the
+    // bubble phase), but never stopped propagation -- so the SAME keypress
+    // reached both handlers: undo/redo ran twice, save() ran twice, and
+    // Space toggled playback twice (self-cancelling).
+    const cb = vi.fn();
+    sm.registerCallback('play', cb);
+    const outerListener = vi.fn();
+    window.addEventListener('keydown', outerListener);
+    try {
+      document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+      expect(cb).toHaveBeenCalledOnce();
+      expect(outerListener).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('keydown', outerListener);
+    }
+  });
+
+  it('does not stop propagation when no shortcut matches (unrelated keys still reach outer listeners)', () => {
+    const outerListener = vi.fn();
+    window.addEventListener('keydown', outerListener);
+    try {
+      document.dispatchEvent(new KeyboardEvent('keydown', { code: 'F13', bubbles: true }));
+      expect(outerListener).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener('keydown', outerListener);
+    }
+  });
+
   it('ignores keydown from input element', () => {
     const cb = vi.fn();
     sm.registerCallback('play', cb);
@@ -187,6 +219,38 @@ describe('ShortcutManager — context and callback', () => {
 
     expect(cb).not.toHaveBeenCalled();
   });
+
+  it('REGRESSION: ignores keydown from a focused button (e.g. Space to activate a toggle)', () => {
+    // Before fix: only <input>/<textarea> were excluded, so pressing Space
+    // on a focused <button> (Inspector.tsx's Solo/Mute/Enabled toggles) fired
+    // the global "play" shortcut instead of letting the button handle Space
+    // natively -- hijacking ordinary keyboard interaction with the control.
+    const cb = vi.fn();
+    sm.registerCallback('play', cb);
+
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    button.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    document.body.removeChild(button);
+
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it('REGRESSION: ignores keydown from a focused select (e.g. arrow keys to change FPS)', () => {
+    // Before fix: arrow-key navigation on a <select> (the FPS dropdown)
+    // collided with the global frameForward/frameBack (ArrowLeft/ArrowRight)
+    // shortcuts.
+    const cb = vi.fn();
+    sm.registerCallback('frameForward', cb);
+
+    const select = document.createElement('select');
+    document.body.appendChild(select);
+    select.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight', bubbles: true }));
+    document.body.removeChild(select);
+
+    expect(cb).not.toHaveBeenCalled();
+  });
+
 
   it('unregisters callback correctly', () => {
     const cb = vi.fn();
@@ -319,7 +383,7 @@ describe('ShortcutManager — import/export', () => {
   it('importShortcuts silently skips unknown actions', () => {
     const payload = JSON.stringify([{ action: 'ghost', key: 'KeyG', modifiers: { ctrl: false, shift: false, alt: false, meta: false } }]);
     expect(sm.importShortcuts(payload)).toBe(true);
-    expect(sm.getAllShortcuts()).toHaveLength(58);
+    expect(sm.getAllShortcuts()).toHaveLength(60);
   });
 
   it('round-trips customizations through export/import', () => {
@@ -426,5 +490,70 @@ describe('ShortcutManager — dispose', () => {
     // No public API to inspect callbacks directly, but a second dispose()
     // must be idempotent (no double-remove errors).
     expect(() => sm.dispose()).not.toThrow();
+  });
+});
+
+// ─── Modifier matching (ctrl/meta unification) ──────────────────────────────
+
+import {
+  shortcutModifiersMatch,
+  sameModifierChord,
+} from '../app/shortcut-manager';
+
+const mods = (o: Partial<{ ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }> = {}) =>
+  ({ ctrl: false, shift: false, alt: false, meta: false, ...o });
+const ev = (o: Partial<{ ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }> = {}) =>
+  ({ ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...o });
+
+describe('shortcutModifiersMatch — ctrl/meta unified as the command key', () => {
+  it('a ctrl-bound shortcut matches both Ctrl and ⌘', () => {
+    expect(shortcutModifiersMatch(mods({ ctrl: true }), ev({ ctrlKey: true }))).toBe(true);
+    expect(shortcutModifiersMatch(mods({ ctrl: true }), ev({ metaKey: true }))).toBe(true);
+  });
+
+  it('REGRESSION: a meta-bound shortcut (⌘B) matches ⌘ and Ctrl (previously never matched)', () => {
+    expect(shortcutModifiersMatch(mods({ meta: true }), ev({ metaKey: true }))).toBe(true);
+    expect(shortcutModifiersMatch(mods({ meta: true }), ev({ ctrlKey: true }))).toBe(true);
+  });
+
+  it('requires the command key when bound, rejects when absent', () => {
+    expect(shortcutModifiersMatch(mods({ ctrl: true }), ev())).toBe(false);
+    expect(shortcutModifiersMatch(mods(), ev({ ctrlKey: true }))).toBe(false);
+  });
+
+  it('matches shift and alt exactly', () => {
+    expect(shortcutModifiersMatch(mods({ shift: true }), ev({ shiftKey: true }))).toBe(true);
+    expect(shortcutModifiersMatch(mods({ shift: true }), ev())).toBe(false);
+    expect(shortcutModifiersMatch(mods({ alt: true }), ev({ altKey: true }))).toBe(true);
+    expect(shortcutModifiersMatch(mods(), ev({ altKey: true }))).toBe(false);
+  });
+
+  it('no-modifier shortcut matches a bare key', () => {
+    expect(shortcutModifiersMatch(mods(), ev())).toBe(true);
+  });
+});
+
+describe('sameModifierChord', () => {
+  it('treats ctrl-only and meta-only as the same chord', () => {
+    expect(sameModifierChord(mods({ ctrl: true }), mods({ meta: true }))).toBe(true);
+  });
+  it('distinguishes shift/alt', () => {
+    expect(sameModifierChord(mods({ ctrl: true }), mods({ ctrl: true, shift: true }))).toBe(false);
+  });
+});
+
+describe('ShortcutManager — meta bindings dispatch (FCP preset)', () => {
+  let sm: ShortcutManager;
+  beforeEach(() => { sm = makeManager(); });
+  afterEach(() => { sm.dispose(); vi.restoreAllMocks(); });
+
+  it('REGRESSION: FCP ⌘B split fires on a metaKey keydown', () => {
+    sm.applyPreset('fcp');
+    sm.setContext('timeline');
+    const cb = vi.fn();
+    sm.registerCallback('split', cb);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyB', metaKey: true, bubbles: true }));
+    expect(cb).toHaveBeenCalledOnce();
   });
 });

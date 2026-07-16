@@ -2,7 +2,7 @@
   "name": "Artone v3",
   "short_name": "Artone",
   "description": "ブラウザ完結型プロフェッショナル動画編集",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "start_url": "/",
   "display": "standalone",
   "orientation": "any",

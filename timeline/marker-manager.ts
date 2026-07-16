@@ -74,6 +74,7 @@ const MARKER_COLORS: Record<MarkerType, string> = {
 export class MarkerManager {
   private markers: Map<string, Marker> = new Map();
   private listeners: Set<() => void> = new Set();
+  private _sortedCache: Marker[] | null = null;
 
   // ============================================================
   // Marker CRUD
@@ -154,7 +155,10 @@ export class MarkerManager {
   }
 
   getAllMarkers(): Marker[] {
-    return Array.from(this.markers.values()).sort((a, b) => a.time - b.time);
+    if (!this._sortedCache) {
+      this._sortedCache = Array.from(this.markers.values()).sort((a, b) => a.time - b.time);
+    }
+    return this._sortedCache;
   }
 
   getMarkersByType(type: MarkerType): Marker[] {
@@ -524,6 +528,7 @@ export class MarkerManager {
   }
 
   private notify(): void {
+    this._sortedCache = null;
     for (const listener of this.listeners) {
       listener();
     }

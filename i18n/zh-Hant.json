@@ -57,6 +57,11 @@
     "paste": "貼上",
     "selectAll": "全選"
   },
+  "history": {
+    "opsCount": "{count} 項操作",
+    "clear": "清除",
+    "empty": "無歷史記錄"
+  },
   "timeline": {
     "title": "時間軸",
     "play": "播放",
@@ -187,6 +192,9 @@
     "all": "全部",
     "empty": "拖放或匯入媒體",
     "noMatch": "無符合結果",
+    "itemsLabel": "項",
+    "sidebarClose": "關閉媒體面板",
+    "sidebarOpen": "開啟媒體面板",
     "status": {
       "pending": "待處理",
       "proxy": "代理",
@@ -214,7 +222,8 @@
     },
     "generic": "錯誤：{message}",
     "init": {
-      "title": "初始化錯誤"
+      "title": "初始化錯誤",
+      "partial": "部分功能啟動失敗：{message}"
     },
     "details": "錯誤詳情",
     "restart": "重新啟動",
@@ -229,7 +238,8 @@
     "restore": "復原",
     "discard": "捨棄",
     "autoSave": "自動儲存",
-    "restorePrompt": "偵測到來自 {time} 的未儲存工作。是否還原？"
+    "restorePrompt": "偵測到來自 {time} 的未儲存工作。是否還原？",
+    "autoSaveFailed": "自動儲存功能未正常運作，您的變更可能不會被儲存。"
   },
   "performance": {
     "fps": "FPS：{value}",
@@ -280,6 +290,8 @@
       "setInPoint": "設定入點",
       "setOutPoint": "設定出點",
       "clearInOut": "清除入點 / 出點",
+      "lift": "提升",
+      "extract": "擷取",
       "zoomIn": "放大",
       "zoomOut": "縮小",
       "zoomFit": "符合螢幕",
@@ -358,7 +370,10 @@
       "scale": "縮放",
       "rotation": "旋轉",
       "alpha": "α",
-      "enabled": "啟用"
+      "enabled": "啟用",
+      "x": "X",
+      "y": "Y",
+      "fps": "幀率"
     }
   },
   "captions": {
@@ -374,6 +389,7 @@
     "placeholder": "搜尋指令、效果、設定...",
     "hint": "↑↓ 導覽 · Enter 執行 · Esc 關閉",
     "count": "{count} 個結果",
+    "noResults": "找不到結果",
     "cmd": {
       "cut": "剪下",
       "copy": "複製",

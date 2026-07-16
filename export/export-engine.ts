@@ -19,7 +19,7 @@ import {
   type VideoChunkRef,
   type AudioChunkRef,
 } from './webm-muxer';
-import { muxMP4 } from './mp4-muxer';
+import { muxMP4, buildAacAudioSpecificConfig } from './mp4-muxer';
 
 // ============================================================
 // Types
@@ -96,12 +96,20 @@ export const DEFAULT_MAX_ENCODE_QUEUE = 8;
 export async function awaitEncoderQueueBelow(
   encoder: EventTarget & { encodeQueueSize: number },
   maxQueue: number = DEFAULT_MAX_ENCODE_QUEUE,
+  timeoutMs = 10_000,
 ): Promise<void> {
   if (encoder.encodeQueueSize < maxQueue) return;
   // 'dequeue' は queue が減るたびに発火するため、once 待ちで十分。
   // 1回の dequeue で必ず閾値未満になるとは限らないが、loop 側が次回必ず再チェックする。
-  await new Promise<void>((resolve) => {
-    encoder.addEventListener('dequeue', () => resolve(), { once: true });
+  // Timeout guard: if the encoder closes/errors without firing 'dequeue', the
+  // Promise would hang indefinitely without this deadline.
+  await new Promise<void>((resolve, reject) => {
+    const onDequeue = () => { clearTimeout(timer); resolve(); };
+    const timer = setTimeout(() => {
+      encoder.removeEventListener('dequeue', onDequeue);
+      reject(new Error(`awaitEncoderQueueBelow: no dequeue within ${timeoutMs}ms — encoder may have stalled`));
+    }, timeoutMs);
+    encoder.addEventListener('dequeue', onDequeue, { once: true });
   });
 }
 
@@ -116,7 +124,11 @@ export const EXPORT_PRESETS: ExportPreset[] = [
     description: '4K UHD for YouTube',
     config: {
       format: 'mp4',
-      codec: 'avc1.640033',
+      // High L5.2 (0x34). 4K60 = 240×135 MBs × 60 = 1,944,000 MB/s, which
+      // exceeds L5.1's (0x33) MaxMBPS of 983,040 — a conformant encoder's
+      // isConfigSupported() rejects the too-low level. L5.2's 2,073,600
+      // covers it. (Was avc1.640033 = L5.1.)
+      codec: 'avc1.640034',
       width: 3840,
       height: 2160,
       fps: 60,
@@ -132,7 +144,11 @@ export const EXPORT_PRESETS: ExportPreset[] = [
     description: '1080p HD for YouTube',
     config: {
       format: 'mp4',
-      codec: 'avc1.640028',
+      // High L4.2 (0x2A). 1080p60 = 120×68 MBs × 60 = 489,600 MB/s, which
+      // exceeds L4.0's (0x28) MaxMBPS of 245,760 — a conformant encoder's
+      // isConfigSupported() rejects the too-low level. L4.2's 522,240
+      // covers it. (Was avc1.640028 = L4.0.)
+      codec: 'avc1.64002A',
       width: 1920,
       height: 1080,
       fps: 60,
@@ -148,7 +164,10 @@ export const EXPORT_PRESETS: ExportPreset[] = [
     description: 'Optimized for Twitter',
     config: {
       format: 'mp4',
-      codec: 'avc1.4D001E',
+      // Main L3.1 (0x1F). 720p30 = 80×45 = 3,600 MBs/frame, which exceeds
+      // L3.0's (0x1E) MaxFS of 1,620 (and its 40,500 MaxMBPS). L3.1's
+      // MaxFS 3,600 / MaxMBPS 108,000 cover it exactly. (Was avc1.4D001E = L3.0.)
+      codec: 'avc1.4D001F',
       width: 1280,
       height: 720,
       fps: 30,
@@ -164,7 +183,10 @@ export const EXPORT_PRESETS: ExportPreset[] = [
     description: '1:1 Square for Instagram',
     config: {
       format: 'mp4',
-      codec: 'avc1.4D001E',
+      // Main L3.2 (0x20). 1080² = 68×68 = 4,624 MBs/frame, exceeding L3.1's
+      // (0x1F) MaxFS of 3,600. L3.2's MaxFS 5,120 / MaxMBPS 216,000 cover it.
+      // (Was avc1.4D001E = L3.0, whose 1,620 MaxFS was far too small.)
+      codec: 'avc1.4D0020',
       width: 1080,
       height: 1080,
       fps: 30,
@@ -180,7 +202,10 @@ export const EXPORT_PRESETS: ExportPreset[] = [
     description: '9:16 Vertical for Reels/TikTok',
     config: {
       format: 'mp4',
-      codec: 'avc1.4D001E',
+      // Main L4.0 (0x28). 1080×1920 = 68×120 = 8,160 MBs/frame, exceeding
+      // L3.2's (0x20) MaxFS of 5,120. L4.0's MaxFS 8,192 / MaxMBPS 245,760
+      // cover it. (Was avc1.4D001E = L3.0.)
+      codec: 'avc1.4D0028',
       width: 1080,
       height: 1920,
       fps: 30,
@@ -248,8 +273,16 @@ export class ExportEngine {
   private jobs: Map<string, ExportJob> = new Map();
   private encoder: VideoEncoder | null = null;
   private audioEncoder: AudioEncoder | null = null;
+  // Actual sample rate/channel count used by the most recent encodeAudio()
+  // call, so mux() can declare matching container metadata instead of
+  // assuming every source is 48kHz stereo.
+  private lastAudioSampleRate = 48000;
+  private lastAudioChannels = 2;
   private abortController: AbortController | null = null;
   private listeners: Set<(job: ExportJob) => void> = new Set();
+  // Cached canvas for videoFrameToImageData() — recreated only on resolution change.
+  private _gifCanvas: OffscreenCanvas | null = null;
+  private _gifCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   // ============================================================
   // Job Management
@@ -284,6 +317,18 @@ export class ExportEngine {
       this.abortController?.abort();
       this.notifyListeners(job);
     }
+  }
+
+  /**
+   * Release a finished job and revoke its output object URL.
+   * Call this when the UI no longer needs `job.outputPath` to allow the
+   * exported Blob to be garbage-collected.
+   */
+  releaseJob(jobId: string): void {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+    if (job.outputPath?.startsWith('blob:')) URL.revokeObjectURL(job.outputPath);
+    this.jobs.delete(jobId);
   }
 
   // ============================================================
@@ -366,8 +411,10 @@ export class ExportEngine {
       this.notifyListeners(job);
       throw error;
     } finally {
-      this.encoder?.close();
-      this.audioEncoder?.close();
+      // WebCodecs spec: close() on an already-closed codec throws InvalidStateError;
+      // guard with state check (same pattern as webcodecs-pipeline.ts line 293).
+      if (this.encoder && this.encoder.state !== 'closed') this.encoder.close();
+      if (this.audioEncoder && this.audioEncoder.state !== 'closed') this.audioEncoder.close();
       this.encoder = null;
       this.audioEncoder = null;
     }
@@ -474,6 +521,8 @@ export class ExportEngine {
     const chunks: AudioChunkRef[] = [];
     const sampleRate = buffer.sampleRate;
     const channels = Math.min(buffer.numberOfChannels, 2);
+    this.lastAudioSampleRate = sampleRate;
+    this.lastAudioChannels = channels;
 
     // Check AAC support
     const support = await AudioEncoder.isConfigSupported({
@@ -489,11 +538,25 @@ export class ExportEngine {
     }
 
     return new Promise((resolve, reject) => {
+      // REGRESSION fix: the muxers used to assume every encoded chunk spans
+      // exactly `frameSize` samples (see the now-removed hardcoded stts
+      // delta in mp4-muxer.ts), but the LAST chunk is shorter whenever
+      // buffer.length isn't an exact multiple of frameSize (true for
+      // virtually any real-world audio buffer) — overstating the muxed
+      // audio track's declared duration. Track each chunk's actual sample
+      // count (FIFO — a single AudioEncoder's output order matches its
+      // input order) so durationUs reflects the real encoded span, falling
+      // back to it only when the browser doesn't populate chunk.duration
+      // itself (matches the same chunk.duration ?? fallback pattern the
+      // video path already uses).
+      const pendingFrameLengths: number[] = [];
       this.audioEncoder = new AudioEncoder({
         output: (chunk) => {
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
-          chunks.push({ data, timestampUs: chunk.timestamp });
+          const length = pendingFrameLengths.shift() ?? frameSize;
+          const durationUs = chunk.duration ?? Math.round((length / sampleRate) * 1_000_000);
+          chunks.push({ data, timestampUs: chunk.timestamp, durationUs });
         },
         error: reject
       });
@@ -510,16 +573,21 @@ export class ExportEngine {
       const totalFrames = Math.ceil(buffer.length / frameSize);
 
       const encodeAll = async () => {
+        // Pre-allocate once at maximum frame size; for f32-planar the WebCodecs
+        // AudioData constructor reads only numberOfFrames * channels samples from
+        // the start, so passing a larger buffer on the last (shorter) frame is safe.
+        const audioBuf = new Float32Array(frameSize * channels);
         for (let f = 0; f < totalFrames; f++) {
           // Back-pressure (see awaitEncoderQueueBelow rationale).
           await awaitEncoderQueueBelow(this.audioEncoder!);
           const offset = f * frameSize;
           const length = Math.min(frameSize, buffer.length - offset);
+          pendingFrameLengths.push(length);
 
           // REGRESSION fix: f32-planar requires all ch-0 samples first, then ch-1.
           // The previous write `data[i * channels + ch]` produced interleaved layout
           // which mismatches f32-planar → garbled audio in the WebCodecs pipeline.
-          const data = new Float32Array(length * channels);
+          const data = audioBuf; // reuse pre-allocated buffer
           for (let ch = 0; ch < channels; ch++) {
             const channelData = buffer.getChannelData(ch);
             for (let i = 0; i < length; i++) {
@@ -568,10 +636,18 @@ export class ExportEngine {
         height: config.height,
       };
       const hasAudio = audioChunks && audioChunks.length > 0;
+      // REGRESSION fix: WebM's A_AAC track requires CodecPrivate (the AAC
+      // AudioSpecificConfig) per the Matroska codec spec, since WebCodecs'
+      // AAC output is raw (no ADTS header) and a decoder has no other way
+      // to learn the sample rate/channel config. Without it, every WebM
+      // export with audio produced an undecodable/silent audio track while
+      // reporting success. Reuses the same ASC builder mp4-muxer.ts already
+      // uses for MP4's esds box.
       const audioTrack = hasAudio ? {
         codecId: toWebMAudioCodecId('mp4a.40.2'),
-        sampleRate: 48000,
-        channels: 2,
+        sampleRate: this.lastAudioSampleRate,
+        channels: this.lastAudioChannels,
+        codecPrivate: buildAacAudioSpecificConfig(this.lastAudioSampleRate, this.lastAudioChannels),
       } : undefined;
       const webmBytes = muxWebM(
         videoTrack,
@@ -585,7 +661,7 @@ export class ExportEngine {
     // MP4: full ISOBMFF container with moov + mdat (H.264 includes avcC/AVCC conversion)
     const mp4Track = { codec: config.codec, width: config.width, height: config.height, fps: config.fps };
     const mp4AudioTrack = (audioChunks && audioChunks.length > 0)
-      ? { sampleRate: 48000, channels: 2 }
+      ? { sampleRate: this.lastAudioSampleRate, channels: this.lastAudioChannels }
       : undefined;
     const mp4Bytes = muxMP4(
       mp4Track,
@@ -645,12 +721,18 @@ export class ExportEngine {
   }
 
   private async videoFrameToImageData(frame: VideoFrame): Promise<ImageData> {
-    const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-    // willReadFrequently: every GIF frame is read back via getImageData.
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) throw new Error('Failed to obtain 2D context from OffscreenCanvas');
-    ctx.drawImage(frame as unknown as CanvasImageSource, 0, 0);
-    return ctx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
+    const w = frame.displayWidth, h = frame.displayHeight;
+    // Reuse canvas when dimensions are unchanged (common for all frames in a clip).
+    // Recreate only on resolution change to avoid per-frame OffscreenCanvas alloc.
+    if (!this._gifCanvas || this._gifCanvas.width !== w || this._gifCanvas.height !== h) {
+      this._gifCanvas = new OffscreenCanvas(w, h);
+      // willReadFrequently: every GIF frame is read back via getImageData.
+      const ctx = this._gifCanvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) throw new Error('Failed to obtain 2D context from OffscreenCanvas');
+      this._gifCtx = ctx;
+    }
+    this._gifCtx!.drawImage(frame as unknown as CanvasImageSource, 0, 0);
+    return this._gifCtx!.getImageData(0, 0, w, h);
   }
 
   // ============================================================

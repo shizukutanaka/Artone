@@ -149,6 +149,26 @@ export class AIEffectsEngine {
   private ctx: OffscreenCanvasRenderingContext2D;
   private listeners: Set<() => void> = new Set();
   private recognizer: SpeechRecognizer | null = null;
+  // Reusable buffers for applyAlphaFeather — resized only when frame dimensions grow
+  private alphaChannelBuf: Float32Array = new Float32Array(0);
+  private alphaBlurredBuf: Float32Array = new Float32Array(0);
+  // Reusable buffers for background removal morphology — resized only when frame dimensions grow
+  private bgMaskBuf:  Uint8Array = new Uint8Array(0);
+  private morphBufA:  Uint8Array = new Uint8Array(0);
+  private morphBufB:  Uint8Array = new Uint8Array(0);
+  // Reusable scratch buffer for boxBlur — resized only when face bounding box grows
+  private _blurTempBuf: Uint8ClampedArray = new Uint8ClampedArray(0);
+  // Cached foreground compositing canvas for removeBackground() — avoids per-frame alloc
+  private _fgCanvas: OffscreenCanvas | null = null;
+  private _fgCtx: OffscreenCanvasRenderingContext2D | null = null;
+  // Cached 64×64 canvas for computeHistogram() — reused across detectScenes() frames
+  private _histCanvas: OffscreenCanvas | null = null;
+  private _histCtx: OffscreenCanvasRenderingContext2D | null = null;
+  // Cached src/dst canvases for upscale() — recreated only on dimension change
+  private _upscaleSrcCanvas: OffscreenCanvas | null = null;
+  private _upscaleSrcCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _upscaleDstCanvas: OffscreenCanvas | null = null;
+  private _upscaleDstCtx: OffscreenCanvasRenderingContext2D | null = null;
 
   constructor() {
     this.canvas = new OffscreenCanvas(1920, 1080);
@@ -283,7 +303,7 @@ export class AIEffectsEngine {
     // Ensure canvas size
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas = new OffscreenCanvas(width, height);
-      this.ctx = this.canvas.getContext('2d')!;
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
     }
 
     // Draw original
@@ -319,26 +339,34 @@ export class AIEffectsEngine {
       this.ctx.clearRect(0, 0, width, height);
     }
 
-    // Draw foreground with alpha
-    const tempCanvas = new OffscreenCanvas(width, height);
-    const tempCtx = tempCanvas.getContext('2d')!;
-    tempCtx.putImageData(imageData, 0, 0);
-    this.ctx.drawImage(tempCanvas, 0, 0);
+    // Draw foreground with alpha — lazy-grow cached canvas avoids per-frame alloc
+    if (!this._fgCanvas || this._fgCanvas.width !== width || this._fgCanvas.height !== height) {
+      this._fgCanvas = new OffscreenCanvas(width, height);
+      this._fgCtx = this._fgCanvas.getContext('2d')!;
+    }
+    this._fgCtx!.putImageData(imageData, 0, 0);
+    this.ctx.drawImage(this._fgCanvas, 0, 0);
 
     return createImageBitmap(this.canvas);
   }
 
   private applyAlphaFeather(data: Uint8ClampedArray, width: number, height: number, radius: number): void {
-    const r = Math.ceil(radius);
-    const alphaChannel = new Float32Array(width * height);
+    if (radius <= 0) return;
+    const r = Math.max(1, Math.ceil(radius));
+    const n = width * height;
+
+    // Reuse class-level buffers; reallocate only when frame size grows
+    if (this.alphaChannelBuf.length < n) this.alphaChannelBuf = new Float32Array(n);
+    if (this.alphaBlurredBuf.length < n) this.alphaBlurredBuf = new Float32Array(n);
+    const alphaChannel = this.alphaChannelBuf;
+    const blurred = this.alphaBlurredBuf;
 
     // Extract alpha
-    for (let i = 0; i < width * height; i++) {
+    for (let i = 0; i < n; i++) {
       alphaChannel[i] = data[i * 4 + 3] / 255;
     }
 
     // Simple box blur
-    const blurred = new Float32Array(width * height);
     
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -356,12 +384,12 @@ export class AIEffectsEngine {
           }
         }
         
-        blurred[y * width + x] = sum / count;
+        blurred[y * width + x] = count > 0 ? sum / count : 0;
       }
     }
 
     // Apply blurred alpha
-    for (let i = 0; i < width * height; i++) {
+    for (let i = 0; i < n; i++) {
       data[i * 4 + 3] = Math.round(blurred[i] * 255);
     }
   }
@@ -376,8 +404,10 @@ export class AIEffectsEngine {
     const width = frame instanceof VideoFrame ? frame.displayWidth : frame.width;
     const height = frame instanceof VideoFrame ? frame.displayHeight : frame.height;
 
-    this.canvas = new OffscreenCanvas(width, height);
-    this.ctx = this.canvas.getContext('2d')!;
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas = new OffscreenCanvas(width, height);
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+    }
     this.ctx.drawImage(frame, 0, 0);
 
     const imageData = this.ctx.getImageData(0, 0, width, height);
@@ -407,8 +437,12 @@ export class AIEffectsEngine {
     const width = frame instanceof VideoFrame ? frame.displayWidth : frame.width;
     const height = frame instanceof VideoFrame ? frame.displayHeight : frame.height;
 
-    this.canvas = new OffscreenCanvas(width, height);
-    this.ctx = this.canvas.getContext('2d')!;
+    // Reuse the shared canvas; recreate only when dimensions change.
+    // The constructor initialises it at 1920×1080 with willReadFrequently.
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas = new OffscreenCanvas(width, height);
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+    }
     this.ctx.drawImage(frame, 0, 0);
 
     for (const face of faces) {
@@ -428,8 +462,9 @@ export class AIEffectsEngine {
   }
 
   private boxBlur(data: Uint8ClampedArray, width: number, height: number, radius: number): void {
-    const r = Math.ceil(radius);
-    const temp = new Uint8ClampedArray(data.length);
+    const r = Math.max(0, Math.ceil(radius));
+    if (this._blurTempBuf.length < data.length) this._blurTempBuf = new Uint8ClampedArray(data.length);
+    const temp = this._blurTempBuf;
 
     // Horizontal pass
     for (let y = 0; y < height; y++) {
@@ -446,9 +481,9 @@ export class AIEffectsEngine {
         }
         
         const idx = (y * width + x) * 4;
-        temp[idx] = rSum / count;
-        temp[idx + 1] = gSum / count;
-        temp[idx + 2] = bSum / count;
+        temp[idx] = count > 0 ? rSum / count : 0;
+        temp[idx + 1] = count > 0 ? gSum / count : 0;
+        temp[idx + 2] = count > 0 ? bSum / count : 0;
         temp[idx + 3] = data[idx + 3];
       }
     }
@@ -468,9 +503,9 @@ export class AIEffectsEngine {
         }
         
         const idx = (y * width + x) * 4;
-        data[idx] = rSum / count;
-        data[idx + 1] = gSum / count;
-        data[idx + 2] = bSum / count;
+        data[idx] = count > 0 ? rSum / count : 0;
+        data[idx + 1] = count > 0 ? gSum / count : 0;
+        data[idx + 2] = count > 0 ? bSum / count : 0;
       }
     }
   }
@@ -511,9 +546,13 @@ export class AIEffectsEngine {
   private async computeHistogram(frame: VideoFrame | ImageBitmap): Promise<number[]> {
     // Use smaller size for performance
     const size = 64;
-    const canvas = new OffscreenCanvas(size, size);
-    // willReadFrequently: read back via getImageData below.
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    // Reuse a single 64×64 canvas across the entire detectScenes() frame loop to
+    // avoid allocating + discarding one OffscreenCanvas per frame.
+    if (!this._histCanvas) {
+      this._histCanvas = new OffscreenCanvas(size, size);
+      this._histCtx = this._histCanvas.getContext('2d', { willReadFrequently: true })!;
+    }
+    const ctx = this._histCtx!;
     ctx.drawImage(frame, 0, 0, size, size);
 
     const imageData = ctx.getImageData(0, 0, size, size);
@@ -637,20 +676,25 @@ export class AIEffectsEngine {
 
     // Lanczos-2 separable resampling — significantly sharper than browser bilinear.
     // Separable horizontal then vertical pass: O(W×H×4) vs O(W×H×16) for 2D kernel.
-    const srcCanvas = new OffscreenCanvas(width, height);
-    // willReadFrequently: source pixels are read back via getImageData.
-    const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true })!;
-    srcCtx.drawImage(frame, 0, 0);
-    const srcData = srcCtx.getImageData(0, 0, width, height);
+    // Canvases are cached and recreated only when frame dimensions change.
+    if (!this._upscaleSrcCanvas || this._upscaleSrcCanvas.width !== width || this._upscaleSrcCanvas.height !== height) {
+      this._upscaleSrcCanvas = new OffscreenCanvas(width, height);
+      // willReadFrequently: source pixels are read back via getImageData.
+      this._upscaleSrcCtx = this._upscaleSrcCanvas.getContext('2d', { willReadFrequently: true })!;
+    }
+    this._upscaleSrcCtx!.drawImage(frame, 0, 0);
+    const srcData = this._upscaleSrcCtx!.getImageData(0, 0, width, height);
 
     const resized = this.resizeLanczos2(srcData.data, width, height, newWidth, newHeight);
 
-    const dstCanvas = new OffscreenCanvas(newWidth, newHeight);
-    const dstCtx = dstCanvas.getContext('2d')!;
-    const dstImageData = dstCtx.createImageData(newWidth, newHeight);
+    if (!this._upscaleDstCanvas || this._upscaleDstCanvas.width !== newWidth || this._upscaleDstCanvas.height !== newHeight) {
+      this._upscaleDstCanvas = new OffscreenCanvas(newWidth, newHeight);
+      this._upscaleDstCtx = this._upscaleDstCanvas.getContext('2d')!;
+    }
+    const dstImageData = this._upscaleDstCtx!.createImageData(newWidth, newHeight);
     dstImageData.data.set(resized);
-    dstCtx.putImageData(dstImageData, 0, 0);
-    return createImageBitmap(dstCanvas);
+    this._upscaleDstCtx!.putImageData(dstImageData, 0, 0);
+    return createImageBitmap(this._upscaleDstCanvas);
   }
 
   // ============================================================
@@ -664,8 +708,10 @@ export class AIEffectsEngine {
     const width = frame instanceof VideoFrame ? frame.displayWidth : frame.width;
     const height = frame instanceof VideoFrame ? frame.displayHeight : frame.height;
 
-    this.canvas = new OffscreenCanvas(width, height);
-    this.ctx = this.canvas.getContext('2d')!;
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas = new OffscreenCanvas(width, height);
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+    }
     this.ctx.drawImage(frame, 0, 0);
 
     const imageData = this.ctx.getImageData(0, 0, width, height);
@@ -837,7 +883,9 @@ export class AIEffectsEngine {
     bg: { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number },
     threshold: number
   ): Uint8Array {
-    const mask = new Uint8Array(width * height);
+    const n = width * height;
+    if (this.bgMaskBuf.length < n) this.bgMaskBuf = new Uint8Array(n);
+    const mask = this.bgMaskBuf;
     const tSq = (threshold * 10) ** 2;
     for (let i = 0; i < width * height; i++) {
       const dr = (data[i * 4] - bg.r) ** 2 / bg.vrR;
@@ -850,12 +898,21 @@ export class AIEffectsEngine {
 
   /** 1D-separable morphological closing (dilate then erode) on a binary mask. */
   private morphClose1D(mask: Uint8Array, width: number, height: number, r: number): Uint8Array {
-    const d = this.dilate1D(mask, width, height, r);
-    return this.erode1D(d, width, height, r);
+    const n = mask.length;
+    if (this.morphBufA.length < n) this.morphBufA = new Uint8Array(n);
+    if (this.morphBufB.length < n) this.morphBufB = new Uint8Array(n);
+    // dilate: mask → (tmp=A, dst=B)
+    this.dilate1D(mask, width, height, r, this.morphBufA, this.morphBufB);
+    // erode: B → (tmp=A, dst=B); H-pass reads B while V-pass writes B — safe because
+    // H-pass fully consumes B into A before V-pass begins writing to B.
+    this.erode1D(this.morphBufB, width, height, r, this.morphBufA, this.morphBufB);
+    return this.morphBufB;
   }
 
-  private dilate1D(src: Uint8Array, width: number, height: number, r: number): Uint8Array {
-    const tmp = new Uint8Array(src.length);
+  private dilate1D(
+    src: Uint8Array, width: number, height: number, r: number,
+    tmp: Uint8Array, dst: Uint8Array,
+  ): void {
     // Horizontal
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -868,7 +925,6 @@ export class AIEffectsEngine {
       }
     }
     // Vertical
-    const dst = new Uint8Array(src.length);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let v = 0;
@@ -879,11 +935,12 @@ export class AIEffectsEngine {
         dst[y * width + x] = v;
       }
     }
-    return dst;
   }
 
-  private erode1D(src: Uint8Array, width: number, height: number, r: number): Uint8Array {
-    const tmp = new Uint8Array(src.length);
+  private erode1D(
+    src: Uint8Array, width: number, height: number, r: number,
+    tmp: Uint8Array, dst: Uint8Array,
+  ): void {
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let v = 1;
@@ -894,7 +951,6 @@ export class AIEffectsEngine {
         tmp[y * width + x] = v;
       }
     }
-    const dst = new Uint8Array(src.length);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let v = 1;
@@ -905,7 +961,6 @@ export class AIEffectsEngine {
         dst[y * width + x] = v;
       }
     }
-    return dst;
   }
 
   // ============================================================

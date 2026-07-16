@@ -143,6 +143,22 @@ describe('i18n — ICU plural interpolation (REGRESSION)', () => {
     const m = mgrWith({ plurals: { items: '{count, plural, one {# item} other {# items}}' } });
     expect(m.t('plurals.items', { count: 0 })).toBe('0 items');
   });
+
+  it('REGRESSION: missing count arg falls back to the "other" form instead of blanking the construct', () => {
+    // Before fix: a missing/non-numeric count made the whole plural
+    // construct disappear (Number(undefined) is NaN, and replacePlurals
+    // special-cased NaN to an empty string before ever consulting the
+    // rules). Intl.PluralRules.select(NaN) actually resolves to 'other'
+    // without throwing, so falling through to selectPlural is correct.
+    const m = mgrWith({ msg: 'You have {count, plural, one {# message} other {# messages}} today' });
+    expect(m.t('msg', {})).toBe('You have  messages today');
+  });
+
+  it('REGRESSION: missing count arg does not render the literal string "NaN"', () => {
+    const m = mgrWith({ msg: '{count, plural, other {#/# done}}' });
+    expect(m.t('msg', {})).not.toContain('NaN');
+    expect(m.t('msg', {})).toBe('/ done');
+  });
 });
 
 // ─── Intl formatter caching (perf) ───────────────────────────────────────────

@@ -29,6 +29,46 @@ describe('FCPXML round-trip (export → import)', () => {
       expect(clips[i].mediaUrl).toBe(orig[i].mediaUrl); // asset ref で復元
     }
   });
+
+  it('REGRESSION: fills the gap between clips with a <gap> spine element (real FCP compatibility)', () => {
+    // sampleTimeline's video clips are [0,90) then start at frame 100 — a
+    // 10-frame hole. Before fix: the spine only ever emitted <clip>
+    // elements with absolute offsets — round-tripped fine through this
+    // codebase's own importer (which reads each clip's offset directly and
+    // never inspects gaps), but a real Final Cut Pro import of a <spine>
+    // (FCP's primary storyline, expected to be contiguous) treats an
+    // un-filled hole as ambiguous/misplaced clips.
+    const xml = interchange.fcpxml().export(sampleTimeline);
+    expect(xml).toContain('<gap name="Gap" offset="90/30s" duration="10/30s"/>');
+  });
+
+  it('does not emit a <gap> when clips are already contiguous', () => {
+    const contiguous = {
+      ...sampleTimeline,
+      videoTracks: [{
+        ...sampleTimeline.videoTracks[0],
+        clips: [
+          { ...sampleTimeline.videoTracks[0].clips[0], startFrame: 0, durationFrames: 90 },
+          { ...sampleTimeline.videoTracks[0].clips[1], startFrame: 90, durationFrames: 60 },
+        ],
+      }],
+    };
+    const xml = interchange.fcpxml().export(contiguous);
+    expect(xml).not.toContain('<gap');
+  });
+
+  it('gap-filled export still round-trips clip positions correctly through this importer', () => {
+    // The importer positions clips by their own absolute `offset` attribute
+    // and simply ignores <gap> tags (getElementsByTagName('clip') only), so
+    // adding gap fillers to the export must not change round-trip results.
+    const xml = interchange.fcpxml().export(sampleTimeline);
+    const tl = interchange.fcpxmlImporter().import(xml);
+    const clips = tl.videoTracks[0].clips;
+    const orig = sampleTimeline.videoTracks[0].clips;
+    for (let i = 0; i < orig.length; i++) {
+      expect(clips[i].startFrame).toBe(orig[i].startFrame);
+    }
+  });
 });
 
 describe('FCPXML parsing', () => {

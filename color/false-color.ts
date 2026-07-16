@@ -95,9 +95,13 @@ export const SIMPLE_FALSE_COLOR_STOPS: readonly FalseColorStop[] = Object.freeze
 
 // ─── ヘルパー ────────────────────────────────────────────────────────────────
 
-/** 線形 sRGB EOTF: エンコード済み [0,1] → 線形 [0,1] */
-function srgbEOTF(v: number): number {
-  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+// Pre-computed sRGB EOTF for each 8-bit byte value (0-255). applyToBuffer()
+// always receives Uint8ClampedArray, so input is always an integer in [0,255].
+// 256 table lookups replace 3 Math.pow() calls per pixel.
+const _SRGB_LUT = new Float32Array(256);
+for (let v = 0; v < 256; v++) {
+  const n = v / 255;
+  _SRGB_LUT[v] = n <= 0.04045 ? n / 12.92 : Math.pow((n + 0.055) / 1.055, 2.4);
 }
 
 /** BT.709 luma: 線形 RGB [0,1] → luma Y [0,1] */
@@ -188,10 +192,7 @@ export function createFalseColorMapper(
 
   function applyToBuffer(data: Uint8ClampedArray): void {
     for (let i = 0; i + 4 <= data.length; i += 4) {
-      const r = srgbEOTF(data[i]     / 255);
-      const g = srgbEOTF(data[i + 1] / 255);
-      const b = srgbEOTF(data[i + 2] / 255);
-      const luma = bt709Luma(r, g, b);
+      const luma = bt709Luma(_SRGB_LUT[data[i]], _SRGB_LUT[data[i + 1]], _SRGB_LUT[data[i + 2]]);
       const [fr, fg, fb] = map(luma);
       data[i]     = fr;
       data[i + 1] = fg;

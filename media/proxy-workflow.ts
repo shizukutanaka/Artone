@@ -15,6 +15,7 @@
  * @version 3.0.0
  */
 import { createLogger } from '../app/logger';
+import { setHighQualityScaling } from '../app/utils';
 
 const log = createLogger('ProxyWorkflow');
 
@@ -188,14 +189,19 @@ class ProxyStorage {
 // Proxy Encoder (WebCodecs)
 // ============================================================
 
+export interface ProxyEncodeOptions {
+  sourceUrl: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  preset: ProxyPreset;
+  onProgress: (p: number) => void;
+  /** Aborting stops the per-frame encode loop as soon as the current frame finishes. */
+  signal?: AbortSignal;
+}
+
 class ProxyEncoder {
-  async encode(
-    sourceUrl: string,
-    sourceW: number,
-    sourceH: number,
-    preset: ProxyPreset,
-    onProgress: (p: number) => void
-  ): Promise<Blob> {
+  async encode(opts: ProxyEncodeOptions): Promise<Blob> {
+    const { sourceUrl, sourceWidth: sourceW, sourceHeight: sourceH, preset, onProgress, signal } = opts;
     const targetW = Math.round((sourceW * preset.scale) / 2) * 2;
     const targetH = Math.round((sourceH * preset.scale) / 2) * 2;
 
@@ -228,12 +234,29 @@ class ProxyEncoder {
 
     // Decode source -> resize -> encode
     const video = document.createElement('video');
+    // REGRESSION fix: crossOrigin must be set BEFORE src -- it configures the
+    // CORS mode for the load `src` triggers, so setting it afterward has no
+    // effect on the in-flight request. A cross-origin source would then taint
+    // the canvas drawImage() below draws into, making `new VideoFrame(canvas, …)`
+    // throw SecurityError instead of encoding.
+    video.crossOrigin = 'anonymous';
     video.src = sourceUrl;
     video.muted = true;
-    video.crossOrigin = 'anonymous';
     await new Promise<void>((res, rej) => {
-      video.onloadedmetadata = () => res();
-      video.onerror = () => rej(new Error('Video load failed'));
+      const METADATA_TIMEOUT_MS = 30_000;
+      const timer = setTimeout(() => {
+        video.onloadedmetadata = null;
+        video.onerror = null;
+        rej(new Error(`Proxy encode: metadata load timeout after ${METADATA_TIMEOUT_MS}ms`));
+      }, METADATA_TIMEOUT_MS);
+      const settle = (fn: () => void) => () => {
+        clearTimeout(timer);
+        video.onloadedmetadata = null;
+        video.onerror = null;
+        fn();
+      };
+      video.onloadedmetadata = settle(res);
+      video.onerror = settle(() => rej(new Error('Video load failed')));
     });
 
     const duration = video.duration;
@@ -246,32 +269,46 @@ class ProxyEncoder {
     const canvas = new OffscreenCanvas(targetW, targetH);
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Failed to get 2D context');
+    setHighQualityScaling(ctx); // proxies downscale the source — use a good kernel
 
-    while (currentTime < duration) {
-      video.currentTime = currentTime;
-      await new Promise<void>((res) => {
-        video.onseeked = () => res();
-      });
+    try {
+      while (currentTime < duration) {
+        // Cancellation used to be bookkeeping-only: cancel() dropped the job
+        // from `active` immediately, but this loop kept running to completion
+        // in the background regardless, still burning CPU/GPU and letting
+        // processQueue() start a new job on top of it (exceeding maxConcurrent).
+        if (signal?.aborted) break;
+        video.currentTime = currentTime;
+        await new Promise<void>((res) => {
+          video.onseeked = () => res();
+        });
 
-      ctx.drawImage(video, 0, 0, targetW, targetH);
-      const frame = new VideoFrame(canvas, {
-        timestamp: currentTime * 1_000_000,
-        duration: frameInterval * 1_000_000
-      });
+        ctx.drawImage(video, 0, 0, targetW, targetH);
+        const frame = new VideoFrame(canvas, {
+          timestamp: currentTime * 1_000_000,
+          duration: frameInterval * 1_000_000
+        });
 
-      try {
-        encoder.encode(frame, { keyFrame: frameCount % 60 === 0 });
-      } finally {
-        frame.close();
+        try {
+          encoder.encode(frame, { keyFrame: frameCount % 60 === 0 });
+        } finally {
+          frame.close();
+        }
+
+        frameCount++;
+        currentTime += frameInterval;
+        onProgress(frameCount / totalFrames);
       }
 
-      frameCount++;
-      currentTime += frameInterval;
-      onProgress(frameCount / totalFrames);
+      await encoder.flush();
+    } finally {
+      encoder.close();
+      // Release the network connection and allow the element to be GC'd immediately.
+      video.src = '';
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.onseeked = null;
     }
-
-    await encoder.flush();
-    encoder.close();
 
     return new Blob(chunks as BlobPart[], { type: 'video/mp4' });
   }
@@ -287,6 +324,7 @@ export class ProxyWorkflow {
   private encoder: ProxyEncoder;
   private queue: ProxyJob[] = [];
   private active = new Map<string, ProxyJob>();
+  private controllers = new Map<string, AbortController>();
   private listeners = new Set<(job: ProxyJob) => void>();
   private mappingCache = new Map<string, ProxyMapping>();
   /** Cache of proxyId → Blob URL so resolveUrl() never creates duplicate URLs. */
@@ -368,21 +406,24 @@ export class ProxyWorkflow {
   }
 
   private async runJob(job: ProxyJob): Promise<void> {
+    const controller = new AbortController();
+    this.controllers.set(job.id, controller);
     try {
       job.status = 'processing';
       job.startedAt = Date.now();
       this.notifyListeners(job);
 
-      const blob = await this.encoder.encode(
-        job.sourceUrl,
-        job.sourceWidth,
-        job.sourceHeight,
-        job.preset,
-        (p) => {
+      const blob = await this.encoder.encode({
+        sourceUrl: job.sourceUrl,
+        sourceWidth: job.sourceWidth,
+        sourceHeight: job.sourceHeight,
+        preset: job.preset,
+        onProgress: (p) => {
           job.progress = p;
           this.notifyListeners(job);
-        }
-      );
+        },
+        signal: controller.signal,
+      });
 
       const mapping: ProxyMapping = {
         sourceId: job.sourceId,
@@ -402,7 +443,16 @@ export class ProxyWorkflow {
       job.completedAt = Date.now();
       job.progress = 1;
       job.outputBlob = blob;
-      job.outputUrl = URL.createObjectURL(blob);
+      // REGRESSION fix: this used to call URL.createObjectURL(blob) directly
+      // and store the result only on job.outputUrl -- never registered in
+      // blobUrlCache, so clearAll()/deleteProxy() (which only revoke entries
+      // in that cache) never revoked it. Every completed job leaked one
+      // object URL for the app's lifetime. mapping.proxyId === job.id (see
+      // above), so reuse the same cache resolveUrl() already reads from —
+      // this also means a later resolveUrl() call for the same proxy returns
+      // this exact URL instead of minting a second one for the same blob.
+      job.outputUrl = this.blobUrlCache.get(job.id) ?? URL.createObjectURL(blob);
+      this.blobUrlCache.set(job.id, job.outputUrl);
       this.notifyListeners(job);
     } catch (e) {
       if (!this.active.has(job.id)) return;
@@ -411,6 +461,7 @@ export class ProxyWorkflow {
       this.notifyListeners(job);
     } finally {
       this.active.delete(job.id);
+      this.controllers.delete(job.id);
       this.processQueue();
     }
   }
@@ -428,6 +479,12 @@ export class ProxyWorkflow {
     if (active) {
       active.status = 'cancelled';
       this.active.delete(jobId);
+      // Actually stop the in-flight encode loop, not just the bookkeeping —
+      // otherwise it kept consuming CPU/GPU in the background until it ran
+      // to completion on its own, and a new job could start on top of it,
+      // exceeding maxConcurrent.
+      this.controllers.get(jobId)?.abort();
+      this.controllers.delete(jobId);
       this.notifyListeners(active);
       return true;
     }

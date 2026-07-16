@@ -4,7 +4,11 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import CaptionManager, { CAPTION_PRESETS } from '../captions/caption-manager';
+import CaptionManager, {
+  CAPTION_PRESETS,
+  wrapCaptionLines,
+  segmentForWrap,
+} from '../captions/caption-manager';
 
 // ============================================================
 // Helpers
@@ -178,6 +182,26 @@ describe('CaptionManager — caption operations', () => {
     expect(cm.getCaptionsAtTime(trackId, 5)).toHaveLength(0); // 5 is end → excluded
     expect(cm.getCaptionsAtTime(trackId, 4.999)).toHaveLength(1);
   });
+
+  it('REGRESSION: updateCaption lengthening endTime keeps the caption reachable by getCaptionsAtTime', () => {
+    // Before fix: the lookback-window cache (_trackMaxDuration) was only ever
+    // updated in addCaption(). A caption whose endTime was later extended via
+    // updateCaption() (e.g. a user dragging its trim handle in the UI) grew
+    // past the cached max duration without updating it, so getCaptionsAtTime's
+    // binary-search-plus-bounded-lookback silently stopped finding it once the
+    // query time was far enough past the caption's start.
+    const a = cm.addCaption(trackId, 0, 5, 'A')!; // duration 5, cache max = 5
+    cm.updateCaption(trackId, a.id, { endTime: 90 }); // now spans 0-90
+    const at = cm.getCaptionsAtTime(trackId, 70);
+    expect(at.map(c => c.text)).toEqual(['A']);
+  });
+
+  it('REGRESSION: updateCaption moving startTime much earlier keeps the caption reachable', () => {
+    const a = cm.addCaption(trackId, 500, 505, 'A')!; // duration 5, cache max = 5
+    cm.updateCaption(trackId, a.id, { startTime: 0 }); // now spans 0-505
+    const at = cm.getCaptionsAtTime(trackId, 490);
+    expect(at.map(c => c.text)).toEqual(['A']);
+  });
 });
 
 // ============================================================
@@ -208,6 +232,21 @@ describe('CAPTION_PRESETS', () => {
 
     // Restore for other tests
     defaultPreset.style.fontSize = before;
+  });
+
+  it('REGRESSION: netflix preset position is a copy, not a shared reference to DEFAULT_POSITION', () => {
+    const netflixPreset = CAPTION_PRESETS.find(p => p.id === 'netflix')!;
+    const cm = makeManager();
+    const trackId = cm.createTrack('T').id;
+    const before = cm.addCaption(trackId, 0, 1, 'before')!.position.y;
+
+    netflixPreset.position.y = 999; // mutate the preset
+
+    const after = cm.addCaption(trackId, 1, 2, 'after')!.position.y;
+    expect(after).toBe(before); // unaffected by preset mutation
+
+    // Restore for other tests
+    netflixPreset.position.y = before;
   });
 });
 
@@ -521,6 +560,54 @@ describe('CaptionManager — wrapText (private)', () => {
   it('handles empty string', () => {
     const result = makePrivate().wrapText(mockCtx(5), '', 100);
     expect(result).toEqual([]);
+  });
+
+  it('REGRESSION: wraps Japanese (no spaces) instead of overflowing one line', () => {
+    // Each char = 10px, maxWidth = 50 → ~5 chars/line. Old space-split logic left
+    // the whole 9-char string on ONE 90px line (overflow); CJK segmentation wraps it.
+    const result = makePrivate().wrapText(mockCtx(10), 'こんにちは世界です', 50);
+    expect(result.length).toBeGreaterThan(1);
+    // No line exceeds the width budget (5 chars).
+    for (const line of result) expect(line.length).toBeLessThanOrEqual(5);
+    // Content is preserved (concatenation equals the input, no spaces inserted).
+    expect(result.join('')).toBe('こんにちは世界です');
+  });
+});
+
+// ─── CJK-aware line wrapping (pure) ───────────────────────────────────────────
+
+describe('segmentForWrap', () => {
+  it('splits Japanese into multiple break tokens', () => {
+    const tokens = segmentForWrap('こんにちは世界です');
+    expect(tokens.length).toBeGreaterThan(1);
+    expect(tokens.join('')).toBe('こんにちは世界です');
+  });
+
+  it('keeps Latin words intact', () => {
+    expect(segmentForWrap('one two').filter((t) => t.trim() !== '')).toEqual(['one', 'two']);
+  });
+});
+
+describe('wrapCaptionLines (pure)', () => {
+  const measure = (charWidth: number) => (s: string) => s.length * charWidth;
+
+  it('matches greedy word wrap for Latin', () => {
+    expect(wrapCaptionLines('one two three', 50, measure(10))).toEqual(['one', 'two', 'three']);
+  });
+
+  it('respects hard newlines', () => {
+    expect(wrapCaptionLines('a\nb', 500, measure(5))).toEqual(['a', 'b']);
+  });
+
+  it('keeps an over-wide unbreakable token on its own line (not dropped)', () => {
+    // Single Latin word wider than maxWidth: emitted as one overflowing line.
+    expect(wrapCaptionLines('supercalifragilistic', 50, measure(10))).toEqual(['supercalifragilistic']);
+  });
+
+  it('wraps CJK with the default segmenter', () => {
+    const lines = wrapCaptionLines('今日はいい天気ですね', 40, measure(10));
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.join('')).toBe('今日はいい天気ですね');
   });
 });
 

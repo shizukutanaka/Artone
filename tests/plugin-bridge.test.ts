@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   PluginBridge,
   BUILTIN_PLUGINS,
+  buildWasmProcessorCode,
   type PluginDescriptor,
   type PluginInstance,
 } from '../plugins/plugin-bridge';
@@ -40,7 +41,14 @@ let instCounter = 0;
 function injectInstance(bridge: PluginBridge, descriptor = makeDescriptor()): PluginInstance {
   instCounter++;
   const parameters = new Map<string, number>();
-  for (const p of descriptor.parameters) parameters.set(p.id, p.defaultValue);
+  const paramById = new Map<string, (typeof descriptor.parameters)[0]>();
+  const paramIndexById = new Map<string, number>();
+  for (let i = 0; i < descriptor.parameters.length; i++) {
+    const p = descriptor.parameters[i];
+    parameters.set(p.id, p.defaultValue);
+    paramById.set(p.id, p);
+    paramIndexById.set(p.id, i);
+  }
   const instance: PluginInstance = {
     id: `inst-${instCounter}`,
     descriptor,
@@ -51,6 +59,8 @@ function injectInstance(bridge: PluginBridge, descriptor = makeDescriptor()): Pl
     presets: [],
     currentPreset: -1,
     bypassed: false,
+    paramById,
+    paramIndexById,
   };
   (bridge as unknown as { instances: Map<string, PluginInstance> }).instances.set(instance.id, instance);
   return instance;
@@ -317,6 +327,67 @@ describe('PluginBridge — chains', () => {
     const chainId = bridge.createChain('C');
     expect(bridge.getChainInput(chainId)).toBeUndefined();
   });
+
+  it('REGRESSION: unloadPlugin removes the instance id from every chain it belongs to', () => {
+    // Before fix: unloadPlugin() only removed the instance from
+    // this.instances, leaving its id in chain.plugins. getChainInput/Output
+    // index into instances via chain.plugins[0]/[length-1], so a chain
+    // whose first plugin was unloaded became silently non-functional
+    // (undefined input) instead of falling back to its remaining plugins.
+    const chainId = bridge.createChain('C');
+    const a = injectInstance(bridge);
+    const b = injectInstance(bridge);
+    bridge.addToChain(chainId, a.id);
+    bridge.addToChain(chainId, b.id);
+
+    bridge.unloadPlugin(a.id);
+
+    expect(bridge.getChain(chainId)!.plugins).toEqual([b.id]);
+  });
+
+  it('REGRESSION: unloadPlugin removes a mid-chain id from multiple chains', () => {
+    const chainA = bridge.createChain('A');
+    const chainB = bridge.createChain('B');
+    const shared = injectInstance(bridge);
+    const other = injectInstance(bridge);
+    bridge.addToChain(chainA, shared.id);
+    bridge.addToChain(chainA, other.id);
+    bridge.addToChain(chainB, shared.id);
+
+    bridge.unloadPlugin(shared.id);
+
+    expect(bridge.getChain(chainA)!.plugins).toEqual([other.id]);
+    expect(bridge.getChain(chainB)!.plugins).toEqual([]);
+  });
+
+  it('REGRESSION: reorderChain ignores an out-of-range fromIndex instead of corrupting the array', () => {
+    // Before fix: an out-of-range fromIndex made splice(fromIndex, 1) remove
+    // nothing (removed = undefined), which the second splice then inserted
+    // as a literal element -- permanently corrupting chain.plugins with a
+    // stray `undefined` entry.
+    const chainId = bridge.createChain('C');
+    const a = injectInstance(bridge);
+    const b = injectInstance(bridge);
+    bridge.addToChain(chainId, a.id);
+    bridge.addToChain(chainId, b.id);
+
+    bridge.reorderChain(chainId, 5, 0); // fromIndex out of range
+
+    expect(bridge.getChain(chainId)!.plugins).toEqual([a.id, b.id]);
+    expect(bridge.getChain(chainId)!.plugins).not.toContain(undefined);
+  });
+
+  it('REGRESSION: reorderChain ignores an out-of-range toIndex', () => {
+    const chainId = bridge.createChain('C');
+    const a = injectInstance(bridge);
+    const b = injectInstance(bridge);
+    bridge.addToChain(chainId, a.id);
+    bridge.addToChain(chainId, b.id);
+
+    bridge.reorderChain(chainId, 0, 9);
+
+    expect(bridge.getChain(chainId)!.plugins).toEqual([a.id, b.id]);
+  });
 });
 
 // ============================================================
@@ -489,6 +560,71 @@ describe('PluginBridge — processOffline', () => {
     await bridge.processOffline(inst.id, inputBuffer);
     // 3 blocks → process called 3 times
     expect(processFn).toHaveBeenCalledTimes(3);
+  });
+
+  it('REGRESSION: clamps channel iteration to the plugin descriptor, not the AudioBuffer channel count', async () => {
+    // Before fix: the input copy loop iterated inputBuffer.numberOfChannels
+    // unconditionally, unlike the real-time process() path which clamps to
+    // Math.min(channels, 2). Bouncing a >stereo AudioBuffer (e.g. 5.1
+    // surround) through a stereo (inputs:2) plugin wrote channel-2..N sample
+    // blocks at inputPtr + ch*blockSize*4 for ch up to numberOfChannels-1 --
+    // memory a real 2-channel plugin never reserves and never expects
+    // touched. Memory layout below places an untouched "guard" region
+    // immediately after the assumed 2-channel input area, which only the
+    // unclamped excess-channel writes could ever reach.
+    const BLOCK = 128;
+    const length = BLOCK;
+    const channels = 6; // 5.1 surround AudioBuffer, but the plugin is stereo (inputs:2/outputs:2)
+
+    const inputPtr = 0;
+    const guardPtr = 2 * BLOCK * 4; // where descriptor.inputs=2's region ends; ch=2..5 writes land here without the clamp
+    const guardChannels = channels - 2;
+    const outputPtr = guardPtr + guardChannels * BLOCK * 4; // placed after the guard, so legit output copy never touches it
+
+    const processFn = vi.fn();
+    const inst = injectInstance(bridge, makeDescriptor({ inputs: 2, outputs: 2 }));
+    (inst.wasmInstance as unknown as { exports: Record<string, unknown> }).exports = {
+      process: processFn,
+      getInputBuffer: vi.fn().mockReturnValue(inputPtr),
+      getOutputBuffer: vi.fn().mockReturnValue(outputPtr),
+      memory: { buffer: new ArrayBuffer(outputPtr + 2 * BLOCK * 4) },
+    };
+    const memoryBuffer = (inst.wasmInstance.exports as unknown as { memory: { buffer: ArrayBuffer } }).memory.buffer;
+
+    const outChannelData = Array.from({ length: channels }, () => new Float32Array(length));
+    const outputBufferMock = {
+      numberOfChannels: channels,
+      length,
+      sampleRate: 44100,
+      getChannelData: vi.fn((ch: number) => outChannelData[ch]),
+    };
+    (bridge as unknown as { audioContext: { createBuffer: ReturnType<typeof vi.fn> } }).audioContext = {
+      createBuffer: vi.fn().mockReturnValue(outputBufferMock),
+    };
+
+    const inputChannelData = Array.from({ length: channels }, (_, ch) => new Float32Array(length).fill(ch + 1));
+    const inputBuffer = {
+      numberOfChannels: channels,
+      length,
+      sampleRate: 44100,
+      getChannelData: vi.fn((ch: number) => inputChannelData[ch]),
+    } as unknown as AudioBuffer;
+
+    // Guard region: only reachable by an unclamped excess-channel write.
+    // Fill it with a sentinel and snapshot that value (as a plain array, not
+    // a live view) so the post-call comparison actually detects a mutation
+    // rather than trivially comparing the same backing memory to itself.
+    const guardView = new Float32Array(memoryBuffer, guardPtr, guardChannels * BLOCK);
+    guardView.fill(-999);
+    const guardSnapshot = Array.from(guardView);
+
+    await bridge.processOffline(inst.id, inputBuffer);
+
+    expect(Array.from(guardView)).toEqual(guardSnapshot);
+    // Only the first 2 (descriptor.outputs) output channels get written;
+    // channels 2..5 must remain untouched (still their initial zeros).
+    expect(outChannelData[2].every((v) => v === 0)).toBe(true);
+    expect(outChannelData[5].every((v) => v === 0)).toBe(true);
   });
 });
 
@@ -678,7 +814,7 @@ describe('PluginBridge — scanPlugins', () => {
   it('fetches the directory index and registers every descriptor', async () => {
     const bridge = makeBridge();
     const descs = [makeDescriptor({ id: 'a:1' }), makeDescriptor({ id: 'b:2' })];
-    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => descs }) as unknown as Response));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => descs }) as unknown as Response));
     try {
       const result = await bridge.scanPlugins('/plugins');
       expect(result).toHaveLength(2);
@@ -691,7 +827,7 @@ describe('PluginBridge — scanPlugins', () => {
 
   it('requests <directory>/index.json', async () => {
     const bridge = makeBridge();
-    const fetchSpy = vi.fn(async () => ({ json: async () => [] }) as unknown as Response);
+    const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => [] }) as unknown as Response);
     vi.stubGlobal('fetch', fetchSpy);
     try {
       await bridge.scanPlugins('/my/plugins');
@@ -711,7 +847,7 @@ describe('PluginBridge — loadFactoryPresets', () => {
     const bridge = makeBridge();
     const inst = injectInstance(bridge);
     const presets = [{ name: 'Warm', parameters: { gain: 3 } }];
-    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => presets }) as unknown as Response));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => presets }) as unknown as Response));
     try {
       await (bridge as unknown as BridgePrivate).loadFactoryPresets(inst);
       expect(inst.presets).toEqual(presets);
@@ -746,9 +882,9 @@ describe('PluginBridge — loadPlugin', () => {
     bridge.registerPlugin(makeDescriptor({ id: 'wasm:1', wasmUrl: '/plugins/x.wasm' }));
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('.wasm')) {
-        return { arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
+        return { ok: true, arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
       }
-      return { json: async () => [] } as unknown as Response; // presets sidecar
+      return { ok: true, json: async () => [] } as unknown as Response; // presets sidecar
     }));
     try {
       const instanceId = await bridge.loadPlugin('wasm:1');
@@ -777,9 +913,9 @@ describe('PluginBridge — loadPlugin', () => {
     const presets = [{ name: 'Default', parameters: { gain: 6 } }];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.endsWith('.wasm')) {
-        return { arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
+        return { ok: true, arrayBuffer: async () => MINIMAL_WASM.buffer } as unknown as Response;
       }
-      return { json: async () => presets } as unknown as Response;
+      return { ok: true, json: async () => presets } as unknown as Response;
     }));
     try {
       const instanceId = await bridge.loadPlugin('wasm:2');
@@ -872,8 +1008,6 @@ describe('PluginBridge — UI listener cleanup', () => {
   it('REGRESSION: re-opening plugin UI does not double-fire message listener', async () => {
     // Before fix: each openPluginUI call with uiUrl added a permanent message
     // listener that was never removed, so N opens → N handlers fired per message.
-    // Use a relative URL so the catch branch sets expectedOrigin = window.location.origin,
-    // matching the origin we use in dispatchEvent below. ('about:blank' has origin "null".)
     const desc = makeDescriptor({ uiUrl: '/plugin-ui.html' });
     const bridge = makeBridge();
     const inst = injectInstance(bridge, desc);
@@ -890,14 +1024,261 @@ describe('PluginBridge — UI listener cleanup', () => {
     await bridge.openPluginUI(inst.id, container);
     await bridge.openPluginUI(inst.id, container);
 
-    // Dispatch a parameterChange message from the expected origin
+    // Messages are matched by source window identity (the iframe is sandboxed
+    // to an opaque origin, so origin-string matching can't be used).
+    const iframe = container.querySelector('iframe')!;
     const msg = new MessageEvent('message', {
-      origin: window.location.origin,
+      source: iframe.contentWindow,
       data: { type: 'parameterChange', instanceId: inst.id, parameterId: 'gain', value: 5 },
     });
     window.dispatchEvent(msg);
 
     // After fix: exactly 1 handler fires (the second open replaced the first)
     expect(callCount).toBe(1);
+  });
+
+  it('sandboxes the plugin UI iframe (allow-scripts only, no allow-same-origin)', async () => {
+    const bridge = makeBridge();
+    const desc = makeDescriptor({ uiUrl: '/plugin-ui.html' });
+    const inst = injectInstance(bridge, desc);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+    const iframe = container.querySelector('iframe')!;
+    const sandbox = iframe.getAttribute('sandbox') ?? '';
+    expect(sandbox.split(/\s+/)).toContain('allow-scripts');
+    expect(sandbox).not.toContain('allow-same-origin');
+    expect(sandbox).not.toContain('allow-top-navigation');
+    expect(sandbox).not.toContain('allow-popups');
+  });
+
+  it('ignores parameterChange messages not sourced from the plugin iframe', async () => {
+    const bridge = makeBridge();
+    const desc = makeDescriptor({ uiUrl: '/plugin-ui.html' });
+    const inst = injectInstance(bridge, desc);
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+
+    const before = bridge.getParameter(inst.id, 'gain');
+    // `iframe.contentWindow` is null in jsdom, so a message with no `source`
+    // set (which also defaults to null there) can't distinguish "from the
+    // iframe" from "from nowhere" in this environment. Use an unambiguously
+    // different, non-null source instead — e.g. `window` itself.
+    window.dispatchEvent(new MessageEvent('message', {
+      source: window,
+      data: { type: 'parameterChange', instanceId: inst.id, parameterId: 'gain', value: 5 },
+    }));
+    expect(bridge.getParameter(inst.id, 'gain')).toBe(before);
+  });
+});
+
+// ============================================================
+// WasmPluginProcessor worklet — real-time path is allocation-free
+// ============================================================
+
+/**
+ * Evaluate the stringified AudioWorklet source under mocked worklet globals and
+ * return the registered processor class. The worklet runs in an isolated scope
+ * with no module imports, so this eval harness (same pattern as the sandbox
+ * lockdown test in plugin-manager.test.ts) is the only way to exercise it.
+ */
+function instantiateWorkletProcessor(): new (opts: unknown) => {
+  process(inputs: Float32Array[][], outputs: Float32Array[][], params: unknown): boolean;
+  [k: string]: unknown;
+} {
+  let RegisteredClass: unknown = null;
+  const registerProcessor = (_name: string, cls: unknown): void => { RegisteredClass = cls; };
+  class AudioWorkletProcessor {
+    port = { postMessage: (): void => {}, onmessage: null as unknown };
+  }
+  const sampleRate = 48000;
+  new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', buildWasmProcessorCode())(
+    AudioWorkletProcessor, registerProcessor, sampleRate,
+  );
+  if (!RegisteredClass) throw new Error('worklet did not registerProcessor');
+  return RegisteredClass as new (opts: unknown) => {
+    process(inputs: Float32Array[][], outputs: Float32Array[][], params: unknown): boolean;
+    [k: string]: unknown;
+  };
+}
+
+const BLOCK = 128;
+
+/** Build a processor wired to a WASM-like memory with a doubling processFunc. */
+function makeWiredProcessor() {
+  const Proc = instantiateWorkletProcessor();
+  const p = new Proc({});
+  p.blockSize = BLOCK;
+  const mem = new WebAssembly.Memory({ initial: 1 }); // 64 KiB
+  p.wasmMemory = mem;
+  p.inputPtr = 0;
+  p.outputPtr = BLOCK * 2 * 4; // bytes: directly after the 256-float input region
+  // Doubles every input sample, reading/writing the processor's cached views.
+  p.processFunc = (): void => {
+    const iv = p.inputView as Float32Array;
+    const ov = p.outputView as Float32Array;
+    for (let i = 0; i < BLOCK * 2; i++) ov[i] = iv[i] * 2;
+  };
+  return { p, mem };
+}
+
+function stereoIO() {
+  const inL = new Float32Array(BLOCK).fill(0.25);
+  const inR = new Float32Array(BLOCK).fill(0.5);
+  const outL = new Float32Array(BLOCK);
+  const outR = new Float32Array(BLOCK);
+  return { inputs: [[inL, inR]], outputs: [[outL, outR]], outL, outR };
+}
+
+describe('WasmPluginProcessor — real-time process()', () => {
+  it('routes input through WASM buffers to output via cached views', () => {
+    const { p } = makeWiredProcessor();
+    const { inputs, outputs, outL, outR } = stereoIO();
+
+    expect(p.process(inputs, outputs, {})).toBe(true);
+    expect(outL[0]).toBeCloseTo(0.5);  // 0.25 * 2
+    expect(outR[0]).toBeCloseTo(1.0);  // 0.5 * 2
+  });
+
+  it('REGRESSION: reuses the same Float32Array views across blocks (no per-block alloc)', () => {
+    const { p } = makeWiredProcessor();
+    const { inputs, outputs } = stereoIO();
+
+    p.process(inputs, outputs, {});
+    const inView = p.inputView;
+    const outView = p.outputView;
+    expect(inView).toBeInstanceOf(Float32Array);
+
+    // Many more blocks must not allocate new views.
+    for (let i = 0; i < 50; i++) p.process(inputs, outputs, {});
+    expect(p.inputView).toBe(inView);
+    expect(p.outputView).toBe(outView);
+  });
+
+  it('rebuilds views when WASM memory grows (buffer detached)', () => {
+    const { p, mem } = makeWiredProcessor();
+    const { inputs, outputs, outL } = stereoIO();
+
+    p.process(inputs, outputs, {});
+    const before = p.inputView;
+
+    mem.grow(1); // detaches the previous ArrayBuffer, invalidating old views
+    p.process(inputs, outputs, {});
+
+    // Plain identity checks — never hand the now-detached old view to a matcher,
+    // whose diff serializer would throw on the detached buffer.
+    expect(p.inputView !== before).toBe(true);
+    expect(p.viewBuffer === mem.buffer).toBe(true);
+    expect(outL[0]).toBeCloseTo(0.5); // still correct after rebuild
+  });
+
+  it('bypass path copies present channels and zero-fills absent ones without allocating', () => {
+    const { p } = makeWiredProcessor();
+    p.bypassed = true;
+
+    // Present input channel is copied through.
+    const inL = new Float32Array(BLOCK).fill(0.7);
+    const outL = new Float32Array(BLOCK).fill(9);
+    expect(p.process([[inL]], [[outL]], {})).toBe(true);
+    expect(outL[0]).toBeCloseTo(0.7);
+
+    // Absent input channel is silenced in place (no allocated silent buffer).
+    const outSilent = new Float32Array(BLOCK).fill(9);
+    p.process([[]], [[outSilent]], {});
+    expect(outSilent[0]).toBe(0);
+
+    // Missing inputs[0] entirely must not throw.
+    const outSilent2 = new Float32Array(BLOCK).fill(9);
+    expect(() => p.process([], [[outSilent2]], {})).not.toThrow();
+    expect(outSilent2[0]).toBe(0);
+  });
+
+  it('bypasses (silences) before init when processFunc is unset', () => {
+    const Proc = instantiateWorkletProcessor();
+    const p = new Proc({});
+    p.blockSize = BLOCK;
+    // processFunc unset → bypass branch even though not explicitly bypassed.
+    const outL = new Float32Array(BLOCK).fill(9);
+    expect(p.process([[]], [[outL]], {})).toBe(true);
+    expect(outL[0]).toBe(0);
+  });
+
+  it('source no longer contains the old per-block allocation patterns', () => {
+    const src = buildWasmProcessorCode();
+    expect(src).not.toMatch(/new Float32Array\(this\.blockSize\)/); // old bypass alloc
+    expect(src).not.toMatch(/\.subarray\(/);                        // old per-channel output view
+    expect(src).toContain('this.viewBuffer');                       // view caching present
+  });
+});
+
+// ============================================================
+// WasmPluginProcessor.setParameter — REGRESSION: allocation-free
+// ============================================================
+
+type ParamProcessor = {
+  setParameter(id: string, value: number): void;
+  [k: string]: unknown;
+};
+
+/** Build a processor wired to capture setParameter's WASM-side calls. */
+function makeParamProcessor(): { p: ParamProcessor; calls: Array<{ id: string; value: number }> } {
+  const Proc = instantiateWorkletProcessor();
+  const p = new Proc({}) as unknown as ParamProcessor;
+  const mem = new WebAssembly.Memory({ initial: 1 });
+  p.wasmMemory = mem;
+  const calls: Array<{ id: string; value: number }> = [];
+  p.wasmAllocString = (): number => 1000; // fixed scratch offset in WASM memory
+  p.wasmSetParameter = (ptr: number, len: number, value: number): void => {
+    const bytes = new Uint8Array(mem.buffer, ptr, len);
+    calls.push({ id: new TextDecoder().decode(bytes), value });
+  };
+  return { p, calls };
+}
+
+describe('WasmPluginProcessor.setParameter() — REGRESSION: allocation-free per call', () => {
+  it('constructs at most one TextEncoder for the processor\'s lifetime, not one per setParameter call', () => {
+    // Before fix: every call did `new TextEncoder().encode(id)`, allocating
+    // both a new encoder AND a new Uint8Array on the real-time audio
+    // thread -- reachable continuously during automation playback (driven
+    // by port.onmessage), violating this codebase's "起動時のみアロケート"
+    // rule for AudioWorkletProcessor the same way process() itself was
+    // already fixed to respect. A plain identity check on p._textEncoder
+    // would false-pass on the old code too (the property simply doesn't
+    // exist there, so undefined === undefined trivially) -- count actual
+    // constructor invocations instead via a spy on the global TextEncoder.
+    let constructCount = 0;
+    const RealTextEncoder = globalThis.TextEncoder;
+    class CountingTextEncoder extends RealTextEncoder {
+      constructor(...args: []) { super(...args); constructCount++; }
+    }
+    vi.stubGlobal('TextEncoder', CountingTextEncoder);
+    try {
+      const { p } = makeParamProcessor();
+      const afterConstruct = constructCount;
+
+      for (let i = 0; i < 20; i++) p.setParameter('gain', i * 0.1);
+
+      expect(afterConstruct).toBeGreaterThanOrEqual(1); // sanity: was constructed at all
+      expect(constructCount).toBe(afterConstruct); // none of the 20 calls constructed another
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('still delivers the correct parameter id and value to the WASM side', () => {
+    const { p, calls } = makeParamProcessor();
+    p.setParameter('gain', 0.5);
+    p.setParameter('mix', 0.8);
+    expect(calls).toEqual([
+      { id: 'gain', value: 0.5 },
+      { id: 'mix', value: 0.8 },
+    ]);
+  });
+
+  it('source constructs TextEncoder once (in the constructor), not inside setParameter', () => {
+    const src = buildWasmProcessorCode();
+    const setParamBody = src.slice(src.indexOf('setParameter(id, value)'));
+    expect(setParamBody).not.toMatch(/new TextEncoder\(\)/);
+    expect(setParamBody).toContain('encodeInto');
+    expect(src).toContain('this._textEncoder = new TextEncoder()');
   });
 });

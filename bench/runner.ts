@@ -40,6 +40,16 @@ async function main(): Promise<void> {
   }
   console.log('');
 
+  // budget 超過警告 (BenchmarkSpec.budget: 期待最大時間)
+  const budgetViolations = bench.checkBudgets(standardBenchmarks, results);
+  if (budgetViolations.length > 0) {
+    console.warn(`Budget exceeded (${budgetViolations.length}):`);
+    for (const v of budgetViolations) {
+      console.warn(`  ${v.name}: ${v.actualMeanMs.toFixed(2)}ms > budget ${v.budgetMs}ms (+${v.exceedPercent.toFixed(1)}%)`);
+    }
+    console.log('');
+  }
+
   // レポート保存
   writeFileSync(REPORT_PATH, JSON.stringify({ timestamp: Date.now(), results }, null, 2));
 
@@ -65,6 +75,22 @@ async function main(): Promise<void> {
   const baseline = BaselineStore.deserialize(readFileSync(BASELINE_PATH, 'utf-8'));
   const detector = bench.detector();
   const report = detector.detect(baseline, results);
+
+  // REGRESSION fix: detector.detect() silently `continue`s past any
+  // benchmark absent from baseline.results ("新規ベンチは比較対象外") -- correct
+  // for a bench genuinely new this run, but when standardBenchmarks grows
+  // and nobody re-runs `bench:baseline`, those benchmarks stay permanently
+  // unprotected with zero visible signal in CI output. Surface the gap
+  // explicitly instead of leaving it silent (bench/CLAUDE.md: this suite is
+  // the CI gate against performance decay over a 10-year lifetime).
+  const missingBaseline = detector.findMissingBaseline(baseline, results);
+  if (missingBaseline.length > 0) {
+    console.warn(
+      `WARNING: ${missingBaseline.length} benchmark(s) have no baseline entry and are NOT covered by ` +
+      `regression detection. Run 'npm run bench:baseline' to add them: ${missingBaseline.join(', ')}`
+    );
+    console.log('');
+  }
 
   console.log(detector.formatReport(report));
 

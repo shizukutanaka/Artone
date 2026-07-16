@@ -216,8 +216,8 @@ describe('ProxyWorkflow — REGRESSION: runJob respects cancelled status', () =>
     };
     internals(pw).encoder = {
       encode: vi.fn().mockImplementation(
-        async (_url: string, _w: number, _h: number, _p: unknown, onProgress: (n: number) => void) => {
-          onProgress(1);
+        async (opts: { onProgress: (n: number) => void }) => {
+          opts.onProgress(1);
           return fakeBlob;
         }
       ),
@@ -283,6 +283,73 @@ describe('ProxyWorkflow — REGRESSION: runJob respects cancelled status', () =>
 
     expect(job.status).toBe('failed');
     expect(job.error).toBe('GPU error');
+  });
+});
+
+// ============================================================
+// REGRESSION: cancel() actually aborts the in-flight encode
+// ============================================================
+
+type InternalPWWithControllers = InternalPW & { controllers: Map<string, AbortController> };
+
+describe('ProxyWorkflow — REGRESSION: cancel() aborts the in-flight encode signal', () => {
+  it('aborts the AbortSignal passed to encoder.encode() for an active job', async () => {
+    // Before fix: cancel() only removed the job from `active` — the encoder's
+    // per-frame loop had no cancellation signal at all and kept running to
+    // completion in the background regardless.
+    const pw = new ProxyWorkflow();
+    const job = makeJob();
+
+    let capturedSignal: AbortSignal | undefined;
+    let resolveEncode!: (blob: Blob) => void;
+    const encodePromise = new Promise<Blob>((resolve) => { resolveEncode = resolve; });
+
+    internals(pw).storage = {
+      init: vi.fn(),
+      save: vi.fn().mockResolvedValue(undefined),
+      findBySourceId: vi.fn().mockResolvedValue([]),
+    };
+    internals(pw).encoder = {
+      encode: vi.fn().mockImplementation(async (opts: { signal?: AbortSignal }) => {
+        capturedSignal = opts.signal;
+        return encodePromise;
+      }),
+    };
+    internals(pw).initialized = true;
+    internals(pw).active.set(job.id, job);
+
+    const runPromise = internals(pw).runJob(job);
+    // Let runJob reach the `await this.encoder.encode(...)` point so the
+    // AbortController is created and its signal captured.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal!.aborted).toBe(false);
+
+    expect(pw.cancel(job.id)).toBe(true);
+    expect(capturedSignal!.aborted).toBe(true);
+
+    resolveEncode(new Blob(['bytes'], { type: 'video/mp4' }));
+    await runPromise;
+
+    // cancel() already removed the job from active — runJob's existing
+    // cancel-race guard must still keep 'cancelled', not overwrite it.
+    expect(job.status).toBe('cancelled');
+  });
+
+  it('does not leak an AbortController for the job once it settles', async () => {
+    const pw = new ProxyWorkflow();
+    const job = makeJob();
+
+    internals(pw).storage = { init: vi.fn(), save: vi.fn().mockResolvedValue(undefined), findBySourceId: vi.fn().mockResolvedValue([]) };
+    internals(pw).encoder = { encode: vi.fn().mockResolvedValue(new Blob(['b'], { type: 'video/mp4' })) };
+    internals(pw).initialized = true;
+    internals(pw).active.set(job.id, job);
+
+    await internals(pw).runJob(job);
+
+    expect((pw as unknown as InternalPWWithControllers).controllers.has(job.id)).toBe(false);
   });
 });
 
@@ -366,6 +433,134 @@ describe('ProxyWorkflow — getQueue / getActive', () => {
 // ============================================================
 // Blob URL leak regressions
 // ============================================================
+
+describe('ProxyWorkflow — REGRESSION: job.outputUrl is registered in blobUrlCache', () => {
+  it('runJob() registers the completed job.outputUrl in blobUrlCache so clearAll()/deleteProxy() revoke it', async () => {
+    // Before fix: runJob() called URL.createObjectURL(blob) directly and
+    // stored the result only on job.outputUrl, never in blobUrlCache.
+    // clearAll()/deleteProxy() only revoke entries in that cache, so every
+    // completed job's outputUrl leaked for the app's lifetime.
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:fake-output');
+    const revokeSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+    const pw = new ProxyWorkflow();
+    const job = makeJob();
+    const fakeBlob = new Blob(['bytes'], { type: 'video/mp4' });
+
+    internals(pw).storage = {
+      init: vi.fn(),
+      save: vi.fn().mockResolvedValue(undefined),
+      findBySourceId: vi.fn().mockResolvedValue([]),
+      delete: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn().mockResolvedValue(undefined),
+    };
+    internals(pw).encoder = { encode: vi.fn().mockResolvedValue(fakeBlob) };
+    internals(pw).initialized = true;
+    internals(pw).active.set(job.id, job);
+
+    await internals(pw).runJob(job);
+
+    expect(job.outputUrl).toBe('blob:fake-output');
+    const blobUrlCache = (pw as unknown as { blobUrlCache: Map<string, string> }).blobUrlCache;
+    expect(blobUrlCache.get(job.id)).toBe('blob:fake-output');
+
+    await pw.deleteProxy(job.id);
+    expect(revokeSpy).toHaveBeenCalledWith('blob:fake-output');
+    expect(blobUrlCache.has(job.id)).toBe(false);
+
+    vi.restoreAllMocks();
+  });
+
+  it('a subsequent resolveUrl() for the same proxy reuses the outputUrl instead of minting a duplicate', async () => {
+    let created = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:fake-${created++}`);
+
+    const pw = new ProxyWorkflow();
+    const job = makeJob({ sourceId: 'src-dup' });
+    const fakeBlob = new Blob(['bytes'], { type: 'video/mp4' });
+
+    internals(pw).storage = {
+      init: vi.fn(),
+      save: vi.fn().mockResolvedValue(undefined),
+      findBySourceId: vi.fn().mockResolvedValue([]),
+      get: vi.fn().mockResolvedValue({ blob: fakeBlob }),
+    };
+    internals(pw).encoder = { encode: vi.fn().mockResolvedValue(fakeBlob) };
+    internals(pw).initialized = true;
+    internals(pw).active.set(job.id, job);
+
+    await internals(pw).runJob(job);
+    expect(created).toBe(1); // one URL created for the completed job
+
+    const mappingCache = (pw as unknown as { mappingCache: Map<string, unknown> }).mappingCache;
+    mappingCache.set('src-dup', { sourceId: 'src-dup', proxyId: job.id, preset: 'quarter', createdAt: Date.now(), sizeBytes: 100 });
+
+    const resolved = await pw.resolveUrl('src-dup', 'original://');
+    expect(resolved).toBe(job.outputUrl);
+    expect(created).toBe(1); // no second URL minted for the same blob
+
+    vi.restoreAllMocks();
+  });
+});
+
+describe('ProxyEncoder — REGRESSION: crossOrigin is set before src', () => {
+  it('sets video.crossOrigin before video.src so the CORS mode applies to the actual load', async () => {
+    // Before fix: video.crossOrigin = 'anonymous' was assigned AFTER
+    // video.src = sourceUrl, which has no effect on the load `src` already
+    // triggered -- a cross-origin source would taint the canvas and make
+    // `new VideoFrame(canvas, …)` throw SecurityError instead of encoding.
+    class FakeVideoEncoder {
+      constructor(_init: { output: (c: unknown) => void; error: (e: Error) => void }) {}
+      configure(): void {}
+      encode(): void {}
+      async flush(): Promise<void> {}
+      close(): void {}
+    }
+    vi.stubGlobal('VideoEncoder', FakeVideoEncoder);
+
+    const order: string[] = [];
+    const realCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      const el = realCreateElement(tag) as HTMLVideoElement;
+      if (tag !== 'video') return el;
+
+      let onErrorHandler: (() => void) | null = null;
+      Object.defineProperty(el, 'crossOrigin', {
+        set: () => { order.push('crossOrigin'); },
+        get: () => 'anonymous',
+      });
+      Object.defineProperty(el, 'src', {
+        set: () => {
+          order.push('src');
+          // Reject the metadata-load promise on the next microtask (by which
+          // point the Promise executor below has already assigned onerror).
+          queueMicrotask(() => onErrorHandler?.());
+        },
+        get: () => '',
+      });
+      Object.defineProperty(el, 'onerror', {
+        set: (fn: (() => void) | null) => { onErrorHandler = fn; },
+        get: () => onErrorHandler,
+      });
+      return el;
+    }) as typeof document.createElement);
+
+    const pw = new ProxyWorkflow();
+    const encoder = (pw as unknown as { encoder: { encode(opts: unknown): Promise<Blob> } }).encoder;
+
+    await expect(encoder.encode({
+      sourceUrl: 'blob:fake-source',
+      sourceWidth: 100,
+      sourceHeight: 100,
+      preset: PROXY_PRESETS.quarter,
+      onProgress: () => {},
+    })).rejects.toThrow('Video load failed');
+
+    expect(order).toEqual(['crossOrigin', 'src']);
+
+    vi.restoreAllMocks();
+  });
+});
 
 describe('ProxyWorkflow — Blob URL caching (regression)', () => {
   it('REGRESSION: resolveUrl returns the same Blob URL on repeated calls (no duplicates)', async () => {

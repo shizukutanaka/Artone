@@ -83,6 +83,16 @@ describe('ColorContrast — parseColor', () => {
   it('returns null for invalid', () => {
     expect(ColorContrast.parseColor('not-a-color')).toBeNull();
   });
+
+  it('REGRESSION: parses rgba() colors (was unparseable regardless of alpha)', () => {
+    // Before fix: the regex required a literal "rgb(" immediately, which is
+    // never a substring of "rgba(" (the "(" follows the "a", not the "b"),
+    // so ANY rgba() string — including fully opaque rgba(r,g,b,1) — failed
+    // to parse and was silently treated as an unrecognized color.
+    expect(ColorContrast.parseColor('rgba(0, 196, 204, 1)')).toEqual([0, 196, 204]);
+    expect(ColorContrast.parseColor('rgba(255, 255, 255, 0.99)')).toEqual([255, 255, 255]);
+    expect(ColorContrast.parseColor('rgba(10, 20, 30, 0.5)')).toEqual([10, 20, 30]);
+  });
 });
 
 // ============================================================
@@ -147,6 +157,54 @@ describe('A11yAuditor — image alt text', () => {
     const report = auditor.audit();
     const altIssue = report.issues.find((i) => i.rule.includes('1.1.1'));
     expect(altIssue).toBeUndefined();
+  });
+});
+
+describe('A11yAuditor — REGRESSION: large-text AA-only contrast must be flagged as not-AAA', () => {
+  it('flags large text at AA-only contrast (ratio in [3, 4.5)) instead of counting it as passed', () => {
+    // Before fix: checkColorContrast()'s guard was
+    // `level === 'A' || (level === 'AA' && !isLarge)`. Large text can only
+    // ever resolve to 'AAA' | 'AA' | 'FAIL' (ColorContrast.level's
+    // isLargeText branch never returns 'A'), so `level === 'AA' && !isLarge`
+    // was never true for large text -- an AA-only large-text element (e.g.
+    // gray-on-white at ~3.1:1, well below the 4.5:1 AAA requirement for
+    // large text) silently fell through to `this.passed++` and was reported
+    // as a passing check.
+    const host = makeHost(
+      '<p id="txt" style="color: rgb(137,137,137); background-color: rgb(255,255,255); font-size: 24px;">Large text</p>'
+    );
+    const auditor = new A11yAuditor(host);
+    const report = auditor.audit();
+    const contrastIssue = report.issues.find(
+      (i) => i.rule === 'wcag-1.4.6' && i.element.includes('#txt')
+    );
+    expect(contrastIssue).toBeTruthy();
+    expect(contrastIssue?.severity).toBe('major');
+    expect(contrastIssue?.message).toContain('AA');
+  });
+});
+
+describe('A11yAuditor — REGRESSION: near-opaque rgba() background resolution', () => {
+  it('correctly resolves a near-opaque rgba() background instead of skipping to a lighter ancestor', () => {
+    // Before fix: findBackground() explicitly tries to treat alpha >= 0.99
+    // rgba() colors as opaque (rather than walking up further), but the
+    // underlying parseColor() call couldn't parse "rgba(...)" at all — it
+    // silently fell through to the parent element instead. With a white
+    // text-on-white-default-background fallback, this white#111 element
+    // would be mis-evaluated against the wrong (lighter) ancestor
+    // background, producing a false contrast FAILURE for what is actually
+    // a near-black background with excellent white-text contrast.
+    const host = makeHost(
+      '<p id="txt" style="color: rgb(255,255,255); background-color: rgba(0,0,0,0.995); font-size: 16px;">Hello world</p>'
+    );
+    const auditor = new A11yAuditor(host);
+    const report = auditor.audit();
+    const contrastIssue = report.issues.find(
+      (i) => i.rule === 'wcag-1.4.6' && i.element.includes('#txt')
+    );
+    // White-on-near-black is an excellent (~21:1) ratio — must not be
+    // flagged as a contrast failure.
+    expect(contrastIssue).toBeUndefined();
   });
 });
 

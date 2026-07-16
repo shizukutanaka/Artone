@@ -410,15 +410,24 @@ describe('lockdownSandboxGlobals', () => {
       fetch: () => 'net', XMLHttpRequest: function () {}, WebSocket: function () {},
       EventSource: function () {}, importScripts: () => 'remote',
       eval: () => 'evil', Function: function () {}, indexedDB: {}, caches: {},
+      Worker: function () {}, Notification: function () {},
       // a benign capability the plugin is allowed to keep
       postMessage: () => 'ok',
     };
     lockdownSandboxGlobals(scope);
     for (const denied of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource',
-      'importScripts', 'eval', 'Function', 'indexedDB', 'caches']) {
+      'importScripts', 'eval', 'Function', 'indexedDB', 'caches', 'Worker', 'Notification']) {
       expect(scope[denied]).toBeUndefined();
     }
     expect(scope.postMessage).toBeTypeOf('function'); // unrelated capability untouched
+  });
+
+  it('denies Worker specifically (prevents sandbox escape via nested worker)', () => {
+    // A malicious plugin could otherwise spawn a nested Worker to get a
+    // fresh, unrestricted global scope with fetch/eval available again.
+    const scope: Record<string, unknown> = { Worker: function () {} };
+    lockdownSandboxGlobals(scope);
+    expect(scope.Worker).toBeUndefined();
   });
 
   it('makes denied globals non-writable (cannot be restored by the plugin)', () => {

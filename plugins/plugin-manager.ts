@@ -279,6 +279,8 @@ const BUILTIN_TRANSITIONS: TransitionPlugin[] = [
  * (`fetch`/`XMLHttpRequest`/`WebSocket`) requires an explicit manifest grant,
  * remote code loading (`importScripts`) and dynamic eval (`eval`/`Function`)
  * are forbidden. This denies them by default inside the sandbox worker.
+ * `Worker` is denied too — nested workers get a fresh, unrestricted global
+ * scope, so allowing it would let a plugin trivially escape this lockdown.
  *
  * Defense-in-depth, not a perfect capability jail: it raises the bar for a
  * malicious plugin running in the worker. MUST stay closure-free — it is
@@ -293,6 +295,7 @@ export function lockdownSandboxGlobals(scope: Record<string, unknown>): void {
     'importScripts',                                        // remote code loading
     'eval', 'Function',                                     // dynamic code eval
     'indexedDB', 'caches',                                  // persistence
+    'Worker', 'Notification',                               // nested unrestricted scope / ambient UI
   ];
   for (const name of denied) {
     try {
@@ -513,6 +516,19 @@ export class PluginManager {
 
   private async executeSandboxed<T>(code: string, context: Record<string, unknown>): Promise<T> {
     return new Promise((resolve, reject) => {
+      // SECURITY EXCEPTION (reviewed) — plugins/CLAUDE.md's "厳守事項" bans
+      // eval/Function outright, but a JS-source plugin (installPlugin's
+      // `code: string`) cannot run at all without turning that string into a
+      // callable once. This is the one call in the codebase permitted to do
+      // so, and only under these constraints:
+      //   1. It runs inside a dedicated, single-purpose Worker — never on the
+      //      main thread — so it has no access to window/DOM/document.
+      //   2. lockdownSandboxGlobals() executes immediately after, before the
+      //      plugin body runs, denying eval/Function/fetch/importScripts/etc.
+      //      so the compiled plugin function itself cannot re-invoke this
+      //      pattern or reach ambient network/code-loading capabilities.
+      //   3. The worker is terminated on completion or after a 5s timeout
+      //      (below), bounding both lifetime and blast radius.
       // The lockdown runs INSIDE the worker, after the plugin function is built
       // (the host needs Function to compile it once) but BEFORE it executes, so
       // untrusted code cannot reach ambient network/code-loading capabilities.
@@ -525,7 +541,7 @@ export class PluginManager {
             const result = fn(context);
             self.postMessage({ success: true, result });
           } catch (error) {
-            self.postMessage({ success: false, error: error.message });
+            self.postMessage({ success: false, error: error instanceof Error ? error.message : String(error) });
           }
         };
       `], { type: 'application/javascript' });

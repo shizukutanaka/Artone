@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { muxMP4, isH264Codec, type MP4VideoTrack } from '../export/mp4-muxer';
+import { muxMP4, isH264Codec, buildAacAudioSpecificConfig, type MP4VideoTrack } from '../export/mp4-muxer';
 import type { VideoChunkRef, AudioChunkRef } from '../export/webm-muxer';
 
 // ============================================================
@@ -233,18 +233,123 @@ describe('muxMP4 — audio', () => {
   it('adding audio track increases file size', () => {
     const video: VideoChunkRef[] = [fakeVideoChunk(0, true, new Uint8Array(32).fill(1))];
     const noAudio = muxMP4(VP9_TRACK, video);
-    const audio: AudioChunkRef[] = [{ data: new Uint8Array(64).fill(0xAA), timestampUs: 0 }];
+    const audio: AudioChunkRef[] = [{ data: new Uint8Array(64).fill(0xAA), timestampUs: 0, durationUs: 21333 }];
     const withAudio = muxMP4(VP9_TRACK, video, { sampleRate: 48000, channels: 2 }, audio);
     expect(withAudio.length).toBeGreaterThan(noAudio.length);
   });
 
   it('audio track has "soun" handler', () => {
     const video: VideoChunkRef[] = [fakeVideoChunk(0, true, new Uint8Array(32).fill(1))];
-    const audio: AudioChunkRef[] = [{ data: new Uint8Array(64).fill(0xAA), timestampUs: 0 }];
+    const audio: AudioChunkRef[] = [{ data: new Uint8Array(64).fill(0xAA), timestampUs: 0, durationUs: 21333 }];
     const bytes = muxMP4(VP9_TRACK, video, { sampleRate: 48000, channels: 2 }, audio);
     // 'soun' = 0x73 0x6F 0x75 0x6E
     const idx = findBytes(bytes, [0x73, 0x6F, 0x75, 0x6E]);
     expect(idx).toBeGreaterThan(-1);
+  });
+
+  it('REGRESSION: audio stts reflects the actual short final chunk, not an overstated constant-1024 assumption', () => {
+    // Before fix: buildAudioStbl hardcoded a single stts entry of
+    // {count: sampleCount, delta: 1024} regardless of the real per-chunk
+    // sample count -- so a final chunk shorter than 1024 samples (true
+    // whenever the source buffer length isn't an exact multiple of 1024,
+    // i.e. virtually any real-world audio) made the declared track duration
+    // longer than the actual encoded audio.
+    const video: VideoChunkRef[] = [fakeVideoChunk(0, true, new Uint8Array(32).fill(1))];
+    const fullDurationUs = Math.round((1024 / 48000) * 1_000_000); // a full 1024-sample AAC frame
+    const shortDurationUs = Math.round((500 / 48000) * 1_000_000); // a short final 500-sample frame
+    const audio: AudioChunkRef[] = [
+      { data: new Uint8Array(64).fill(0xAA), timestampUs: 0, durationUs: fullDurationUs },
+      { data: new Uint8Array(64).fill(0xAA), timestampUs: fullDurationUs, durationUs: fullDurationUs },
+      { data: new Uint8Array(32).fill(0xAA), timestampUs: fullDurationUs * 2, durationUs: shortDurationUs },
+    ];
+    const bytes = muxMP4(VP9_TRACK, video, { sampleRate: 48000, channels: 2 }, audio);
+
+    // Locate every 'stts' box; the audio track's trak (and its stts) comes
+    // after the video track's in trak order, so the second occurrence is
+    // the audio track's.
+    const sttsFourCC = [0x73, 0x74, 0x74, 0x73];
+    const offsets: number[] = [];
+    for (let i = 0; i <= bytes.length - 4; i++) {
+      if (sttsFourCC.every((b, j) => bytes[i + j] === b)) offsets.push(i);
+    }
+    expect(offsets).toHaveLength(2);
+    // offsets[] point at the 'stts' fourCC bytes themselves (box() writes
+    // [4-byte size][4-byte fourCC]...), so the fourCC is already 4 bytes
+    // into the box: fourCC(+0) -> hdr/version+flags(+4) -> body(+8).
+    const audioSttsFourCC = offsets[1];
+
+    // fullbox body layout after the fourCC: [4 hdr][4 entry_count]
+    // then entry_count * (4 sample_count + 4 sample_delta).
+    const entryCount = readU32BE(bytes, audioSttsFourCC + 8);
+    expect(entryCount).toBe(2); // before fix this was always 1 (a single flat assumption)
+    expect(readU32BE(bytes, audioSttsFourCC + 12)).toBe(2);    // first entry: 2 full frames
+    expect(readU32BE(bytes, audioSttsFourCC + 16)).toBe(1024); // ...at 1024 samples each
+    expect(readU32BE(bytes, audioSttsFourCC + 20)).toBe(1);    // second entry: 1 short frame
+    expect(readU32BE(bytes, audioSttsFourCC + 24)).toBe(500);  // ...at its real 500-sample length
+  });
+
+  /** Locate the 'mp4a' box's 16.16 fixed-point sampleRate field (offset +28 from the fourCC). */
+  function readMp4aSampleRateField(bytes: Uint8Array): number {
+    const mp4aFourCC = [0x6D, 0x70, 0x34, 0x61]; // "mp4a"
+    const idx = findBytes(bytes, mp4aFourCC);
+    expect(idx).toBeGreaterThan(-1);
+    // mp4a box body (after the fourCC): reserved(6) + data_ref_index(2) +
+    // reserved(8) + channels(2) + samplesize(2) + pre_defined(2) + reserved(2)
+    // = 24 bytes, then the 4-byte sampleRate field.
+    return readU32BE(bytes, idx + 4 + 24);
+  }
+
+  it('REGRESSION: mp4a sampleRate field is exact (not wrapped) for a rate within 16 bits', () => {
+    const video: VideoChunkRef[] = [fakeVideoChunk(0, true, new Uint8Array(32).fill(1))];
+    const audio: AudioChunkRef[] = [{ data: new Uint8Array(64).fill(0xAA), timestampUs: 0, durationUs: 21333 }];
+    const bytes = muxMP4(VP9_TRACK, video, { sampleRate: 48000, channels: 2 }, audio);
+    // 48000 << 16 = 0xBB800000. Coerce to unsigned: JS's `<<` operates on a
+    // signed Int32, so 48000 << 16 alone overflows into a negative number,
+    // while readU32BE (matching this file's own u32() byte-construction,
+    // which is unsigned-safe) reads the same bits as a positive value.
+    expect(readMp4aSampleRateField(bytes)).toBe((48000 << 16) >>> 0);
+  });
+
+  it('REGRESSION: mp4a sampleRate field no longer wraps for 96000Hz (was declaring ~30464Hz)', () => {
+    // Before fix: `(sampleRate & 0xFFFF) << 16` computed 96000 & 0xFFFF =
+    // 30464, silently declaring the wrong sample rate in the box for a rate
+    // this file's own FREQ_INDEX table already supports as standard AAC-LC
+    // (96000Hz is index 0) -- not just an exotic edge case.
+    const video: VideoChunkRef[] = [fakeVideoChunk(0, true, new Uint8Array(32).fill(1))];
+    const audio: AudioChunkRef[] = [{ data: new Uint8Array(64).fill(0xAA), timestampUs: 0, durationUs: 10667 }];
+    const bytes = muxMP4(VP9_TRACK, video, { sampleRate: 96000, channels: 2 }, audio);
+    // Per the fix's documented convention: rates above 65535 write 0 (the
+    // real rate is read from the AudioSpecificConfig in esds instead).
+    expect(readMp4aSampleRateField(bytes)).toBe(0);
+    // It must NOT be the old wrapped value.
+    expect(readMp4aSampleRateField(bytes)).not.toBe((96000 & 0xFFFF) << 16);
+  });
+});
+
+// ============================================================
+// buildAacAudioSpecificConfig
+// ============================================================
+
+describe('buildAacAudioSpecificConfig', () => {
+  it('encodes a known-correct ASC for a standard rate (48kHz stereo)', () => {
+    // objectType=2 (AAC-LC), samplingFreqIndex=3 (48000), channelConfig=2
+    expect(buildAacAudioSpecificConfig(48000, 2)).toEqual(new Uint8Array([0x11, 0x90]));
+  });
+
+  it('supports all 13 standard AAC-LC sample rates without throwing, including 96000/88200', () => {
+    for (const rate of [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]) {
+      expect(() => buildAacAudioSpecificConfig(rate, 2)).not.toThrow();
+    }
+  });
+
+  it('REGRESSION: throws for a sample rate outside the standard AAC-LC table instead of emitting a truncated ASC', () => {
+    // Before fix: an out-of-table rate silently fell back to
+    // samplingFreqIndex=15 ("explicit frequency"), a value that per the AAC
+    // spec requires 24 additional explicit-frequency bits this function's
+    // fixed 2-byte layout never wrote -- producing a structurally invalid
+    // AudioSpecificConfig a decoder would misinterpret, rather than failing
+    // loudly (export/CLAUDE.md: "データ損失は致命的").
+    expect(() => buildAacAudioSpecificConfig(22254, 2)).toThrow(/unsupported AAC sample rate/);
   });
 });
 

@@ -323,6 +323,92 @@ describe('encodeGif — options', () => {
 });
 
 // ============================================================
+// REGRESSION: color table size must match numColors < 256
+//
+// Before fix: gifHeader/frameBlock hardcoded the GCT/LCT packed byte for a
+// 256-entry table (0xF7 / 0x87) and lzwCompress's minCodeSize to 8,
+// regardless of the actual (possibly smaller) palette produced for
+// GifEncodeOptions.numColors. The declared table size and the actual
+// written palette then disagreed, corrupting the stream for any decoder
+// that trusts the declared size.
+// ============================================================
+
+describe('encodeGif — REGRESSION: color table size matches numColors < 256', () => {
+  it('numColors=16 declares a 16-entry (not 256-entry) global and local color table', () => {
+    const bytes = encodeGif([solidFrame(8, 8, 200, 100, 50)], { numColors: 16, dither: false });
+
+    // Logical Screen Descriptor packed byte (offset 10): GCT flag=1,
+    // color resolution=N, sort=0, size=N. For 16 entries, N=3 (2^(3+1)=16).
+    // 0x80 | (3<<4) | 3 = 0xB3.
+    expect(bytes[10]).toBe(0xB3);
+    expect(bytes[10] & 0x07).toBe(3); // size field
+    const declaredGctSize = 1 << ((bytes[10] & 0x07) + 1);
+    expect(declaredGctSize).toBe(16);
+
+    // Global color table occupies exactly declaredGctSize*3 bytes starting
+    // at offset 13 (6-byte header + 7-byte LSD).
+    const gctStart = 13;
+    const gctEnd = gctStart + declaredGctSize * 3;
+
+    // Image Descriptor's packed byte (0x80 | N) must appear immediately
+    // after the GCT, at the expected Image Descriptor offset (9 bytes after
+    // the 0x2C Image Separator, which itself follows the GCT + GCE).
+    let sepIdx = -1;
+    for (let i = gctEnd; i < bytes.length; i++) {
+      if (bytes[i] === 0x2C) { sepIdx = i; break; }
+    }
+    expect(sepIdx).toBeGreaterThan(-1);
+    const lctPacked = bytes[sepIdx + 9];
+    expect(lctPacked).toBe(0x83); // 0x80 | N(=3)
+    const declaredLctSize = 1 << ((lctPacked & 0x07) + 1);
+    expect(declaredLctSize).toBe(16);
+
+    // LZW minimum code size (immediately after the LCT) must be N+1 = 4,
+    // not the old hardcoded 8.
+    const lctStart = sepIdx + 10;
+    const minCodeSizeOffset = lctStart + declaredLctSize * 3;
+    expect(bytes[minCodeSizeOffset]).toBe(4);
+  });
+
+  it('numColors=2 pads up to the 4-entry floor (LZW min code size must be >= 2)', () => {
+    // requestedColors=2 rounds UP to the smallest valid table (4 entries,
+    // N=1, minCodeSize=2) rather than declaring a 2-entry table whose
+    // minCodeSize=1 many decoders reject.
+    const bytes = encodeGif([solidFrame(4, 4, 0, 0, 0)], { numColors: 2, dither: false });
+    expect(bytes[10] & 0x07).toBe(1); // N=1 -> declared size 4
+    let sepIdx = -1;
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] === 0x2C) { sepIdx = i; break; }
+    }
+    const lctPacked = bytes[sepIdx + 9];
+    expect(lctPacked & 0x07).toBe(1);
+    const lctSize = 1 << ((lctPacked & 0x07) + 1);
+    const minCodeSizeOffset = sepIdx + 10 + lctSize * 3;
+    expect(bytes[minCodeSizeOffset]).toBe(2);
+  });
+
+  it('numColors=200 (not a power of two) pads the table up to 256, not down to 128', () => {
+    // GIF color tables must be a power of two; 200 requested colors cannot
+    // be represented exactly, so it must round UP (never truncate the
+    // palette to fewer entries than requested).
+    const bytes = encodeGif([solidFrame(4, 4, 10, 20, 30)], { numColors: 200, dither: false });
+    const declaredSize = 1 << ((bytes[10] & 0x07) + 1);
+    expect(declaredSize).toBe(256);
+  });
+
+  it('default (no numColors option) still declares a 256-entry table with minCodeSize 8 (no regression for the default path)', () => {
+    const bytes = encodeGif([solidFrame(4, 4, 200, 100, 50)]);
+    expect(bytes[10]).toBe(0xF7);
+    let sepIdx = 0;
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] === 0x2C) { sepIdx = i; break; }
+    }
+    expect(bytes[sepIdx + 9]).toBe(0x87);
+    expect(bytes[sepIdx + 10 + 256 * 3]).toBe(8);
+  });
+});
+
+// ============================================================
 // Error handling
 // ============================================================
 

@@ -95,6 +95,8 @@ const DEFAULT_SHORTCUTS: Omit<Shortcut, 'id' | 'customized'>[] = [
   { action: 'selectAll',    key: 'KeyA',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.selectAll',    category: C.edit },
   { action: 'deselect',     key: 'Escape', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.deselect',     category: C.edit },
   { action: 'split',        key: 'KeyB',   modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.split',        category: C.edit },
+  { action: 'lift',         key: 'Semicolon', modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.lift',      category: C.edit },
+  { action: 'extract',      key: 'Quote',  modifiers: { ctrl: false, shift: false, alt: false, meta: false }, context: 'timeline', description: 'shortcut.action.extract',      category: C.edit },
   { action: 'duplicate',    key: 'KeyD',   modifiers: { ctrl: true,  shift: false, alt: false, meta: false }, context: 'global',   description: 'shortcut.action.duplicate',    category: C.edit },
 
   // Timeline
@@ -165,6 +167,46 @@ const DAVINCI_OVERRIDES: Array<[string, Partial<Shortcut>]> = [
 ];
 
 // ============================================================
+// Modifier matching (pure — unit tested without a DOM)
+// ============================================================
+
+/** The modifier flags of a keyboard event that shortcut matching reads. */
+export interface EventModifiers {
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}
+
+/**
+ * Whether a shortcut's modifiers match an event's.
+ *
+ * Ctrl and Meta are unified into a single platform "command" modifier (Ctrl on
+ * Windows/Linux, ⌘ on macOS) so a binding made with either fires for either.
+ * The previous inline check only honoured `mods.ctrl` and never inspected
+ * `mods.meta`, so any meta-only binding — e.g. the FCP preset's ⌘B split —
+ * could never match (pressing ⌘B gave commandPressed=true while mods.ctrl=false).
+ */
+export function shortcutModifiersMatch(mods: ShortcutModifiers, ev: EventModifiers): boolean {
+  const commandWanted = mods.ctrl || mods.meta;
+  const commandPressed = ev.ctrlKey || ev.metaKey;
+  return (
+    commandWanted === commandPressed &&
+    mods.shift === ev.shiftKey &&
+    mods.alt === ev.altKey
+  );
+}
+
+/** Whether two modifier sets denote the same chord (ctrl/meta unified). */
+export function sameModifierChord(a: ShortcutModifiers, b: ShortcutModifiers): boolean {
+  return (
+    (a.ctrl || a.meta) === (b.ctrl || b.meta) &&
+    a.shift === b.shift &&
+    a.alt === b.alt
+  );
+}
+
+// ============================================================
 // Shortcut Manager
 // ============================================================
 
@@ -207,10 +249,21 @@ export class ShortcutManager {
 
   private handleKeyDown(event: KeyboardEvent): void {
     if (!this.enabled) return;
-    
-    // Ignore if in input field
-    if (event.target instanceof HTMLInputElement || 
-        event.target instanceof HTMLTextAreaElement) {
+
+    // REGRESSION fix: only <input>/<textarea> were excluded, so a focused
+    // <button> (e.g. Inspector.tsx's Solo/Mute/Enabled toggles) or <select>
+    // (the FPS dropdown) never got the native Space-to-click / arrow-key
+    // navigation the user expects -- the global shortcut underneath it
+    // (e.g. Space -> play, ArrowLeft/Right -> frame step) fired instead,
+    // via preventDefault() below, hijacking ordinary keyboard interaction
+    // with any focused interactive control.
+    const target = event.target;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLButtonElement ||
+      target instanceof HTMLSelectElement
+    ) {
       return;
     }
 
@@ -219,6 +272,18 @@ export class ShortcutManager {
       const callback = this.callbacks.get(shortcut.action);
       if (callback) {
         event.preventDefault();
+        // REGRESSION fix: app/shell.tsx also installs its own `window`
+        // keydown listener for a subset of these same combos (Space/
+        // Cmd+Z/Cmd+Shift+Z/Cmd+S), calling the equivalent engine action
+        // through the React layer. Since this listener is on `document`
+        // (attached in the constructor) and shell.tsx's is on `window`,
+        // this one always runs first in the bubble phase -- without
+        // stopping propagation, the SAME keypress reached BOTH handlers:
+        // undo/redo ran twice, save() ran twice, and Space toggled
+        // playback twice (self-cancelling, so it could never actually
+        // start playback). Stop the event here once a registered shortcut
+        // actually handles it, so no other listener double-fires it.
+        event.stopPropagation();
         callback();
       }
     }
@@ -234,12 +299,7 @@ export class ShortcutManager {
         continue;
       }
 
-      const mods = shortcut.modifiers;
-      if (mods.ctrl !== (event.ctrlKey || event.metaKey)) continue;
-      if (mods.shift !== event.shiftKey) continue;
-      if (mods.alt !== event.altKey) continue;
-
-      return shortcut;
+      if (shortcutModifiersMatch(shortcut.modifiers, event)) return shortcut;
     }
     return null;
   }
@@ -327,11 +387,9 @@ export class ShortcutManager {
       if (excludeAction && shortcut.action === excludeAction) continue;
       if (shortcut.context !== 'global' && shortcut.context !== context && context !== 'global') continue;
 
-      if (shortcut.key === key &&
-          shortcut.modifiers.ctrl === modifiers.ctrl &&
-          shortcut.modifiers.shift === modifiers.shift &&
-          shortcut.modifiers.alt === modifiers.alt &&
-          shortcut.modifiers.meta === modifiers.meta) {
+      // Unify ctrl/meta so a conflict is detected consistently with how
+      // shortcutModifiersMatch() dispatches (⌘B and Ctrl+B are the same chord).
+      if (shortcut.key === key && sameModifierChord(shortcut.modifiers, modifiers)) {
         return shortcut;
       }
     }

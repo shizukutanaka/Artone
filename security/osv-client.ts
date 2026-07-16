@@ -141,16 +141,34 @@ export function osvToCVE(osv: OSVVulnerability, packageName: string): CVE {
   const range = affected?.ranges?.[0];
 
   // 範囲文字列構築
+  //
+  // REGRESSION fix: a single `{intro, fixed}` pair only ever kept the LAST
+  // introduced/fixed event seen. Real OSV/GHSA entries can have multiple
+  // introduced/fixed pairs in one ranges[].events array describing disjoint
+  // vulnerable windows (e.g. vulnerable in [0, 1.0.0), fixed, then
+  // re-introduced and fixed again in [1.5.0, 2.0.0) after a backport). The
+  // old code discarded every window but the last, so a scanned version
+  // falling in an earlier vulnerable window was silently reported as safe —
+  // a false negative in the exact "critical CVE は自動的に CI 失敗" path.
+  // Each closed window becomes its own range joined by "||", the OR-combine
+  // format sbom.ts's versionMatches() already supports for affected.versions.
   let affectedVersions = '*';
   if (range && range.type === 'SEMVER') {
-    const events = range.events;
+    const ranges: string[] = [];
     let intro = '';
-    let fixed = '';
-    for (const e of events) {
-      if (e.introduced && e.introduced !== '0') intro = `>=${e.introduced}`;
-      if (e.fixed) fixed = `<${e.fixed}`;
+    for (const e of range.events) {
+      if (e.introduced !== undefined) {
+        intro = e.introduced !== '0' ? `>=${e.introduced}` : '';
+      } else if (e.fixed || e.limit) {
+        const upper = `<${e.fixed ?? e.limit}`;
+        ranges.push([intro, upper].filter(Boolean).join(' '));
+        intro = '';
+      }
     }
-    affectedVersions = [intro, fixed].filter(Boolean).join(' ') || '*';
+    // A trailing open introduced with no closing fixed/limit event means
+    // "still vulnerable in every version from `introduced` onward".
+    if (intro) ranges.push(intro);
+    affectedVersions = ranges.length > 0 ? ranges.join('||') : '*';
   } else if (affected?.versions && affected.versions.length > 0) {
     affectedVersions = affected.versions.join('||');
   }
@@ -169,8 +187,10 @@ export function osvToCVE(osv: OSVVulnerability, packageName: string): CVE {
     else if (s.includes('low')) severity = 'low';
   }
 
-  // fixedIn 抽出
-  const fixedEvent = range?.events.find((e) => e.fixed);
+  // fixedIn 抽出 — 複数の fixed イベントがある場合は最後 (最新の修正版) を採用。
+  // "upgrade to X" として表示されるため、re-introduced 後の古い修正版を
+  // 提示してしまわないよう最後のイベントを使う。
+  const fixedEvent = [...(range?.events ?? [])].reverse().find((e) => e.fixed);
 
   return {
     id: osv.id,

@@ -49,19 +49,24 @@ export interface EngineState {
   lastCommand: { cmd: AppCommand; seq: number } | null;
 }
 
-const DEFAULT_STATE: EngineState = {
-  isPlaying: false,
-  currentTime: 0,
-  duration: 0,
-  fps: 30,
-  projectName: t('file.untitled'),
-  hasUnsavedChanges: false,
-  isReady: false,
-  error: null,
-  warnings: [],
-  capabilityTier: 'unknown',
-  lastCommand: null,
-};
+// Built lazily (as a useState initializer) rather than as a module-level
+// constant: t('file.untitled') requires i18n to already be set up, and this
+// module can be imported before entry.tsx finishes awaiting setupI18n().init().
+function createDefaultState(): EngineState {
+  return {
+    isPlaying: false,
+    currentTime: 0,
+    duration: 0,
+    fps: 30,
+    projectName: t('file.untitled'),
+    hasUnsavedChanges: false,
+    isReady: false,
+    error: null,
+    warnings: [],
+    capabilityTier: 'unknown',
+    lastCommand: null,
+  };
+}
 
 // === Engine Actions (UI → エンジンのコマンド) ===
 
@@ -73,9 +78,17 @@ export interface EngineActions {
   save(): Promise<void>;
   undo(): void;
   redo(): void;
-  importFiles(files: File[]): Promise<void>;
+  /**
+   * Imports each file into the engine. Returns the subset that failed (by
+   * reference, so callers can filter their own `files` array) — a caller
+   * that unconditionally treats every input file as "imported" after this
+   * resolves would show a UI entry for media the engine never actually has.
+   */
+  importFiles(files: File[]): Promise<Set<File>>;
   exportProject(preset?: string): Promise<void>;
   setProjectName(name: string): void;
+  /** Surfaces a message via the same error UI as failed imports/exports. */
+  setError(message: string): void;
   clearError(): void;
   /** エンジンインスタンス直接アクセス (Pro 機能用) */
   getApp(): ArtoneApp | null;
@@ -115,8 +128,8 @@ interface EngineProviderProps {
 /** エンジン初期化ロジック。副作用を分離してテスト容易性を高める。 */
 async function initEngine(
   config: Partial<AppConfig>,
+  setState: React.Dispatch<React.SetStateAction<EngineState>>,
   onReady: (app: ArtoneApp, caps: { warnings: string[]; tier: string }) => void,
-  _onError: (msg: string) => void,
   cancelled: () => boolean
 ) {
   const { detectCapabilities } = await import('./capabilities');
@@ -130,6 +143,20 @@ async function initEngine(
     ...config,
     hardwareAcceleration: config.hardwareAcceleration !== false && caps.webgpu,
   });
+
+  // REGRESSION fix: app.emit must be wired BEFORE calling initialize() --
+  // ArtoneApp.initialize() emits 'init:partial' synchronously at the very
+  // end of its own body (if project/audio/recovery/shortcuts/autosave setup
+  // failed), and that call happens entirely before this function's caller
+  // (onReady) used to run. With emit assigned only inside onReady, the event
+  // fired into `this.emit?.(...)` while emit was still undefined -- a no-op
+  // -- so init failures were silently dropped no matter what listened for
+  // them downstream.
+  let cmdSeq = 0;
+  app.emit = (name: string, payload?: unknown) => {
+    setState((s) => ({ ...s, lastCommand: { cmd: { name, payload }, seq: ++cmdSeq } }));
+  };
+
   await app.initialize();
 
   if (cancelled()) {
@@ -165,23 +192,31 @@ function createPlaybackTick(
 
 export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children }) => {
   const appRef = useRef<ArtoneApp | null>(null);
-  const [state, setState] = useState<EngineState>(DEFAULT_STATE);
+  const [state, setState] = useState<EngineState>(createDefaultState);
   const rafRef = useRef<number>(0);
-  const cancelledRef = useRef(false);
 
   // エンジン初期化 (1 回のみ)
   useEffect(() => {
-    cancelledRef.current = false;
+    // REGRESSION fix: this used to be a ref shared across every effect
+    // invocation. Under React 18 StrictMode's dev-mode double-invoke
+    // (mount -> cleanup -> mount), the cleanup set the shared ref to
+    // cancelled, but the immediately-following second mount reset it back
+    // to false -- so when the FIRST invocation's in-flight initEngine()
+    // finally resolved, its cancelled() check read the *shared* ref (now
+    // false again) and proceeded anyway: it called onReady, overwrote
+    // appRef.current, and started an untracked requestAnimationFrame loop
+    // racing with the second invocation's own app/RAF loop. Scoping the
+    // flag to a local variable per effect invocation means each
+    // invocation's cancellation state is independent, so a genuinely
+    // cancelled (unmounted) invocation stays cancelled regardless of
+    // what any later invocation does.
+    let cancelled = false;
 
     initEngine(
       config ?? {},
+      setState,
       (app, caps) => {
         appRef.current = app;
-        // Wire up app.emit so keyboard-shortcut events reach the React layer
-        let cmdSeq = 0;
-        app.emit = (name: string, payload?: unknown) => {
-          setState((s) => ({ ...s, lastCommand: { cmd: { name, payload }, seq: ++cmdSeq } }));
-        };
         setState((s) => ({
           ...s,
           isReady: true,
@@ -190,17 +225,16 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
           warnings: caps.warnings,
           capabilityTier: caps.tier as EngineState['capabilityTier'],
         }));
-        const tick = createPlaybackTick(appRef, rafRef, setState, () => cancelledRef.current);
+        const tick = createPlaybackTick(appRef, rafRef, setState, () => cancelled);
         rafRef.current = requestAnimationFrame(tick);
       },
-      (msg) => setState((s) => ({ ...s, error: msg })),
-      () => cancelledRef.current
+      () => cancelled
     ).catch((err: Error) => {
-      if (!cancelledRef.current) setState((s) => ({ ...s, error: err.message }));
+      if (!cancelled) setState((s) => ({ ...s, error: err.message }));
     });
 
     return () => {
-      cancelledRef.current = true;
+      cancelled = true;
       cancelAnimationFrame(rafRef.current);
       appRef.current?.dispose?.();
       appRef.current = null;
@@ -247,13 +281,15 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
       },
       async importFiles(files: File[]) {
         const app = appRef.current;
-        if (!app) return;
+        if (!app) return new Set(files);
         const errors: string[] = [];
+        const failed = new Set<File>();
         for (const f of files) {
           try {
             await app.importMedia(f);
           } catch (e) {
             errors.push(`${f.name}: ${(e as Error).message}`);
+            failed.add(f);
           }
         }
         if (errors.length > 0) {
@@ -261,6 +297,7 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
         } else {
           setState((s) => ({ ...s, hasUnsavedChanges: true }));
         }
+        return failed;
       },
       async exportProject(preset?: string) {
         try {
@@ -271,6 +308,9 @@ export const EngineProvider: React.FC<EngineProviderProps> = ({ config, children
       },
       setProjectName(name: string) {
         setState((s) => ({ ...s, projectName: name, hasUnsavedChanges: true }));
+      },
+      setError(message: string) {
+        setState((s) => ({ ...s, error: message }));
       },
       clearError() {
         setState((s) => ({ ...s, error: null }));

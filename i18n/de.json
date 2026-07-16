@@ -57,6 +57,11 @@
     "paste": "Einfügen",
     "selectAll": "Alles auswählen"
   },
+  "history": {
+    "opsCount": "{count} Vorgänge",
+    "clear": "Löschen",
+    "empty": "Kein Verlauf"
+  },
   "timeline": {
     "title": "Timeline",
     "play": "Wiedergabe",
@@ -187,6 +192,9 @@
     "all": "Alle",
     "empty": "Medien ablegen oder importieren",
     "noMatch": "Keine Treffer",
+    "itemsLabel": "Elemente",
+    "sidebarClose": "Medienbereich schließen",
+    "sidebarOpen": "Medienbereich öffnen",
     "status": {
       "pending": "Ausstehend",
       "proxy": "Proxy",
@@ -214,7 +222,8 @@
     },
     "generic": "Fehler: {message}",
     "init": {
-      "title": "Initialisierungsfehler"
+      "title": "Initialisierungsfehler",
+      "partial": "Einige Funktionen konnten nicht gestartet werden: {message}"
     },
     "details": "Fehlerdetails",
     "restart": "Neu starten",
@@ -229,7 +238,8 @@
     "restore": "Wiederherstellen",
     "discard": "Verwerfen",
     "autoSave": "Auto-Speichern",
-    "restorePrompt": "Nicht gespeicherte Arbeit von {time} gefunden. Wiederherstellen?"
+    "restorePrompt": "Nicht gespeicherte Arbeit von {time} gefunden. Wiederherstellen?",
+    "autoSaveFailed": "Automatisches Speichern funktioniert nicht. Änderungen werden möglicherweise nicht gespeichert."
   },
   "performance": {
     "fps": "FPS: {value}",
@@ -280,6 +290,8 @@
       "setInPoint": "In-Punkt setzen",
       "setOutPoint": "Out-Punkt setzen",
       "clearInOut": "In / Out löschen",
+      "lift": "Anheben",
+      "extract": "Extrahieren",
       "zoomIn": "Vergrößern",
       "zoomOut": "Verkleinern",
       "zoomFit": "Einpassen",
@@ -358,7 +370,10 @@
       "scale": "Skalierung",
       "rotation": "Drehung",
       "alpha": "α",
-      "enabled": "Aktiviert"
+      "enabled": "Aktiviert",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {
@@ -374,6 +389,7 @@
     "placeholder": "Befehle, Effekte, Einstellungen suchen...",
     "hint": "↑↓ Navigieren · Enter Ausführen · Esc Schließen",
     "count": "{count} Ergebnisse",
+    "noResults": "Keine Ergebnisse gefunden",
     "cmd": {
       "cut": "Ausschneiden",
       "copy": "Kopieren",

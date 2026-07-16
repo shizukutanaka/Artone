@@ -16,10 +16,21 @@ export interface CacheInfo {
 
 export type CacheStatus = Record<string, CacheInfo>;
 
+/**
+ * Whether the Service Worker should be registered for the current build.
+ * Production only — registering in dev would let the SW's cache-first
+ * strategy serve a stale bundle over Vite's HMR-served modules, and dev
+ * builds have no `dist/sw.js` to register against in the first place.
+ */
+export function shouldRegisterServiceWorker(isProd: boolean): boolean {
+  return isProd && 'serviceWorker' in navigator;
+}
+
 export class ServiceWorkerManager {
   private registration: ServiceWorkerRegistration | null = null;
   private updateAvailable = false;
   private listeners = new Set<(state: 'updated' | 'offline' | 'online') => void>();
+  private readonly abortCtrl = new AbortController();
 
   async register(swUrl = '/sw.js'): Promise<boolean> {
     if (!('serviceWorker' in navigator)) return false;
@@ -37,9 +48,21 @@ export class ServiceWorkerManager {
   private setupListeners(): void {
     if (!this.registration) return;
 
+    const { signal } = this.abortCtrl;
+
+    // REGRESSION fix: this listener used to be registered with no `signal`,
+    // so destroy()'s abortCtrl.abort() couldn't remove it. Every
+    // register()/setupListeners() call on the underlying registration (a
+    // fresh ServiceWorkerManager instance, or a re-register after destroy())
+    // added another 'updatefound' listener that lived on for the
+    // registration's full lifetime -- unbounded accumulation across manager
+    // re-creation.
     this.registration.addEventListener('updatefound', () => {
       const worker = this.registration!.installing;
       if (!worker) return;
+      // Use { once: true } so the statechange listener auto-removes after first fire,
+      // preventing a listener leak when updatefound fires multiple times (e.g., rapid
+      // redeploys in dev mode accumulate unlimited statechange listeners otherwise).
       worker.addEventListener('statechange', () => {
         if (
           worker.state === 'installed' &&
@@ -48,18 +71,18 @@ export class ServiceWorkerManager {
           this.updateAvailable = true;
           this.notify('updated');
         }
-      });
-    });
+      }, { once: true });
+    }, { signal });
 
     navigator.serviceWorker.addEventListener('message', (e) => {
       // ハンドラ拡張ポイント
       if (e.data?.type === 'SYNC_TRIGGERED') {
         // アプリ側でリスナー登録可
       }
-    });
+    }, { signal });
 
-    window.addEventListener('online', () => this.notify('online'));
-    window.addEventListener('offline', () => this.notify('offline'));
+    window.addEventListener('online', () => this.notify('online'), { signal });
+    window.addEventListener('offline', () => this.notify('offline'), { signal });
   }
 
   async applyUpdate(): Promise<void> {
@@ -131,12 +154,33 @@ export class ServiceWorkerManager {
     }
   }
 
+  /** Remove all global event listeners (online/offline/SW message). */
+  destroy(): void {
+    this.abortCtrl.abort();
+    this.listeners.clear();
+  }
+
   private sendMessage<T>(msg: unknown): Promise<T | null> {
     return new Promise((resolve) => {
       const ch = new MessageChannel();
-      ch.port1.onmessage = (e) => resolve(e.data as T);
+      let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const settle = (value: T | null): void => {
+        if (settled) return;
+        settled = true;
+        // Cancel the timeout so the closure is released immediately instead of
+        // being kept alive by the event loop for the remaining 5-second window.
+        if (timeoutId !== null) clearTimeout(timeoutId);
+        // Close port1 to release the message channel; the transfer of port2 to
+        // the SW means it gets closed on the other side when the SW drops it.
+        ch.port1.close();
+        resolve(value);
+      };
+      ch.port1.onmessage = (e) => settle(e.data as T);
       navigator.serviceWorker.controller?.postMessage(msg, [ch.port2]);
-      setTimeout(() => resolve(null), 5000);
+      // Timeout: resolve null and close port so the channel isn't leaked when
+      // the SW never responds (e.g. SW not running, wrong message type).
+      timeoutId = setTimeout(() => settle(null), 5000);
     });
   }
 }

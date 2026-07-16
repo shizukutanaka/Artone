@@ -8,6 +8,7 @@ import {
   safeJsonParse,
   clamp, lerp, frameToSeconds, secondsToFrame,
   escapeXML, pad, uuid, formatBytes, formatTimecode,
+  setHighQualityScaling,
 } from '../app/utils';
 import { logger } from '../app/logger';
 
@@ -141,5 +142,20 @@ describe('safeStorageSet — throw path', () => {
     expect(warnSpy).toHaveBeenCalled();
     setSpy.mockRestore();
     warnSpy.mockRestore();
+  });
+});
+
+describe('setHighQualityScaling', () => {
+  it('enables smoothing and sets quality to high', () => {
+    const ctx = { imageSmoothingEnabled: false, imageSmoothingQuality: 'low' as ImageSmoothingQuality };
+    setHighQualityScaling(ctx);
+    expect(ctx.imageSmoothingEnabled).toBe(true);
+    expect(ctx.imageSmoothingQuality).toBe('high');
+  });
+
+  it('overrides a previously-medium quality', () => {
+    const ctx = { imageSmoothingEnabled: true, imageSmoothingQuality: 'medium' as ImageSmoothingQuality };
+    setHighQualityScaling(ctx);
+    expect(ctx.imageSmoothingQuality).toBe('high');
   });
 });

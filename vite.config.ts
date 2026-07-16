@@ -6,9 +6,10 @@
  * Pike: シンプル設定
  */
 
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { readdirSync, mkdirSync, copyFileSync } from 'fs';
 import { visualizer } from 'rollup-plugin-visualizer';
 
 // ==================================================
@@ -16,6 +17,27 @@ import { visualizer } from 'rollup-plugin-visualizer';
 // ==================================================
 const isProd = process.env.NODE_ENV === 'production';
 const isAnalyze = process.env.ANALYZE === 'true';
+
+// i18n/*.json is fetched at runtime as '/i18n/{locale}.json' (see
+// i18n/i18n-manager.ts loadLocale()), but it lives outside `publicDir` so
+// `vite build` never copies it into dist/. Without this, every locale load
+// 404s in production and every t() call silently falls back to raw keys.
+function copyI18nLocalesPlugin(): Plugin {
+  return {
+    name: 'copy-i18n-locales',
+    apply: 'build',
+    closeBundle() {
+      const srcDir = resolve(__dirname, 'i18n');
+      const outDir = resolve(__dirname, 'dist/i18n');
+      mkdirSync(outDir, { recursive: true });
+      for (const file of readdirSync(srcDir)) {
+        if (file.endsWith('.json')) {
+          copyFileSync(resolve(srcDir, file), resolve(outDir, file));
+        }
+      }
+    },
+  };
+}
 
 // ==================================================
 // Vite Configuration
@@ -39,7 +61,9 @@ export default defineConfig({
       open: true,
       gzipSize: true,
       brotliSize: true
-    })
+    }),
+
+    copyI18nLocalesPlugin()
   ].filter(Boolean),
 
   // ----- ビルド設定 -----

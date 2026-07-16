@@ -333,3 +333,86 @@ describe('parseCubeLUT', () => {
     expect(() => parseCubeLUT('LUT_3D_SIZE 4\n0 0 0')).toThrow('too short');
   });
 });
+
+// ============================================================
+// Zero-allocation trilinear refactor — equivalence with reference
+// ============================================================
+
+/** Independent reference: the original array-allocating trilinear math. */
+function refSampleLUT(lut: LUTData, r: number, g: number, b: number): [number, number, number] {
+  const N = lut.size;
+  if (N < 2) return [r, g, b];
+  const scale = N - 1;
+  const ri = Math.min(Math.max(r * scale, 0), scale);
+  const gi = Math.min(Math.max(g * scale, 0), scale);
+  const bi = Math.min(Math.max(b * scale, 0), scale);
+  const r0 = Math.floor(ri), g0 = Math.floor(gi), b0 = Math.floor(bi);
+  const r1 = Math.min(r0 + 1, scale), g1 = Math.min(g0 + 1, scale), b1 = Math.min(b0 + 1, scale);
+  const dr = ri - r0, dg = gi - g0, db = bi - b0;
+  const at = (rr: number, gg: number, bb: number): [number, number, number] => {
+    const idx = (bb * N * N + gg * N + rr) * 3;
+    return [lut.data[idx], lut.data[idx + 1], lut.data[idx + 2]];
+  };
+  const lerp = (a: number[], c: number[], t: number): [number, number, number] =>
+    [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t, a[2] + (c[2] - a[2]) * t];
+  const c00 = lerp(at(r0, g0, b0), at(r1, g0, b0), dr);
+  const c10 = lerp(at(r0, g1, b0), at(r1, g1, b0), dr);
+  const c01 = lerp(at(r0, g0, b1), at(r1, g0, b1), dr);
+  const c11 = lerp(at(r0, g1, b1), at(r1, g1, b1), dr);
+  const c0 = lerp(c00, c10, dg);
+  const c1 = lerp(c01, c11, dg);
+  return lerp(c0, c1, db);
+}
+
+/** Build an N³ LUT from a deterministic per-coordinate function. */
+function makeLUT(N: number, fn: (r: number, g: number, b: number) => [number, number, number]): LUTData {
+  const data = new Float32Array(N * N * N * 3);
+  for (let b = 0; b < N; b++) {
+    for (let g = 0; g < N; g++) {
+      for (let r = 0; r < N; r++) {
+        const idx = (b * N * N + g * N + r) * 3;
+        const [vr, vg, vb] = fn(r / (N - 1), g / (N - 1), b / (N - 1));
+        data[idx] = vr; data[idx + 1] = vg; data[idx + 2] = vb;
+      }
+    }
+  }
+  return { name: `lut${N}`, size: N, data };
+}
+
+describe('sampleLUT — zero-alloc core matches reference', () => {
+  it('is bit-identical to the array-allocating reference over randomized inputs', () => {
+    let seed = 424242;
+    const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    // A non-trivial LUT (gamma-ish per channel + cross-channel mix) at several sizes.
+    for (const N of [2, 3, 5, 17, 33]) {
+      const lut = makeLUT(N, (r, g, b) => [
+        Math.pow(r, 0.9),
+        Math.min(1, g * 0.8 + b * 0.2),
+        Math.min(1, b * 0.7 + r * 0.1),
+      ]);
+      for (let k = 0; k < 400; k++) {
+        const r = rng(), g = rng(), b = rng();
+        const got = sampleLUT(lut, r, g, b);
+        const ref = refSampleLUT(lut, r, g, b);
+        // Exact equality: identical float operations in identical order.
+        expect(got[0]).toBe(ref[0]);
+        expect(got[1]).toBe(ref[1]);
+        expect(got[2]).toBe(ref[2]);
+      }
+    }
+  });
+
+  it('applyLUTToBuffer reuses one scratch tuple yet matches per-pixel sampleLUT', () => {
+    const lut = makeLUT(9, (r, g, b) => [g, b, r]); // channel swap
+    const px = new Uint8ClampedArray([10, 20, 30, 255, 200, 100, 50, 128]);
+    const expected = new Uint8ClampedArray(px);
+    for (let i = 0; i < expected.length; i += 4) {
+      const [or, og, ob] = sampleLUT(lut, expected[i] / 255, expected[i + 1] / 255, expected[i + 2] / 255);
+      expected[i] = Math.round(Math.max(0, Math.min(1, or)) * 255);
+      expected[i + 1] = Math.round(Math.max(0, Math.min(1, og)) * 255);
+      expected[i + 2] = Math.round(Math.max(0, Math.min(1, ob)) * 255);
+    }
+    applyLUTToBuffer(px, lut);
+    expect(Array.from(px)).toEqual(Array.from(expected));
+  });
+});

@@ -57,6 +57,11 @@
     "paste": "Coller",
     "selectAll": "Tout sélectionner"
   },
+  "history": {
+    "opsCount": "{count} opérations",
+    "clear": "Effacer",
+    "empty": "Aucun historique"
+  },
   "timeline": {
     "title": "Timeline",
     "play": "Lecture",
@@ -187,6 +192,9 @@
     "all": "Tout",
     "empty": "Déposez ou importez des médias",
     "noMatch": "Aucun résultat",
+    "itemsLabel": "éléments",
+    "sidebarClose": "Fermer le panneau média",
+    "sidebarOpen": "Ouvrir le panneau média",
     "status": {
       "pending": "En attente",
       "proxy": "Proxy",
@@ -214,7 +222,8 @@
     },
     "generic": "Erreur : {message}",
     "init": {
-      "title": "Erreur d'initialisation"
+      "title": "Erreur d'initialisation",
+      "partial": "Certaines fonctionnalités n'ont pas pu démarrer : {message}"
     },
     "details": "Détails de l'erreur",
     "restart": "Redémarrer",
@@ -229,7 +238,8 @@
     "restore": "Restaurer",
     "discard": "Abandonner",
     "autoSave": "Sauvegarde auto",
-    "restorePrompt": "Travail non enregistré détecté depuis {time}. Restaurer ?"
+    "restorePrompt": "Travail non enregistré détecté depuis {time}. Restaurer ?",
+    "autoSaveFailed": "La sauvegarde automatique ne fonctionne pas. Vos modifications risquent de ne pas être enregistrées."
   },
   "performance": {
     "fps": "FPS : {value}",
@@ -280,6 +290,8 @@
       "setInPoint": "Définir le point d'entrée",
       "setOutPoint": "Définir le point de sortie",
       "clearInOut": "Effacer entrée / sortie",
+      "lift": "Soulever",
+      "extract": "Extraire",
       "zoomIn": "Agrandir",
       "zoomOut": "Réduire",
       "zoomFit": "Ajuster à l'écran",
@@ -358,7 +370,10 @@
       "scale": "Échelle",
       "rotation": "Rotation",
       "alpha": "α",
-      "enabled": "Activé"
+      "enabled": "Activé",
+      "x": "X",
+      "y": "Y",
+      "fps": "IPS"
     }
   },
   "captions": {
@@ -374,6 +389,7 @@
     "placeholder": "Rechercher commandes, effets, paramètres...",
     "hint": "↑↓ Naviguer · Enter Exécuter · Esc Fermer",
     "count": "{count} résultats",
+    "noResults": "Aucun résultat trouvé",
     "cmd": {
       "cut": "Couper",
       "copy": "Copier",

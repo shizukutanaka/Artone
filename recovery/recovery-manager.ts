@@ -82,6 +82,8 @@ export class RecoveryManager {
   private status: RecoveryStatus = 'idle';
   private autoSaveTimer: number | null = null;
   private lastSaveTime = 0;
+  /** Separate throttle clock for 'crash' snapshots (see saveSnapshot). */
+  private lastCrashSaveTime = 0;
   private listeners: Set<(status: RecoveryStatus) => void> = new Set();
   private crashFlag = 'artone_crash_flag';
   /** Guards against attaching crash-detection listeners more than once. */
@@ -104,6 +106,11 @@ export class RecoveryManager {
       // (complete data loss). Default 50; minimum meaningful value is 1.
       maxSnapshots: Math.max(1, config.maxSnapshots ?? 50),
     };
+  }
+
+  /** Configured retention window (ms) — how long a snapshot survives enforceLimit()'s age purge. */
+  getMaxAge(): number {
+    return this.config.maxAge;
   }
 
   // ----- 初期化 -----
@@ -171,7 +178,7 @@ export class RecoveryManager {
         this.currentProjectId ?? undefined,
         this.currentProjectName ?? undefined,
         data,
-      );
+      ).catch(e => log.error('Failed to save crash snapshot:', e));
     };
 
     window.addEventListener('error', saveCrashSnapshot);
@@ -192,14 +199,21 @@ export class RecoveryManager {
 
     this.stopAutoSave();
 
-    this.autoSaveTimer = window.setInterval(async () => {
+    // Guard flag prevents concurrent saves when saveSnapshot takes longer than the interval.
+    let saving = false;
+    this.autoSaveTimer = window.setInterval(() => {
+      if (saving) return;
+      saving = true;
       const data = getData();
-      await this.saveSnapshot('auto', projectId, projectName, data);
+      this.saveSnapshot('auto', projectId, projectName, data)
+        .catch(e => log.warn('Auto-save failed', e))
+        .finally(() => { saving = false; });
     }, this.config.autoSaveInterval);
 
     // Save immediately on start
     const data = getData();
-    this.saveSnapshot('auto', projectId, projectName, data);
+    this.saveSnapshot('auto', projectId, projectName, data)
+      .catch(e => log.warn('Initial auto-save failed', e));
   }
 
   stopAutoSave(): void {
@@ -228,9 +242,24 @@ export class RecoveryManager {
     if (type === 'auto' && now - this.lastSaveTime < 5000) {
       return null;
     }
+    // REGRESSION fix: 'crash' snapshots were exempt from any throttle (by
+    // design, so a single genuine crash is never dropped) -- but a repeating
+    // error (e.g. a thrown-in-a-loop bug, or a rejection that keeps firing)
+    // calls saveCrashSnapshot() on every 'error'/'unhandledrejection' event
+    // with no upper bound on frequency. Each write also runs enforceLimit(),
+    // whose eviction is purely count/age-based: a burst of near-identical
+    // crash snapshots can blow past maxSnapshots and evict genuinely useful
+    // older backups (including the last good pre-crash auto-save) in favor
+    // of dozens of near-duplicate snapshots of the same failing moment.
+    // Throttle crash saves too, just on a much shorter, still-generous
+    // window than auto-saves so a real crash is still captured promptly.
+    if (type === 'crash' && now - this.lastCrashSaveTime < 2000) {
+      return null;
+    }
 
     this.setStatus('saving');
     this.lastSaveTime = now;
+    if (type === 'crash') this.lastCrashSaveTime = now;
 
     try {
       const dataStr = JSON.stringify(data);
@@ -264,10 +293,15 @@ export class RecoveryManager {
     return new Promise((resolve, reject) => {
       const tx = this.requireDB().transaction(this.config.storeName, 'readwrite');
       const store = tx.objectStore(this.config.storeName);
-      const request = store.put(snapshot);
-      
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+
+      store.put(snapshot);
+
+      // Resolve on tx.oncomplete (durable commit) — critical in the data-loss
+      // risk zone. request.onsuccess fires when the write is enqueued but the
+      // transaction may still abort (disk full, browser killed), leaving a false
+      // "snapshot saved" result and potentially losing crash-recovery data.
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error ?? new Error('writeSnapshot: transaction aborted'));
     });
   }
 
@@ -289,9 +323,8 @@ export class RecoveryManager {
       
       request.onsuccess = () => {
         const snapshots = request.result as RecoverySnapshot[];
-        // Sort by timestamp descending
-        snapshots.sort((a, b) => b.timestamp - a.timestamp);
-        resolve(snapshots);
+        // Sort by timestamp descending — spread to avoid mutating the IDB result
+        resolve([...snapshots].sort((a, b) => b.timestamp - a.timestamp));
       };
       
       request.onerror = () => reject(request.error);
@@ -353,10 +386,11 @@ export class RecoveryManager {
     return new Promise((resolve) => {
       const tx = this.requireDB().transaction(this.config.storeName, 'readwrite');
       const store = tx.objectStore(this.config.storeName);
-      const request = store.delete(id);
-      
-      request.onsuccess = () => resolve(true);
-      request.onerror = () => resolve(false);
+
+      store.delete(id);
+
+      tx.oncomplete = () => resolve(true);
+      tx.onabort = () => resolve(false);
     });
   }
 
@@ -406,11 +440,16 @@ export class RecoveryManager {
     // newest-first): age-expired, plus everything past the cap among survivors.
     const snapshots = await this.getSnapshots();
     const toDelete: string[] = [];
-    let kept = 0;
+    // REGRESSION fix: maxSnapshots must cap snapshots PER PROJECT, not
+    // globally. A single shared counter meant one project's frequent saves
+    // could starve every other project's budget down to zero survivors even
+    // though each individually stayed well under maxSnapshots.
+    const keptPerProject = new Map<string, number>();
     for (const s of snapshots) {
-      if (now - s.timestamp > maxAge) toDelete.push(s.id);
-      else if (kept >= maxSnapshots) toDelete.push(s.id);
-      else kept++;
+      if (now - s.timestamp > maxAge) { toDelete.push(s.id); continue; }
+      const kept = keptPerProject.get(s.projectId) ?? 0;
+      if (kept >= maxSnapshots) { toDelete.push(s.id); continue; }
+      keptPerProject.set(s.projectId, kept + 1);
     }
     if (toDelete.length === 0) return;
 
@@ -612,7 +651,7 @@ export function RecoveryDialogUI(props: {
           gap: 12px;
           justify-content: flex-end;
         ">
-          <button onclick="discardRecovery()" style="
+          <button data-action="discard" style="
             padding: 10px 20px;
             border: none;
             border-radius: 6px;
@@ -623,7 +662,7 @@ export function RecoveryDialogUI(props: {
           ">
             Start Fresh
           </button>
-          <button onclick="restoreSelected()" style="
+          <button data-action="restore" style="
             padding: 10px 20px;
             border: none;
             border-radius: 6px;
@@ -639,6 +678,33 @@ export function RecoveryDialogUI(props: {
       </div>
     </div>
   `;
+}
+
+/**
+ * Mount RecoveryDialogUI into a container and wire up event delegation.
+ * Returns a cleanup function that removes the listener.
+ */
+export function mountRecoveryDialog(
+  container: HTMLElement,
+  props: { snapshots: RecoverySnapshot[]; onRestore: (id: string) => void; onDiscard: () => void },
+): () => void {
+  container.innerHTML = RecoveryDialogUI(props);
+  // Track which snapshot item is selected (default: first)
+  let selectedId: string | null = props.snapshots[0]?.id ?? null;
+
+  const onClick = (e: Event): void => {
+    const target = e.target as HTMLElement;
+    const item = target.closest('.snapshot-item') as HTMLElement | null;
+    if (item?.dataset['id']) selectedId = item.dataset['id'];
+
+    const btn = target.closest('[data-action]') as HTMLElement | null;
+    if (!btn) return;
+    if (btn.dataset['action'] === 'discard') props.onDiscard();
+    else if (btn.dataset['action'] === 'restore' && selectedId) props.onRestore(selectedId);
+  };
+
+  container.addEventListener('click', onClick);
+  return () => container.removeEventListener('click', onClick);
 }
 
 // ============================================================

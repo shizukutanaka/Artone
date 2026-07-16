@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   wrapWords,
   countPrintableChars,
+  graphemeLength,
   cps,
   normalizeCues,
   auditCues,
@@ -82,6 +83,55 @@ describe('wrapWords()', () => {
   it('negative maxChars does not hang', () => {
     expect(() => wrapWords('abcdef', -5)).not.toThrow();
   });
+
+  it('treats each emoji as 1 char for line-width purposes', () => {
+    // 5 emoji; maxChars=3 → wrap after 3rd
+    const result = wrapWords('🎬🎵🎶🎸🎤', 3);
+    // Each emoji is one grapheme; result should have lines ≤ 3 graphemes wide
+    for (const line of result) {
+      expect(graphemeLength(line)).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it('hard-breaks long emoji word at grapheme boundary', () => {
+    // A "word" of 4 emoji hard-broken at maxChars=2
+    const result = wrapWords('🎬🎵🎶🎸', 2);
+    expect(result.length).toBe(2);
+    expect(graphemeLength(result[0])).toBe(2);
+    expect(graphemeLength(result[1])).toBe(2);
+  });
+});
+
+// ============================================================
+// graphemeLength
+// ============================================================
+
+describe('graphemeLength()', () => {
+  it('returns same as .length for ASCII', () => {
+    expect(graphemeLength('hello')).toBe(5);
+  });
+
+  it('counts basic emoji as 1 (🎬 is a surrogate pair, .length===2)', () => {
+    expect(graphemeLength('🎬')).toBe(1);
+  });
+
+  it('counts each emoji in a sequence (🎬🎵🎶)', () => {
+    expect(graphemeLength('🎬🎵🎶')).toBe(3);
+  });
+
+  it('counts ZWJ family emoji as 1 grapheme cluster', () => {
+    // 👨‍👩‍👦 = U+1F468 ZWJ U+1F469 ZWJ U+1F466 — visually one character
+    expect(graphemeLength('👨‍👩‍👦')).toBe(1);
+  });
+
+  it('counts flag emoji as 1 (🇯🇵 = two regional indicators)', () => {
+    expect(graphemeLength('🇯🇵')).toBe(1);
+  });
+
+  it('counts mixed text + emoji', () => {
+    // 'Hi 🎬!' = H(1) i(1) space(1) 🎬(1) !(1) = 5 graphemes
+    expect(graphemeLength('Hi 🎬!')).toBe(5);
+  });
 });
 
 // ============================================================
@@ -111,6 +161,16 @@ describe('countPrintableChars()', () => {
 
   it('multi-line cue counts all words', () => {
     expect(countPrintableChars('Hello\nbeautiful\nworld')).toBe('Hello beautiful world'.length);
+  });
+
+  it('counts emoji as 1 char each (surrogate pair 🎬 must not double-count)', () => {
+    // Without Intl.Segmenter fix, '🎬'.length === 2 would give 2 instead of 1
+    expect(countPrintableChars('🎬')).toBe(1);
+    expect(countPrintableChars('Scene 🎬 one')).toBe(11);
+  });
+
+  it('counts ZWJ family emoji as 1 for CPS purposes', () => {
+    expect(countPrintableChars('👨‍👩‍👦')).toBe(1);
   });
 });
 

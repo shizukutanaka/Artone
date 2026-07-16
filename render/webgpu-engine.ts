@@ -89,9 +89,10 @@ export class WebGPURenderEngine {
   private device: GPUDevice | null = null;
   private context: GPUCanvasContext | null = null;
 
-  // Cache
+  // Texture LRU cache — Map insertion order tracks MRU (newest = last entry).
+  // delete+set on hit moves an entry to the MRU end; keys().next() gives LRU
+  // (oldest = first entry) for eviction — all O(1), no cacheOrder array needed.
   private textureCache: Map<string, GPUTexture> = new Map();
-  private cacheOrder: string[] = [];
   private cacheHits = 0;
   private cacheMisses = 0;
   
@@ -126,6 +127,14 @@ export class WebGPURenderEngine {
   private deviceLost = false;
   private intentionalDestroy = false;
   private readonly contextListeners = new Set<(lost: boolean) => void>();
+  // Pre-allocated CPU staging buffers — reused every frame (avoids Float32Array alloc per call).
+  private readonly effectParamBuf    = new Float32Array(8);  // up to 8 numeric effect params
+  private readonly compositeParamBuf = new Float32Array(4);  // [opacity, blendMode, 0, 0]
+  // Pre-allocated GPU uniform buffers — created once after device init, persistent across
+  // frames. Eliminates device.createBuffer() per effect/layer per frame (render CLAUDE.md:
+  // resource creation in render loop 禁止). Destroyed implicitly by device.destroy().
+  private _effectParamGPUBuf: GPUBuffer | null = null;    // 32 bytes UNIFORM|COPY_DST
+  private _compositeParamGPUBuf: GPUBuffer | null = null; // 16 bytes UNIFORM|COPY_DST
 
   /** Subscribe to device lost/recovered transitions (UI can show a banner). */
   onContextChange(listener: (lost: boolean) => void): () => void {
@@ -157,7 +166,7 @@ export class WebGPURenderEngine {
     this.deviceLost = true;
     log.warn(`WebGPU device lost (${info?.reason ?? 'unknown'}): ${info?.message ?? ''} — attempting recovery`);
     this.notifyContext(true);
-    void this.attemptRecovery();
+    this.attemptRecovery().catch(e => log.error('WebGPU recovery failed', e));
   }
 
   /** Best-effort recovery: drop invalid resources and re-run initialize(). */
@@ -166,10 +175,11 @@ export class WebGPURenderEngine {
     // All GPU objects belonged to the lost device and are now invalid; drop refs
     // (do not call .destroy() — the device is gone). Textures re-upload next frame.
     this.textureCache.clear();
-    this.cacheOrder = [];
     this.pipelines.clear();
     this.shaders.clear();
     this.sampler = null;
+    this._effectParamGPUBuf = null;
+    this._compositeParamGPUBuf = null;
     this.device = null;
     const ok = await this.initialize(this.canvas);
     if (ok) {
@@ -189,6 +199,12 @@ export class WebGPURenderEngine {
       return false;
     }
 
+    // Reset in case this instance is being reused after a prior destroy()
+    // (destroy()->initialize(), rather than always constructing a fresh
+    // instance) — otherwise watchDeviceLost()'s guard below stays permanently
+    // tripped and a real device-lost event is never recovered.
+    this.intentionalDestroy = false;
+
     try {
       const adapter = await navigator.gpu.requestAdapter({
         powerPreference: this.config.preferLowPower ? 'low-power' : 'high-performance'
@@ -199,7 +215,11 @@ export class WebGPURenderEngine {
       this.canvas = canvas;
       // Watch for device loss so we can pause rendering and auto-recover.
       this.watchDeviceLost(this.device);
-      this.context = canvas.getContext('webgpu') as GPUCanvasContext;
+      this.context = canvas.getContext('webgpu') as GPUCanvasContext | null;
+      if (!this.context) {
+        log.error('WebGPU canvas context unavailable');
+        return false;
+      }
 
       const format = navigator.gpu.getPreferredCanvasFormat();
       this.context.configure({
@@ -216,6 +236,20 @@ export class WebGPURenderEngine {
 
       await this.compileShaders();
       await this.createPipelines();
+
+      // Pre-allocate persistent uniform buffers — one per param layout.
+      // These replace per-frame createBuffer() calls in applyEffect/compositeLayer.
+      // Destroy any previously allocated buffers to prevent leaks on re-initialization.
+      this._effectParamGPUBuf?.destroy();
+      this._effectParamGPUBuf = this.device.createBuffer({
+        size: 32,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+      });
+      this._compositeParamGPUBuf?.destroy();
+      this._compositeParamGPUBuf = this.device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+      });
 
       return true;
     } catch (e) {
@@ -487,24 +521,22 @@ export class WebGPURenderEngine {
   }
 
   private cacheTexture(id: string, texture: GPUTexture): void {
-    // Evict if full
+    // Evict LRU (first Map entry) while at capacity.
     while (this.textureCache.size >= this.config.maxTextureCache) {
-      const oldest = this.cacheOrder.shift();
-      if (oldest) {
-        this.textureCache.get(oldest)?.destroy();
-        this.textureCache.delete(oldest);
-      }
+      const { value: oldest, done } = this.textureCache.keys().next();
+      if (done) break;
+      this.textureCache.get(oldest)?.destroy();
+      this.textureCache.delete(oldest);
     }
-
     this.textureCache.set(id, texture);
-    this.cacheOrder.push(id);
   }
 
   private updateCacheOrder(id: string): void {
-    const idx = this.cacheOrder.indexOf(id);
-    if (idx > -1) {
-      this.cacheOrder.splice(idx, 1);
-      this.cacheOrder.push(id);
+    // Re-append to Map end so this entry is now the MRU.
+    const tex = this.textureCache.get(id);
+    if (tex !== undefined) {
+      this.textureCache.delete(id);
+      this.textureCache.set(id, tex);
     }
   }
 
@@ -513,7 +545,6 @@ export class WebGPURenderEngine {
       tex.destroy();
     }
     this.textureCache.clear();
-    this.cacheOrder = [];
     this.cacheHits = 0;
     this.cacheMisses = 0;
   }
@@ -543,8 +574,9 @@ export class WebGPURenderEngine {
     });
     clearPass.end();
 
-    // Frame-local GPU resources created during encoding; destroyed after submit.
-    const transientBuffers: GPUBuffer[] = [];
+    // Intermediate effect textures are tracked here and destroyed after submit.
+    // Param buffers are pre-allocated persistently (_effectParamGPUBuf,
+    // _compositeParamGPUBuf) so no transient buffer array is needed.
     const transientTextures: GPUTexture[] = [];
 
     // Render each layer
@@ -555,7 +587,7 @@ export class WebGPURenderEngine {
       let tex = layer.texture;
       for (const effect of layer.effects) {
         if (!effect.enabled) continue;
-        const out = await this.applyEffect(encoder, tex, effect, transientBuffers);
+        const out = await this.applyEffect(encoder, tex, effect);
         if (out) {
           transientTextures.push(out);
           tex = out;
@@ -563,14 +595,12 @@ export class WebGPURenderEngine {
       }
 
       // Composite
-      await this.compositeLayer(encoder, outputView, tex, layer, transientBuffers);
+      await this.compositeLayer(encoder, outputView, tex, layer);
     }
 
     this.device.queue.submit([encoder.finish()]);
 
-    // REGRESSION: destroy all frame-local GPU resources after submit.
-    // paramBuffers and intermediate effect textures were previously leaked every frame.
-    for (const buf of transientBuffers) buf.destroy();
+    // Destroy intermediate effect textures created during this frame.
     for (const t of transientTextures) t.destroy();
 
     // Update stats
@@ -581,7 +611,6 @@ export class WebGPURenderEngine {
     encoder: GPUCommandEncoder,
     input: GPUTexture,
     effect: RenderEffect,
-    transient: GPUBuffer[]
   ): Promise<GPUTexture | null> {
     if (!this.device) return null;
 
@@ -597,17 +626,15 @@ export class WebGPURenderEngine {
       usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING
     });
 
-    const paramData = new Float32Array(8);
+    const paramData = this.effectParamBuf;
+    paramData.fill(0);
     let i = 0;
     for (const v of Object.values(effect.params)) {
       if (typeof v === 'number') paramData[i++] = v;
     }
 
-    const paramBuffer = this.device.createBuffer({
-      size: 32,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-    transient.push(paramBuffer);
+    // Use persistent uniform buffer (pre-allocated in init) — avoids createBuffer per frame.
+    const paramBuffer = this._effectParamGPUBuf!;
     this.device.queue.writeBuffer(paramBuffer, 0, paramData);
 
     const bindGroup = this.device.createBindGroup({
@@ -636,18 +663,18 @@ export class WebGPURenderEngine {
     output: GPUTextureView,
     texture: GPUTexture,
     layer: RenderLayer,
-    transient: GPUBuffer[]
   ): Promise<void> {
     if (!this.device || !this.sampler) return;
 
     const pipeline = this.pipelines.get('composite') as GPURenderPipeline;
 
-    const paramData = new Float32Array([layer.opacity, this.blendModeToInt(layer.blend), 0, 0]);
-    const paramBuffer = this.device.createBuffer({
-      size: 16,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-    transient.push(paramBuffer);
+    const paramData = this.compositeParamBuf;
+    paramData[0] = layer.opacity;
+    paramData[1] = this.blendModeToInt(layer.blend);
+    paramData[2] = 0;
+    paramData[3] = 0;
+    // Use persistent uniform buffer (pre-allocated in init) — avoids createBuffer per frame.
+    const paramBuffer = this._compositeParamGPUBuf!;
     this.device.queue.writeBuffer(paramBuffer, 0, paramData);
 
     const bindGroup = this.device.createBindGroup({
@@ -729,6 +756,11 @@ export class WebGPURenderEngine {
     this.pipelines.clear();
     this.shaders.clear();
     this.sampler = null;
+    // Explicitly destroy pre-allocated param buffers before device.destroy().
+    this._effectParamGPUBuf?.destroy();
+    this._effectParamGPUBuf = null;
+    this._compositeParamGPUBuf?.destroy();
+    this._compositeParamGPUBuf = null;
     // Mark BEFORE destroy() so the device.lost handler treats the resulting
     // 'destroyed' resolution as intentional (no spurious recovery attempt).
     this.intentionalDestroy = true;

@@ -36,10 +36,18 @@ describe('LicenseAnalyzer — categorize', () => {
     expect(LicenseAnalyzer.categorize(null)).toBe('unknown');
   });
 
-  it('SPDX expression picks strongest (MIT OR GPL-3.0)', () => {
-    // OR 式では最も制約の強いものを採用
-    const cat = LicenseAnalyzer.categorize('MIT OR GPL-3.0');
-    expect(['strong-copyleft', 'permissive']).toContain(cat);
+  it('REGRESSION: pure OR expression picks the WEAKEST (most permissive) option, not the strongest', () => {
+    // Before fix: OR was tokenized identically to AND and the strongest
+    // category always won, so "MIT OR GPL-3.0" categorized as
+    // strong-copyleft. But OR is a licensee's CHOICE between alternatives --
+    // MIT-or-GPL-3.0 means the dependency is validly usable under MIT alone,
+    // so the correct category is 'permissive'.
+    expect(LicenseAnalyzer.categorize('MIT OR GPL-3.0')).toBe('permissive');
+    expect(LicenseAnalyzer.categorize('(MIT OR Apache-2.0)')).toBe('permissive');
+  });
+
+  it('AND combination still picks the strongest (every term must be satisfied)', () => {
+    expect(LicenseAnalyzer.categorize('MIT AND GPL-3.0')).toBe('strong-copyleft');
   });
 
   it('does not false-match substring (MITigation)', () => {
@@ -64,6 +72,13 @@ describe('LicenseAnalyzer — compatible', () => {
   it('unknown dependency license is flagged', () => {
     const result = LicenseAnalyzer.compatible('MIT', null);
     expect(result.compatible).toBe(false);
+  });
+
+  it('REGRESSION: a dual-licensed (MIT OR GPL-3.0) dependency is compatible with an MIT project', () => {
+    // Real-world dual-licensing pattern: the dependency may be used under
+    // MIT alone, so it must not be flagged as a GPL conflict.
+    const result = LicenseAnalyzer.compatible('MIT', 'MIT OR GPL-3.0');
+    expect(result.compatible).toBe(true);
   });
 });
 
@@ -117,10 +132,13 @@ describe('SBOMGenerator — CycloneDX 1.7', () => {
   });
 
   it('toSPDX emits PackageChecksum for sha256 hash', () => {
-    const b64 = Buffer.from('deadbeef', 'hex').toString('base64');
+    // Component.hash.value is hex (generate.ts's normalizeHash already
+    // converts npm's base64 integrity value at construction time) — do not
+    // construct it as base64 here, or the test exercises the opposite
+    // encoding from what the real pipeline produces.
     const hashed: Component = {
       name: 'react', version: '18.2.0', type: 'library', license: 'MIT',
-      hash: { algorithm: 'sha256', value: b64 },
+      hash: { algorithm: 'sha256', value: 'deadbeef' },
     };
     const bom = gen.generate(project, [hashed], []);
     const spdx = gen.toSPDX(bom);
@@ -128,25 +146,39 @@ describe('SBOMGenerator — CycloneDX 1.7', () => {
   });
 
   it('toSPDX emits PackageChecksum for sha1 hash with uppercase algo', () => {
-    const b64 = Buffer.from('cafebabe', 'hex').toString('base64');
     const hashed: Component = {
       name: 'lodash', version: '4.17.21', type: 'library', license: 'MIT',
-      hash: { algorithm: 'sha1', value: b64 },
+      hash: { algorithm: 'sha1', value: 'cafebabe' },
     };
     const bom = gen.generate(project, [hashed], []);
     const spdx = gen.toSPDX(bom);
     expect(spdx).toContain('PackageChecksum: SHA1: cafebabe');
   });
 
-  it('toSPDX skips PackageChecksum for invalid base64', () => {
+  it('REGRESSION: does not double-decode an already-hex hash value (was corrupting every checksum)', () => {
+    // Before fix: toSPDX ran c.hash.value through base64ToHex() again, even
+    // though normalizeHash() already produced hex. Hex digits happen to also
+    // be valid base64 characters, so this didn't throw — it silently decoded
+    // garbage bytes into every PackageChecksum line in the real npm-audit →
+    // SBOM pipeline.
     const hashed: Component = {
       name: 'react', version: '18.2.0', type: 'library', license: 'MIT',
-      hash: { algorithm: 'sha256', value: '!!!invalid-base64!!!' },
+      hash: { algorithm: 'sha512', value: 'DEADBEEFCAFEBABE1234567890ABCDEF' },
     };
     const bom = gen.generate(project, [hashed], []);
     const spdx = gen.toSPDX(bom);
-    // base64ToHex may or may not throw on malformed; key is it doesn't crash
+    expect(spdx).toContain('PackageChecksum: SHA512: deadbeefcafebabe1234567890abcdef');
+  });
+
+  it('toSPDX omits PackageChecksum for a non-hex hash value', () => {
+    const hashed: Component = {
+      name: 'react', version: '18.2.0', type: 'library', license: 'MIT',
+      hash: { algorithm: 'sha256', value: '!!!not-hex!!!' },
+    };
+    const bom = gen.generate(project, [hashed], []);
+    const spdx = gen.toSPDX(bom);
     expect(spdx).toContain('PackageName: react');
+    expect(spdx).not.toContain('PackageChecksum');
   });
 });
 
@@ -178,6 +210,35 @@ describe('VulnerabilityScanner', () => {
     const fresh = new VulnerabilityScanner();
     const reports = fresh.scan([{ name: 'lodash', version: '4.17.21', type: 'library', license: 'MIT' }]);
     expect(reports).toHaveLength(0);
+  });
+
+  it('REGRESSION: detects a version inside a hyphen range ("1.0.0 - 2.0.0")', () => {
+    // Before fix: a hyphen range fell through to the whitespace-based AND
+    // split, producing tokens ["1.0.0", "-", "2.0.0"] -- the literal "-"
+    // token can never equal any real version, so `parts.every(...)` was
+    // always false and the range matched NOTHING, for any version. A CVE
+    // declared this way would silently never be flagged -- a fail-open
+    // false negative in a vulnerability scanner.
+    const hyphenCve: CVE = {
+      id: 'CVE-2024-0002',
+      package: 'example-pkg',
+      affectedVersions: '1.0.0 - 2.0.0',
+      severity: 'critical',
+      description: 'Test hyphen range',
+    };
+    const fresh = new VulnerabilityScanner();
+    fresh.loadDatabase([hyphenCve]);
+    const inRange = fresh.scan([{ name: 'example-pkg', version: '1.5.0', type: 'library', license: 'MIT' }]);
+    expect(inRange).toHaveLength(1);
+    const belowRange = fresh.scan([{ name: 'example-pkg', version: '0.9.0', type: 'library', license: 'MIT' }]);
+    expect(belowRange).toHaveLength(0);
+    const aboveRange = fresh.scan([{ name: 'example-pkg', version: '2.0.1', type: 'library', license: 'MIT' }]);
+    expect(aboveRange).toHaveLength(0);
+    // Boundaries are inclusive.
+    const atLowerBound = fresh.scan([{ name: 'example-pkg', version: '1.0.0', type: 'library', license: 'MIT' }]);
+    expect(atLowerBound).toHaveLength(1);
+    const atUpperBound = fresh.scan([{ name: 'example-pkg', version: '2.0.0', type: 'library', license: 'MIT' }]);
+    expect(atUpperBound).toHaveLength(1);
   });
 });
 

@@ -13,6 +13,7 @@
  */
 
 import { createLogger } from '../app/logger';
+import { setHighQualityScaling } from '../app/utils';
 
 // ============================================================
 // Types
@@ -130,6 +131,30 @@ export async function getBestCodec(
 // Video Decoder Stream
 // ============================================================
 
+/**
+ * Wait until decoder.decodeQueueSize drops below maxQueue, or resolve
+ * immediately if already below it. Mirrors export/export-engine.ts's
+ * awaitEncoderQueueBelow (kept as a local, decoder-specific copy —
+ * core/ is the lower-level foundation export/ builds on, so it must not
+ * import from export/; VideoDecoder's queue-size property and 'dequeue'
+ * event are otherwise identical in shape to VideoEncoder's).
+ */
+async function awaitDecodeQueueBelow(
+  decoder: EventTarget & { decodeQueueSize: number },
+  maxQueue = 8,
+  timeoutMs = 10_000,
+): Promise<void> {
+  if (decoder.decodeQueueSize < maxQueue) return;
+  await new Promise<void>((resolve, reject) => {
+    const onDequeue = () => { clearTimeout(timer); resolve(); };
+    const timer = setTimeout(() => {
+      decoder.removeEventListener('dequeue', onDequeue);
+      reject(new Error(`awaitDecodeQueueBelow: no dequeue within ${timeoutMs}ms — decoder may have stalled`));
+    }, timeoutMs);
+    decoder.addEventListener('dequeue', onDequeue, { once: true });
+  });
+}
+
 export class VideoDecoderStream extends TransformStream<EncodedVideoChunk, DecodedFrame> {
   private decoder: VideoDecoder | null = null;
 
@@ -137,44 +162,41 @@ export class VideoDecoderStream extends TransformStream<EncodedVideoChunk, Decod
     // Definite assignment: start() sets `decoder` synchronously inside super().
     let decoder!: VideoDecoder;
     let frameIndex = 0;
-    const pendingResolves: Array<(frame: DecodedFrame) => void> = [];
 
     super({
       start: (controller) => {
         decoder = new VideoDecoder({
           output: (frame) => {
-            const resolve = pendingResolves.shift();
-            if (resolve) {
-              resolve({
-                frame,
-                index: frameIndex++,
-                timestamp: frame.timestamp,
-                duration: frame.duration ?? 0,
-                keyFrame: false
-              });
-            } else {
-              controller.enqueue({
-                frame,
-                index: frameIndex++,
-                timestamp: frame.timestamp,
-                duration: frame.duration ?? 0,
-                keyFrame: false
-              });
-            }
+            controller.enqueue({
+              frame,
+              index: frameIndex++,
+              timestamp: frame.timestamp,
+              duration: frame.duration ?? 0,
+              keyFrame: false
+            });
           },
           error: (e) => controller.error(e)
         });
         decoder.configure(config);
       },
 
-      transform: async (chunk, controller) => {
-        return new Promise((resolve) => {
-          pendingResolves.push((decodedFrame) => {
-            controller.enqueue(decodedFrame);
-            resolve();
-          });
-          decoder.decode(chunk);
-        });
+      // REGRESSION fix: transform() used to return a Promise that only
+      // resolved when the NEXT output frame arrived, assuming exactly one
+      // output per input chunk. TransformStream calls transform()
+      // strictly sequentially — it will not feed chunk N+1 until chunk N's
+      // promise resolves — but a decoder with B-frame reordering can
+      // buffer several input chunks before emitting any output at all, so
+      // this deadlocked real H.264/H.265 content. decode() is fire-and-
+      // forget; the `output` callback above enqueues frames independently
+      // of transform()'s cadence, exactly like VideoEncoderStream's
+      // transform below and export/export-engine.ts's already-corrected
+      // batch decode/encode methods (which explicitly gate on flush()
+      // rather than an input:output count match "which would otherwise
+      // hang forever"). Backpressure is still enforced via decodeQueueSize
+      // so a fast source doesn't queue unbounded decode() calls.
+      transform: async (chunk) => {
+        await awaitDecodeQueueBelow(decoder);
+        decoder.decode(chunk);
       },
 
       flush: async () => {
@@ -226,8 +248,14 @@ export class VideoEncoderStream extends TransformStream<VideoFrame, EncodedChunk
 
       transform: (frame, _controller) => {
         const isKeyFrame = frameCount % keyFrameInterval === 0;
-        encoder.encode(frame, { keyFrame: isKeyFrame });
-        frame.close();
+        try {
+          encoder.encode(frame, { keyFrame: isKeyFrame });
+        } finally {
+          // encoder.encode() can throw synchronously (e.g. encoder in
+          // 'closed' state) — without finally, frame.close() never runs
+          // and the VideoFrame leaks per core/CLAUDE.md's use-after-close rule.
+          frame.close();
+        }
         frameCount++;
       },
 
@@ -388,6 +416,15 @@ export class VideoPipeline {
       decoder.configure(config);
       decoder.decode(chunk);
       await decoder.flush();
+    } catch (e) {
+      // REGRESSION fix: flush() can reject AFTER output() already fired one
+      // or more times (e.g. a corrupted chunk following valid ones). Without
+      // this catch, the function re-threw before ever reaching the code
+      // below that closes/returns the accumulated frames -- they were simply
+      // discarded with no owner left to close them, leaking their GPU/media
+      // resources.
+      for (const f of frames) f.close();
+      throw e;
     } finally {
       closeQuietly(decoder);
     }
@@ -425,6 +462,11 @@ export class VideoPipeline {
         decoder.decode(chunk);
       }
       await decoder.flush();
+    } catch (e) {
+      // See decodeFrame: flush() rejecting after some outputs already fired
+      // must not leak those already-decoded frames.
+      for (const f of frames) f.close();
+      throw e;
     } finally {
       closeQuietly(decoder);
     }
@@ -571,10 +613,19 @@ export class VideoPipeline {
       frameStream = frameStream.pipeThrough(new FrameProcessorStream(processor));
     }
 
-    await frameStream
-      .pipeThrough(frameAdapter)
-      .pipeThrough(encoder)
-      .pipeTo(outputCollector);
+    try {
+      await frameStream
+        .pipeThrough(frameAdapter)
+        .pipeThrough(encoder)
+        .pipeTo(outputCollector);
+    } finally {
+      // flush() closes codecs on clean completion; close here guards error paths
+      // where flush() is never called (stream abort propagation skips it).
+      const dec = decoder.getDecoder();
+      const enc = encoder.getEncoder();
+      if (dec && dec.state !== 'closed') dec.close();
+      if (enc && enc.state !== 'closed') enc.close();
+    }
 
     return outputChunks;
   }
@@ -643,6 +694,19 @@ export class VideoPipeline {
       // its forward reference; that later frame is discarded by the selector.
       if (i < chunks.length) decoder.decode(chunks[i]);
       await decoder.flush();
+    } catch (e) {
+      // See decodeFrame: the output callback already closes every
+      // non-selected frame immediately, so at most one frame (`best`) is
+      // ever unclosed at a time. If flush() rejects after `best` was set,
+      // it would otherwise leak that one frame. Read into a const first --
+      // `best` is reassigned inside the output closure above, which defeats
+      // TypeScript's control-flow narrowing on the `let` binding directly.
+      // TypeScript narrows `best` to `null` here because its only reassignment
+      // (inside the `output` closure above) is invisible to control-flow
+      // analysis in this outer scope -- an explicit cast is needed since the
+      // compiler can't see what we know is possible at runtime.
+      (best as VideoFrame | null)?.close();
+      throw e;
     } finally {
       closeQuietly(decoder);
     }
@@ -672,6 +736,12 @@ export class VideoPipeline {
     // every thumbnail onto chunk 0 instead of spreading across the timeline.
     const interval = Math.max(1, Math.floor(chunks.length / count));
 
+    // Single canvas reused for all thumbnails (same dimensions) — createImageBitmap
+    // captures a snapshot of the current canvas state, so reuse is safe.
+    const thumbCanvas = new OffscreenCanvas(width, height);
+    const thumbCtx = thumbCanvas.getContext('2d')!;
+    setHighQualityScaling(thumbCtx);
+
     for (let i = 0; i < count; i++) {
       const chunkIndex = Math.min(i * interval, chunks.length - 1);
 
@@ -683,13 +753,9 @@ export class VideoPipeline {
       );
 
       if (frame) {
-        const canvas = new OffscreenCanvas(width, height);
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(frame, 0, 0, width, height);
+        thumbCtx.drawImage(frame, 0, 0, width, height);
         frame.close();
-
-        const thumbnail = await createImageBitmap(canvas);
-        thumbnails.push(thumbnail);
+        thumbnails.push(await createImageBitmap(thumbCanvas));
       }
     }
 
@@ -721,148 +787,177 @@ export class VideoPipeline {
 // ============================================================
 
 export const FrameProcessors = {
-  // Grayscale conversion
-  grayscale: async (frame: VideoFrame): Promise<VideoFrame> => {
-    const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-    // willReadFrequently: pixels are read back via getImageData below.
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+  // Grayscale conversion. A factory (called as `FrameProcessors.grayscale()`)
+  // like every other processor below, even though it takes no configuration
+  // params — REGRESSION fix: this used to be a plain FrameProcessor backed by
+  // a MODULE-LEVEL shared canvas/ctx (`_grayscaleCanvas`/`_grayscaleCtx`), the
+  // only processor here not using the lazy-init-per-closure pattern. Two
+  // concurrent grayscale() calls (e.g. two pipelines, or two overlapping
+  // pipeline stages, processing frames in parallel) raced on the same
+  // canvas/context: pipeline A's drawImage()/getImageData() could be
+  // clobbered by pipeline B's drawImage() before A finished reading pixels
+  // back, corrupting output. Each factory call now gets its own canvas.
+  grayscale: () => {
+    let canvas: OffscreenCanvas | null = null;
+    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    // new VideoFrame(canvas, …) snapshots pixel state synchronously, so the
+    // canvas can be reused immediately after the call returns.
+    return async (frame: VideoFrame): Promise<VideoFrame> => {
+      const w = frame.displayWidth, h = frame.displayHeight;
+      if (!canvas || canvas.width !== w || canvas.height !== h) {
+        canvas = new OffscreenCanvas(w, h);
+        // willReadFrequently: pixels are read back via getImageData below.
+        ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      }
+      ctx!.drawImage(frame, 0, 0);
+      const imageData = ctx!.getImageData(0, 0, w, h);
+      const data = imageData.data;
 
-    ctx.drawImage(frame, 0, 0);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    
-    for (let i = 0; i < data.length; i += 4) {
-      const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-      data[i] = data[i + 1] = data[i + 2] = gray;
-    }
-    
-    ctx.putImageData(imageData, 0, 0);
-    
-    return new VideoFrame(canvas, { timestamp: frame.timestamp });
+      for (let i = 0; i < data.length; i += 4) {
+        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+        data[i] = data[i + 1] = data[i + 2] = gray;
+      }
+
+      ctx!.putImageData(imageData, 0, 0);
+      return new VideoFrame(canvas, { timestamp: frame.timestamp });
+    };
   },
 
   // Brightness/Contrast adjustment
   brightnessContrast: (brightness: number, contrast: number) => {
+    // Lazy-init canvas per closure: each factory call gets its own canvas that
+    // is created on the first frame and resized only when dimensions change.
+    // new VideoFrame(canvas, …) snapshots pixel state, so canvas reuse is safe.
+    let canvas: OffscreenCanvas | null = null;
+    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    const filterStr = `brightness(${1 + brightness}) contrast(${1 + contrast})`;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      const ctx = canvas.getContext('2d')!;
-      
-      ctx.filter = `brightness(${1 + brightness}) contrast(${1 + contrast})`;
-      ctx.drawImage(frame, 0, 0);
-      
+      const { displayWidth: w, displayHeight: h } = frame;
+      if (!canvas || canvas.width !== w || canvas.height !== h) {
+        canvas = new OffscreenCanvas(w, h);
+        ctx = canvas.getContext('2d')!;
+        ctx.filter = filterStr;
+      }
+      ctx!.drawImage(frame, 0, 0);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
 
   // Resize
   resize: (width: number, height: number) => {
+    // Canvas dimensions are fixed by the factory args — create once, reuse every frame.
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d')!;
+    setHighQualityScaling(ctx);
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d')!;
-      
       ctx.drawImage(frame, 0, 0, width, height);
-      
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
 
   // Crop
   crop: (x: number, y: number, width: number, height: number) => {
+    // Output dimensions are fixed by factory args — create canvas once.
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d')!;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d')!;
-      
-      ctx.drawImage(
-        frame,
-        x, y, width, height,
-        0, 0, width, height
-      );
-      
+      ctx.drawImage(frame, x, y, width, height, 0, 0, width, height);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
 
   // Rotate
   rotate: (degrees: number) => {
+    // degrees is fixed by the factory arg, so trig constants are computed once.
+    const radians = degrees * Math.PI / 180;
+    const cos = Math.abs(Math.cos(radians));
+    const sin = Math.abs(Math.sin(radians));
+    // Lazy-grow canvas: output dimensions depend on input frame size. For a fixed
+    // source resolution (the common case) the canvas is created once and reused.
+    let canvas: OffscreenCanvas | null = null;
+    let ctx: OffscreenCanvasRenderingContext2D | null = null;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const radians = degrees * Math.PI / 180;
-      const cos = Math.abs(Math.cos(radians));
-      const sin = Math.abs(Math.sin(radians));
-      
-      const newWidth = frame.displayWidth * cos + frame.displayHeight * sin;
-      const newHeight = frame.displayWidth * sin + frame.displayHeight * cos;
-      
-      const canvas = new OffscreenCanvas(newWidth, newHeight);
-      const ctx = canvas.getContext('2d')!;
-      
-      ctx.translate(newWidth / 2, newHeight / 2);
-      ctx.rotate(radians);
-      ctx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
-      
+      const newWidth  = frame.displayWidth  * cos + frame.displayHeight * sin;
+      const newHeight = frame.displayWidth  * sin + frame.displayHeight * cos;
+      if (!canvas || canvas.width !== newWidth || canvas.height !== newHeight) {
+        canvas = new OffscreenCanvas(newWidth, newHeight);
+        ctx = canvas.getContext('2d')!;
+      }
+      ctx!.setTransform(1, 0, 0, 1, 0, 0); // reset before each frame
+      ctx!.translate(newWidth / 2, newHeight / 2);
+      ctx!.rotate(radians);
+      ctx!.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
 
   // Flip
   flip: (horizontal: boolean, vertical: boolean) => {
+    // Lazy-init canvas: created on first frame, reused when dimensions are stable.
+    // setTransform() replaces (not accumulates) the transform matrix, so no save/restore.
+    let canvas: OffscreenCanvas | null = null;
+    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    const sx = horizontal ? -1 : 1;
+    const sy = vertical   ? -1 : 1;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      const ctx = canvas.getContext('2d')!;
-      
-      ctx.translate(
-        horizontal ? frame.displayWidth : 0,
-        vertical ? frame.displayHeight : 0
-      );
-      ctx.scale(
-        horizontal ? -1 : 1,
-        vertical ? -1 : 1
-      );
-      ctx.drawImage(frame, 0, 0);
-      
+      const { displayWidth: w, displayHeight: h } = frame;
+      if (!canvas || canvas.width !== w || canvas.height !== h) {
+        canvas = new OffscreenCanvas(w, h);
+        ctx = canvas.getContext('2d')!;
+      }
+      ctx!.setTransform(sx, 0, 0, sy, horizontal ? w : 0, vertical ? h : 0);
+      ctx!.drawImage(frame, 0, 0);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
 
   // Watermark
   watermark: (text: string, position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' = 'bottom-right') => {
+    // Lazy-init canvas per closure: created on the first frame, resized only when
+    // frame dimensions change. Text metrics and context state set once at init.
+    let canvas: OffscreenCanvas | null = null;
+    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    let metricsWidth = 0;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
-      const canvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
-      const ctx = canvas.getContext('2d')!;
-      
-      ctx.drawImage(frame, 0, 0);
-      
-      ctx.font = '24px sans-serif';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.lineWidth = 2;
-      
-      const metrics = ctx.measureText(text);
+      const { displayWidth: w, displayHeight: h } = frame;
+      if (!canvas || canvas.width !== w || canvas.height !== h) {
+        canvas = new OffscreenCanvas(w, h);
+        ctx = canvas.getContext('2d')!;
+        ctx.font = '24px sans-serif';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.lineWidth = 2;
+        // measureText is computed once per resolution; text and font don't change.
+        metricsWidth = ctx.measureText(text).width;
+      }
+
+      ctx!.drawImage(frame, 0, 0);
+
       const padding = 20;
-      
       let x: number, y: number;
-      
+
       switch (position) {
         case 'top-left':
           x = padding;
           y = 24 + padding;
           break;
         case 'top-right':
-          x = frame.displayWidth - metrics.width - padding;
+          x = w - metricsWidth - padding;
           y = 24 + padding;
           break;
         case 'bottom-left':
           x = padding;
-          y = frame.displayHeight - padding;
+          y = h - padding;
           break;
         case 'bottom-right':
         default:
-          x = frame.displayWidth - metrics.width - padding;
-          y = frame.displayHeight - padding;
+          x = w - metricsWidth - padding;
+          y = h - padding;
       }
-      
-      ctx.strokeText(text, x, y);
-      ctx.fillText(text, x, y);
-      
+
+      ctx!.strokeText(text, x, y);
+      ctx!.fillText(text, x, y);
+
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   }

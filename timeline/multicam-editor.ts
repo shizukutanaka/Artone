@@ -292,17 +292,17 @@ export class MultiCamEditor {
   }
 
   private getActiveSwitch(time: number): SwitchPoint | null {
-    let active: SwitchPoint | null = null;
-    
-    for (const sp of this.state.switchPoints) {
-      if (sp.time <= time) {
-        active = sp;
-      } else {
-        break;
-      }
+    // Binary search: find the rightmost switch point with sp.time <= time.
+    // switchPoints is kept sorted by addSwitchPoint(). O(log N) vs O(N) —
+    // matters at 60fps since setPlayhead() calls this on every playhead tick.
+    const points = this.state.switchPoints;
+    let lo = 0, hi = points.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (points[mid].time <= time) lo = mid + 1;
+      else hi = mid;
     }
-    
-    return active;
+    return lo > 0 ? points[lo - 1] : null;
   }
 
   // ============================================================

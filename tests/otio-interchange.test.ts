@@ -218,6 +218,22 @@ describe('OTIOImporter — basic import', () => {
     expect(imported.videoTracks[0].clips[0].speedFactor).toBeCloseTo(2.0, 4);
   });
 
+  it('REGRESSION: speedFactor 0 (freeze frame) round-trips exactly, not Infinity', () => {
+    // Before fix: toOTIOClip computed time_scalar = 1/0 = Infinity.
+    // JSON.stringify silently turns Infinity into null, and the importer's
+    // 1/time_scalar reciprocal turned that null back into 1/null = Infinity
+    // -- corrupting a freeze-frame clip's speedFactor from 0 to Infinity.
+    const exp = new OTIOExporter();
+    const imp = new OTIOImporter();
+    const clip = makeClip({ speedFactor: 0 });
+    const json = exp.exportToString(makeTimeline({ videoTracks: [makeTrack({ clips: [clip] })] }));
+    expect(json).not.toContain('Infinity');
+    const parsed = JSON.parse(json);
+    expect(Number.isFinite(parsed.tracks.children[0].children[0].effects[0].time_scalar)).toBe(true);
+    const imported = imp.importFromString(json);
+    expect(imported.videoTracks[0].clips[0].speedFactor).toBe(0);
+  });
+
   it('restores markers with color conversion (RED → red)', () => {
     const exp = new OTIOExporter();
     const imp = new OTIOImporter();
@@ -285,6 +301,62 @@ describe('OTIOImporter.importWithReport', () => {
     const imp = new OTIOImporter();
     const { losses } = imp.importWithReport(json);
     expect(losses.some(l => l.field === 'media_reference')).toBe(true);
+  });
+
+  it('REGRESSION: reports a loss for GeneratorReference.1 media, same as MissingReference.1', () => {
+    // Before fix: GeneratorReference.1 (used by other NLEs for generated
+    // media such as color bars/slugs/solids) fell through to the same empty
+    // mediaUrl as MissingReference.1, but produced no loss entry -- silently
+    // swallowing the same practical data loss that the sibling case reports.
+    const json = JSON.stringify({
+      OTIO_SCHEMA: 'Timeline.1',
+      name: 'T',
+      global_start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 0 },
+      tracks: {
+        OTIO_SCHEMA: 'Stack.1', effects: [], markers: [], children: [{
+          OTIO_SCHEMA: 'Track.1', kind: 'Video', effects: [], markers: [], children: [{
+            OTIO_SCHEMA: 'Clip.2', name: 'Bars', effects: [], markers: [],
+            media_reference: { OTIO_SCHEMA: 'GeneratorReference.1' },
+            source_range: {
+              OTIO_SCHEMA: 'TimeRange.1',
+              start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 0 },
+              duration:   { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 30 },
+            },
+          }],
+        }],
+      },
+    });
+    const imp = new OTIOImporter();
+    const { losses } = imp.importWithReport(json);
+    expect(losses.some(l => l.field === 'media_reference' && l.otioType === 'GeneratorReference.1')).toBe(true);
+  });
+
+  it('REGRESSION: reports a loss for track-level markers instead of silently dropping them', () => {
+    // Before fix: fromOTIOTrackWithReport never read track.markers at all
+    // (only Stack-level and Clip-level markers were read) -- a third-party
+    // OTIO file (e.g. from DaVinci Resolve) placing a marker on the TRACK
+    // itself vanished completely, with no exception, warning, or loss entry.
+    const json = JSON.stringify({
+      OTIO_SCHEMA: 'Timeline.1',
+      name: 'T',
+      global_start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 0 },
+      tracks: {
+        OTIO_SCHEMA: 'Stack.1', effects: [], markers: [], children: [{
+          OTIO_SCHEMA: 'Track.1', kind: 'Video', effects: [], children: [],
+          markers: [{
+            OTIO_SCHEMA: 'Marker.2', name: 'Track Cue', color: 'RED',
+            marked_range: {
+              OTIO_SCHEMA: 'TimeRange.1',
+              start_time: { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 10 },
+              duration:   { OTIO_SCHEMA: 'RationalTime.1', rate: 30, value: 1 },
+            },
+          }],
+        }],
+      },
+    });
+    const imp = new OTIOImporter();
+    const { losses } = imp.importWithReport(json);
+    expect(losses.some(l => l.field === 'marker')).toBe(true);
   });
 
   it('reports foreign Effect loss for effects from other tools', () => {

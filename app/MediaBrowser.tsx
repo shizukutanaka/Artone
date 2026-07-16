@@ -154,9 +154,9 @@ const ItemView: React.FC<{
               fontFamily: 'ui-monospace, monospace'
             }}
           >
-            {item.width && item.height && `${item.width}×${item.height} · `}
+            {item.width && item.height ? `${item.width}×${item.height} · ` : null}
             {formatDuration(item.duration)}
-            {item.duration && ' · '}
+            {item.duration ? ' · ' : null}
             {formatSize(item.size)}
           </div>
           {badge && (
@@ -196,7 +196,7 @@ const ItemView: React.FC<{
             cursor: 'pointer',
             fontSize: 12
           }}
-          title="削除"
+          title={t('common.delete')}
         >
           ×
         </button>
@@ -209,7 +209,7 @@ const ItemView: React.FC<{
 // Main Browser
 // ============================================================
 
-export const MediaBrowser: React.FC<MediaBrowserProps> = ({
+export const MediaBrowser: React.FC<MediaBrowserProps> = React.memo(({
   items,
   onImport,
   onSelect,
@@ -219,15 +219,39 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = ({
   const [filter, setFilter] = useState<'all' | 'video' | 'audio' | 'image'>('all');
   const [search, setSearch] = useState('');
   const [dragOver, setDragOver] = useState(false);
+  // REGRESSION fix: dragOver used to be toggled directly from onDragOver
+  // (true) / onDragLeave (false). Since child elements (thumbnails, labels)
+  // sit inside this container, moving the pointer over one of them fires a
+  // dragleave on the parent immediately followed by a dragenter -- with no
+  // depth tracking this flickered the highlight on/off during an otherwise
+  // continuous drag. A counter (matching drop-zone.tsx's pattern) only
+  // clears the highlight once every nested enter has a matching leave.
+  const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filtered = items
     .filter((i) => filter === 'all' || i.type === filter)
     .filter((i) => !search || i.name.toLowerCase().includes(search.toLowerCase()));
 
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepth.current++;
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepth.current--;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setDragOver(false);
+    }
+  }, []);
+
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+      dragDepth.current = 0;
       setDragOver(false);
       const files = Array.from(e.dataTransfer.files);
       if (files.length > 0) onImport(files);
@@ -253,11 +277,9 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = ({
         background: dragOver ? color.brand + '10' : 'transparent',
         border: dragOver ? `2px dashed ${color.brand}` : 'none'
       }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragOver(true);
-      }}
-      onDragLeave={() => setDragOver(false)}
+      onDragEnter={handleDragEnter}
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {/* Toolbar */}
@@ -275,7 +297,7 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = ({
             fontWeight: 600
           }}
         >
-          + インポート
+          + {t('media.import')}
         </button>
         <input
           ref={fileInputRef}
@@ -360,11 +382,12 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = ({
           fontFamily: 'ui-monospace, monospace'
         }}
       >
-        {filtered.length} / {items.length} アイテム ·{' '}
+        {filtered.length} / {items.length} {t('media.itemsLabel')} ·{' '}
         {formatSize(items.reduce((s, i) => s + i.size, 0))}
       </div>
     </div>
   );
-};
+});
+MediaBrowser.displayName = 'MediaBrowser';
 
 export default MediaBrowser;

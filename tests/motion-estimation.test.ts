@@ -224,6 +224,18 @@ describe('lucasKanade', () => {
     const points: Vec2[] = [{ x: 10, y: 10 }, { x: 20, y: 20 }, { x: 30, y: 30 }];
     expect(lucasKanade(a, a, points).length).toBe(3);
   });
+
+  it('REGRESSION: valid reflects actual convergence, not hardcoded true', () => {
+    // Before fix: `valid: converged || true` was always true regardless of
+    // whether the iterative refinement actually converged.
+    const a = texturedImage(64, 64);
+    const b = shiftImageFrac(a, 8, 6); // large displacement, textured point
+    const flows = lucasKanade(a, b, [{ x: 32, y: 32 }], {
+      windowRadius: 4, maxIterations: 1, epsilon: 1e-6,
+    });
+    // One iteration can't converge to 1e-6 precision on an 8px shift.
+    expect(flows[0].valid).toBe(false);
+  });
 });
 
 // ─── selectFeatures ───────────────────────────────────────────────────────────

@@ -6,7 +6,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { KeyframeAnimator, type EasingType } from '../animation/keyframe-animator';
+import {
+  KeyframeAnimator, findPrevKeyframeIndex, type EasingType,
+  _getBezierCacheSizeForTesting,
+} from '../animation/keyframe-animator';
 
 // ============================================================
 // Easing function boundary conditions
@@ -454,5 +457,190 @@ describe('KeyframeAnimator — reverseKeyframes', () => {
     anim.addKeyframe(id2, 'y', 0.5, 42, 'linear');
     expect(() => anim.reverseKeyframes(id2, 'y')).not.toThrow();
     expect(anim.getValue(id2, 'y', 0.5)).toBeCloseTo(42, 1);
+  });
+});
+
+// ============================================================
+// findPrevKeyframeIndex — binary search (O(log n) keyframe lookup)
+// ============================================================
+
+/** Reference implementation: the original O(n) linear scan getValue() used. */
+function linearPrevIndex(times: number[], time: number): number {
+  let result = -1;
+  for (let i = 0; i < times.length; i++) {
+    if (times[i] <= time) result = i;
+    else break;
+  }
+  return result;
+}
+
+function kf(time: number) {
+  return { id: `k${time}`, time, value: time, easing: 'linear' as EasingType };
+}
+
+describe('findPrevKeyframeIndex', () => {
+  it('returns -1 for an empty array', () => {
+    expect(findPrevKeyframeIndex([], 5)).toBe(-1);
+  });
+
+  it('returns -1 when time precedes the first keyframe', () => {
+    expect(findPrevKeyframeIndex([kf(1), kf(2), kf(3)], 0.5)).toBe(-1);
+  });
+
+  it('returns the last index when time is past the last keyframe', () => {
+    expect(findPrevKeyframeIndex([kf(1), kf(2), kf(3)], 99)).toBe(2);
+  });
+
+  it('returns the exact index on a keyframe boundary', () => {
+    const ks = [kf(0), kf(1), kf(2), kf(3)];
+    expect(findPrevKeyframeIndex(ks, 0)).toBe(0);
+    expect(findPrevKeyframeIndex(ks, 2)).toBe(2);
+    expect(findPrevKeyframeIndex(ks, 3)).toBe(3);
+  });
+
+  it('returns the bracketing index for a time between keyframes', () => {
+    expect(findPrevKeyframeIndex([kf(0), kf(10), kf(20)], 5)).toBe(0);
+    expect(findPrevKeyframeIndex([kf(0), kf(10), kf(20)], 15)).toBe(1);
+  });
+
+  it('matches the linear-scan reference across randomized inputs', () => {
+    // Deterministic PRNG (no Math.random) so failures reproduce.
+    let seed = 1234567;
+    const rng = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+    for (let trial = 0; trial < 200; trial++) {
+      const n = 1 + Math.floor(rng() * 12);
+      const times: number[] = [];
+      let t = rng() * 2;
+      for (let i = 0; i < n; i++) { times.push(t); t += rng() * 3 + 0.01; }
+      const ks = times.map(kf);
+      // Probe a range that spans before-first through after-last, plus exact hits.
+      const probes = [times[0] - 1, times[n - 1] + 1, ...times, ...times.map((x) => x + 0.005)];
+      for (const probe of probes) {
+        expect(findPrevKeyframeIndex(ks, probe)).toBe(linearPrevIndex(times, probe));
+      }
+    }
+  });
+});
+
+describe('getValue equivalence after binary-search refactor', () => {
+  it('interpolates identically to a linear-scan reference over many keyframes', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+    const times = [0, 0.5, 1.0, 2.0, 3.5, 4.0, 7.0, 10.0];
+    times.forEach((tm, i) => anim.addKeyframe(id, 'x', tm, i * 10, 'linear'));
+
+    // Reference linear interpolation matching the old prev/next selection.
+    const ref = (time: number): number => {
+      const idx = linearPrevIndex(times, time);
+      if (idx === -1) return 0;        // before first → first value (index 0 → 0)
+      if (idx + 1 >= times.length) return idx * 10; // after last → prev value
+      const prevT = times[idx], nextT = times[idx + 1];
+      const lt = (time - prevT) / (nextT - prevT);
+      return idx * 10 + lt * ((idx + 1) * 10 - idx * 10);
+    };
+
+    for (let time = -0.5; time <= 11; time += 0.137) {
+      expect(anim.getValue(id, 'x', time)).toBeCloseTo(ref(time), 6);
+    }
+  });
+
+  it('handles exact boundary hits (t=0 segment start)', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addKeyframe(id, 'x', 0, 0, 'linear');
+    anim.addKeyframe(id, 'x', 1, 100, 'linear');
+    anim.addKeyframe(id, 'x', 2, 50, 'linear');
+    expect(anim.getValue(id, 'x', 1)).toBeCloseTo(100, 6); // exactly on middle kf
+    expect(anim.getValue(id, 'x', 0)).toBeCloseTo(0, 6);
+    expect(anim.getValue(id, 'x', 2)).toBeCloseTo(50, 6);
+  });
+});
+
+// ============================================================
+// Bezier closure cache bound
+// ============================================================
+
+describe('cubicBezier module cache — REGRESSION: bounded, not unbounded', () => {
+  it('does not grow past its cap while dragging distinct handle values', () => {
+    // Before fix: every distinct (outX,outY,inX,inY) combination cached a new
+    // Newton-Raphson closure forever. A user dragging a Bezier handle
+    // generates a new float value on nearly every pointermove, so this grew
+    // without bound over the course of an editing session.
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+
+    for (let i = 0; i < 700; i++) {
+      const outX = 0.0001 + i * 0.0009; // 700 distinct values -> 700 distinct cache keys
+      anim.addKeyframe(id, 'x', 0, 0, 'bezier', { outX, outY: 0.2 });
+      anim.addKeyframe(id, 'x', 1, 100, 'bezier', { inX: 0.5, inY: 0.5 });
+      anim.getValue(id, 'x', 0.5);
+    }
+
+    expect(_getBezierCacheSizeForTesting()).toBeLessThanOrEqual(500);
+  });
+});
+
+// ============================================================
+// animation.duration recalculation
+// ============================================================
+
+describe('animation.duration — REGRESSION: stays in sync after update/delete', () => {
+  it('updateKeyframe recomputes duration when a keyframe is dragged past the old ceiling', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addKeyframe(id, 'x', 0, 0, 'linear');
+    const kf = anim.addKeyframe(id, 'x', 5, 100, 'linear')!;
+    expect(anim.getAnimation(id)!.duration).toBe(5);
+
+    // Before fix: dragging this keyframe out to time=20 left duration at 5.
+    anim.updateKeyframe(id, 'x', kf.id, { time: 20 });
+    expect(anim.getAnimation(id)!.duration).toBe(20);
+  });
+
+  it('updateKeyframe lowers duration when the last keyframe is dragged earlier', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addKeyframe(id, 'x', 0, 0, 'linear');
+    const kf = anim.addKeyframe(id, 'x', 10, 100, 'linear')!;
+    expect(anim.getAnimation(id)!.duration).toBe(10);
+
+    anim.updateKeyframe(id, 'x', kf.id, { time: 3 });
+    expect(anim.getAnimation(id)!.duration).toBe(3);
+  });
+
+  it('deleteKeyframe recomputes duration when the ceiling-defining keyframe is removed', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addKeyframe(id, 'x', 0, 0, 'linear');
+    anim.addKeyframe(id, 'x', 4, 50, 'linear');
+    const last = anim.addKeyframe(id, 'x', 12, 100, 'linear')!;
+    expect(anim.getAnimation(id)!.duration).toBe(12);
+
+    // Before fix: deleting the last (ceiling-defining) keyframe left
+    // duration stuck at 12 even though no keyframe reaches that far anymore.
+    anim.deleteKeyframe(id, 'x', last.id);
+    expect(anim.getAnimation(id)!.duration).toBe(4);
+  });
+
+  it('duration accounts for the max across all properties, not just the last-edited one', () => {
+    const anim = new KeyframeAnimator();
+    const id = anim.createAnimation('t').id;
+    anim.addProperty(id, 'x', 0);
+    anim.addProperty(id, 'y', 0);
+    anim.addKeyframe(id, 'x', 8, 100, 'linear');
+    const yKf = anim.addKeyframe(id, 'y', 15, 100, 'linear')!;
+    expect(anim.getAnimation(id)!.duration).toBe(15);
+
+    anim.deleteKeyframe(id, 'y', yKf.id);
+    expect(anim.getAnimation(id)!.duration).toBe(8);
   });
 });

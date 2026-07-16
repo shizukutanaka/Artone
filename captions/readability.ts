@@ -14,6 +14,46 @@
  */
 
 // ============================================================
+// Grapheme utilities
+// ============================================================
+
+/** Lazy-initialized Intl.Segmenter for grapheme cluster counting. */
+let _graphemeSegmenter: Intl.Segmenter | null | undefined;
+
+/** Returns cached grapheme segmenter, or null if unavailable. */
+function getGraphemeSegmenter(): Intl.Segmenter | null {
+  if (_graphemeSegmenter !== undefined) return _graphemeSegmenter;
+  try {
+    _graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  } catch {
+    _graphemeSegmenter = null;
+  }
+  return _graphemeSegmenter;
+}
+
+/**
+ * Counts user-perceived characters (grapheme clusters) in `s`.
+ * Handles emoji (🎬), surrogate pairs, and ZWJ sequences (👨‍👩‍👦) correctly.
+ * Falls back to spread-array length when Intl.Segmenter is unavailable.
+ */
+export function graphemeLength(s: string): number {
+  const seg = getGraphemeSegmenter();
+  if (seg) return [...seg.segment(s)].length;
+  // Spread handles surrogate pairs but not ZWJ sequences (e.g. family emoji)
+  return [...s].length;
+}
+
+/**
+ * Splits `s` into an array of grapheme cluster strings.
+ * Used for hard-breaking long words at grapheme boundaries.
+ */
+function splitGraphemes(s: string): string[] {
+  const seg = getGraphemeSegmenter();
+  if (seg) return [...seg.segment(s)].map(({ segment }) => segment);
+  return [...s];
+}
+
+// ============================================================
 // Types
 // ============================================================
 
@@ -90,34 +130,39 @@ function resolveOptions(opts: ReadabilityOptions): Required<Omit<ReadabilityOpti
 // ============================================================
 
 /**
- * Wraps `text` into lines of at most `maxChars` printable characters.
+ * Wraps `text` into lines of at most `maxChars` grapheme clusters.
  * Splits on whitespace; does not break hyphenated tokens.
  * Returns array of line strings.
  */
 export function wrapWords(text: string, maxChars: number): string[] {
-  // maxChars ≤ 0 would make the hard-break loop below never shrink `remaining`
-  // (slice(0,0)='' and slice(0)=whole string) → infinite loop. Clamp to ≥ 1.
+  // maxChars ≤ 0 would make the hard-break loop below never shrink — clamp to ≥ 1.
   const maxC = Math.max(1, Math.floor(maxChars));
   const words = text.split(/\s+/).filter((w) => w.length > 0);
   const lines: string[] = [];
   let current = '';
+  let currentGLen = 0; // grapheme length of `current`
 
   for (const word of words) {
-    const candidate = current.length === 0 ? word : `${current} ${word}`;
-    if (candidate.length <= maxC) {
-      current = candidate;
+    const wordGLen = graphemeLength(word);
+    const candidateGLen = currentGLen === 0 ? wordGLen : currentGLen + 1 + wordGLen;
+    if (candidateGLen <= maxC) {
+      current = currentGLen === 0 ? word : `${current} ${word}`;
+      currentGLen = candidateGLen;
     } else {
       if (current.length > 0) lines.push(current);
-      // Long word wider than maxC: hard-break at maxC boundary
-      if (word.length > maxC) {
-        let remaining = word;
-        while (remaining.length > maxC) {
-          lines.push(remaining.slice(0, maxC));
-          remaining = remaining.slice(maxC);
+      // Long word wider than maxC: hard-break at grapheme cluster boundary
+      if (wordGLen > maxC) {
+        const graphemes = splitGraphemes(word);
+        let i = 0;
+        while (graphemes.length - i > maxC) {
+          lines.push(graphemes.slice(i, i + maxC).join(''));
+          i += maxC;
         }
-        current = remaining;
+        current = graphemes.slice(i).join('');
+        currentGLen = graphemes.length - i;
       } else {
         current = word;
+        currentGLen = wordGLen;
       }
     }
   }
@@ -129,9 +174,13 @@ export function wrapWords(text: string, maxChars: number): string[] {
 // CPS utilities
 // ============================================================
 
-/** Counts printable characters (strips '\n', trailing spaces). */
+/**
+ * Counts printable grapheme clusters (strips newlines, collapses whitespace).
+ * Uses Intl.Segmenter so emoji and ZWJ sequences count as one character each.
+ */
 export function countPrintableChars(text: string): number {
-  return text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim().length;
+  const clean = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+  return graphemeLength(clean);
 }
 
 /** Characters per second for a cue. Returns 0 for zero-duration cues. */
@@ -282,11 +331,12 @@ export function auditCues(
     }
 
     for (const line of lines) {
-      if (line.length > opts.maxCharsPerLine) {
+      const lineGLen = graphemeLength(line);
+      if (lineGLen > opts.maxCharsPerLine) {
         violations.push({
           index: i,
           type: 'line_length',
-          detail: `line "${line.slice(0, 20)}…" length ${line.length} > max ${opts.maxCharsPerLine}`,
+          detail: `line "${line.slice(0, 20)}…" length ${lineGLen} > max ${opts.maxCharsPerLine}`,
         });
         break; // one violation per cue for line_length
       }

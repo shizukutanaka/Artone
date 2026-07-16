@@ -220,14 +220,61 @@ function istft(
 
 // ─── Median filter ────────────────────────────────────────────────────────────
 
-/** In-place copy of `arr` for median work. */
-function medianOfSlice(buf: Float64Array, len: number): number {
-  // Partial selection sort for small kernels (kernel ≤ 31 typical)
-  const half = len >> 1;
-  // Simple insertion-based partial sort for correctness & simplicity
-  const scratch = buf.slice(0, len);
-  scratch.sort(); // Float64Array.prototype.sort is numeric
-  return scratch[half];
+/**
+ * Median of `buf[0..len)` via in-place quickselect.
+ *
+ * O(len) average (vs O(len·log len) for a full sort) and — crucially — zero
+ * allocation. The previous implementation called `buf.slice(0, len)` on every
+ * sample, copying `len` doubles and producing nFrames×nBins throwaway arrays
+ * per median-filter pass on a large spectrogram. Callers pass a scratch buffer
+ * they fully refill before each call, so reordering `buf[0..len)` in place is
+ * safe. Uses `<` directly (numeric, like Float64Array's default sort).
+ *
+ * Exported for direct unit testing against a sort-based reference.
+ *
+ * # AI generated (reviewed)
+ */
+export function medianOfSlice(buf: Float64Array, len: number): number {
+  const k = len >> 1;
+  let lo = 0;
+  let hi = len - 1;
+  while (lo < hi) {
+    const p = partitionForSelect(buf, lo, hi);
+    if (k === p) break;
+    if (k < p) hi = p - 1;
+    else lo = p + 1;
+  }
+  return buf[k];
+}
+
+/** Swap two elements of a Float64Array. */
+function swapF64(a: Float64Array, i: number, j: number): void {
+  const t = a[i];
+  a[i] = a[j];
+  a[j] = t;
+}
+
+/**
+ * Lomuto partition around a median-of-three pivot (robust against already-sorted
+ * input, which is common in spectrogram rows). Returns the pivot's final index.
+ */
+function partitionForSelect(a: Float64Array, lo: number, hi: number): number {
+  const mid = (lo + hi) >> 1;
+  // Median-of-three: order a[lo] <= a[mid] <= a[hi], then use a[mid] as pivot.
+  if (a[mid] < a[lo]) swapF64(a, lo, mid);
+  if (a[hi] < a[lo]) swapF64(a, lo, hi);
+  if (a[hi] < a[mid]) swapF64(a, mid, hi);
+  const pivot = a[mid];
+  swapF64(a, mid, hi); // park pivot at the end
+  let store = lo;
+  for (let i = lo; i < hi; i++) {
+    if (a[i] < pivot) {
+      swapF64(a, store, i);
+      store++;
+    }
+  }
+  swapF64(a, store, hi); // restore pivot to its sorted position
+  return store;
 }
 
 /**
@@ -241,11 +288,13 @@ function medianFilterTime(mag: Float64Array[], kernLen: number): Float64Array[] 
   const nFrames = mag.length;
   const nBins   = nFrames > 0 ? mag[0].length : 0;
   const half    = kernLen >> 1;
-  const result: Float64Array[] = [];
+  // One flat allocation + subarray views avoids nFrames separate new Float64Array(nBins) calls.
+  const flat    = new Float64Array(nFrames * nBins);
+  const result  = Array.from({length: nFrames}, (_, f) => flat.subarray(f * nBins, (f + 1) * nBins));
   const scratch = new Float64Array(kernLen);
 
   for (let f = 0; f < nFrames; f++) {
-    const row = new Float64Array(nBins);
+    const row = result[f];
     for (let b = 0; b < nBins; b++) {
       for (let k = 0; k < kernLen; k++) {
         const fi = Math.max(0, Math.min(nFrames - 1, f - half + k));
@@ -253,7 +302,6 @@ function medianFilterTime(mag: Float64Array[], kernLen: number): Float64Array[] 
       }
       row[b] = medianOfSlice(scratch, kernLen);
     }
-    result.push(row);
   }
   return result;
 }
@@ -268,11 +316,12 @@ function medianFilterFreq(mag: Float64Array[], kernLen: number): Float64Array[] 
   const nFrames = mag.length;
   const nBins   = nFrames > 0 ? mag[0].length : 0;
   const half    = kernLen >> 1;
-  const result: Float64Array[] = [];
+  const flat    = new Float64Array(nFrames * nBins);
+  const result  = Array.from({length: nFrames}, (_, f) => flat.subarray(f * nBins, (f + 1) * nBins));
   const scratch = new Float64Array(kernLen);
 
   for (let f = 0; f < nFrames; f++) {
-    const row = new Float64Array(nBins);
+    const row = result[f];
     for (let b = 0; b < nBins; b++) {
       for (let k = 0; k < kernLen; k++) {
         const bi = Math.max(0, Math.min(nBins - 1, b - half + k));
@@ -280,7 +329,6 @@ function medianFilterFreq(mag: Float64Array[], kernLen: number): Float64Array[] 
       }
       row[b] = medianOfSlice(scratch, kernLen);
     }
-    result.push(row);
   }
   return result;
 }
@@ -302,20 +350,26 @@ function wienerMasks(
 ): { hRe: Float64Array[]; hIm: Float64Array[]; pRe: Float64Array[]; pIm: Float64Array[] } {
   const nFrames = H.length;
   const nBins   = nFrames > 0 ? H[0].length : 0;
-  const hRe: Float64Array[] = [];
-  const hIm: Float64Array[] = [];
-  const pRe: Float64Array[] = [];
-  const pIm: Float64Array[] = [];
+  // Four flat allocations + subarray views instead of 4×nFrames separate Float64Array(nBins) calls.
+  const flatHRe = new Float64Array(nFrames * nBins);
+  const flatHIm = new Float64Array(nFrames * nBins);
+  const flatPRe = new Float64Array(nFrames * nBins);
+  const flatPIm = new Float64Array(nFrames * nBins);
+  const mkViews = (flat: Float64Array): Float64Array[] =>
+    Array.from({length: nFrames}, (_, f) => flat.subarray(f * nBins, (f + 1) * nBins));
+  const hRe = mkViews(flatHRe);
+  const hIm = mkViews(flatHIm);
+  const pRe = mkViews(flatPRe);
+  const pIm = mkViews(flatPIm);
   const EPS = 1e-10;
+  const useSq = p === 2;
 
   for (let f = 0; f < nFrames; f++) {
-    const hrRow = new Float64Array(nBins);
-    const hiRow = new Float64Array(nBins);
-    const prRow = new Float64Array(nBins);
-    const piRow = new Float64Array(nBins);
+    const hrRow = hRe[f], hiRow = hIm[f], prRow = pRe[f], piRow = pIm[f];
     for (let b = 0; b < nBins; b++) {
-      const hp = Math.pow(H[f][b], p);
-      const pp = Math.pow(P[f][b], p);
+      const h = H[f][b], pv = P[f][b];
+      const hp = useSq ? h * h : (h > 0 ? Math.exp(p * Math.log(h)) : 0);
+      const pp = useSq ? pv * pv : (pv > 0 ? Math.exp(p * Math.log(pv)) : 0);
       const denom = hp + pp + EPS;
       const mH = hp / denom;
       const mP = pp / denom;
@@ -324,8 +378,6 @@ function wienerMasks(
       prRow[b] = mP * re[f][b];
       piRow[b] = mP * im[f][b];
     }
-    hRe.push(hrRow); hIm.push(hiRow);
-    pRe.push(prRow); pIm.push(piRow);
   }
   return { hRe, hIm, pRe, pIm };
 }
@@ -406,36 +458,51 @@ export function createHPSSProcessor(opts: HPSSOptions = {}): {
   const percFilterLen = opts.percussiveFilterLen ?? 17;
   const maskPower     = opts.maskPower          ?? 2;
 
-  let buffer: number[] = [];
+  // Float32Array ring buffer replaces number[] to avoid per-sample push() overhead.
+  // Capacity doubles when full (amortised O(1) per sample), same as Array growth.
+  let bufData = new Float32Array(winSize * 4);
+  let bufLen = 0;
+
+  function ensureCapacity(needed: number): void {
+    if (needed <= bufData.length) return;
+    const next = new Float32Array(needed * 2);
+    next.set(bufData.subarray(0, bufLen));
+    bufData = next;
+  }
 
   function processBuffer(): HPSSResult | null {
-    if (buffer.length < winSize) return null;
+    if (bufLen < winSize) return null;
     // Process all complete hops
-    const totalFrames = Math.floor((buffer.length - winSize) / hopSize) + 1;
+    const totalFrames = Math.floor((bufLen - winSize) / hopSize) + 1;
     const usedSamples = (totalFrames - 1) * hopSize + winSize;
-    const chunk = new Float32Array(buffer.slice(0, usedSamples));
+    const chunk = bufData.slice(0, usedSamples);
     const result = separateHPSS(chunk, { windowSize: winSize, hopSize, harmonicFilterLen: harmFilterLen, percussiveFilterLen: percFilterLen, maskPower });
-    // Keep leftover
-    buffer = buffer.slice(usedSamples - (winSize - hopSize));
+    // Keep leftover: shift the tail to the front in-place
+    const keepFrom = usedSamples - (winSize - hopSize);
+    const newLen = bufLen - keepFrom;
+    bufData.copyWithin(0, keepFrom, bufLen);
+    bufLen = newLen;
     return result;
   }
 
   return {
     push(block: Float32Array): HPSSResult | null {
-      for (let i = 0; i < block.length; i++) buffer.push(block[i]);
+      ensureCapacity(bufLen + block.length);
+      bufData.set(block, bufLen);
+      bufLen += block.length;
       return processBuffer();
     },
     flush(): HPSSResult {
-      if (buffer.length === 0) {
+      if (bufLen === 0) {
         const empty = new Float32Array(0);
         return { harmonic: empty, percussive: empty, residual: empty };
       }
-      const chunk = new Float32Array(buffer);
-      buffer = [];
+      const chunk = bufData.slice(0, bufLen);
+      bufLen = 0;
       return separateHPSS(chunk, { windowSize: winSize, hopSize, harmonicFilterLen: harmFilterLen, percussiveFilterLen: percFilterLen, maskPower });
     },
     reset(): void {
-      buffer = [];
+      bufLen = 0;
     },
   };
 }

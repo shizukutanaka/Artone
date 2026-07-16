@@ -124,15 +124,17 @@ const DOWNMIX_51_TO_STEREO: Record<ChannelLabel, [number, number]> = {
 /**
  * 各チャンネルラベルに対応する DownmixConfig のカテゴリゲインを返す。
  * L/R は基準 (1.0)、C は centerGain、サラウンド/ハイトは surroundGain、LFE は lfeGain。
- * config 未指定時は 1.0。
+ * config 未指定時は L/R/C/サラウンドは 1.0。LFE は ITU-R BS.775 準拠の Lo/Ro
+ * ダウンミックスがデフォルトで LFE を除外するため 0 (config.lfeGain で明示的に
+ * 上書き可能 — 一部の非標準実装は LFE をステレオへ折り込む)。
  */
 export function downmixGainForLabel(label: ChannelLabel, config?: Partial<DownmixConfig>): number {
-  if (!config) return 1;
+  if (!config) return label === 'LFE' ? 0 : 1;
   switch (label) {
     case 'C':
       return config.centerGain ?? 1;
     case 'LFE':
-      return config.lfeGain ?? 1;
+      return config.lfeGain ?? 0;
     case 'Ls': case 'Rs': case 'Lrs': case 'Rrs':
     case 'Ltf': case 'Rtf': case 'Ltr': case 'Rtr':
       return config.surroundGain ?? 1;
@@ -151,6 +153,14 @@ export class SurroundAudioEngine {
   private channels: Map<string, SurroundChannel> = new Map();
   private channelNodes: Map<string, GainNode> = new Map();
   private masterNode: GainNode;
+  /**
+   * Transient downmix-only GainNodes (leftGain/rightGain/leftSplit/rightSplit)
+   * created by updateRouting()'s stereo-downmix branch. Unlike channelNodes
+   * these are rebuilt from scratch on every call, so without tracking and
+   * disconnecting them here each format/monitor-format change leaked the
+   * previous call's nodes — they stayed connected into the graph forever.
+   */
+  private downmixNodes: AudioNode[] = [];
   private lfeFilter: BiquadFilterNode;
   private monitorFormat: SurroundFormat = 'stereo';
   private listeners: Set<() => void> = new Set();
@@ -308,7 +318,7 @@ export class SurroundAudioEngine {
       let gain = Math.max(0, 1 - (distance / spreadFactor));
       
       // Apply power panning
-      gain = Math.pow(gain, 0.5);
+      gain = Math.sqrt(gain);
       
       // Special handling for LFE
       if (channel.label === 'LFE') {
@@ -325,9 +335,19 @@ export class SurroundAudioEngine {
     }
     
     // Normalize gains
-    const total = Array.from(gains.values()).reduce((sum, g) => sum + g * g, 0);
+    // REGRESSION fix: LFE's gain (panner.lfeAmount) is unrelated to spatial
+    // position, but was still included in the power sum used to derive the
+    // normalizer -- so turning the LFE send up or down changed the relative
+    // loudness of every OTHER (spatial bed) channel even though nothing
+    // about the panning position changed. Exclude it from the sum too,
+    // matching how it's already excluded from the loop that applies the
+    // normalizer below.
+    let total = 0;
+    for (const [label, gain] of gains) {
+      if (label !== 'LFE') total += gain * gain;
+    }
     const normalizer = total > 0 ? 1 / Math.sqrt(total) : 1;
-    
+
     for (const [label, gain] of gains) {
       if (label !== 'LFE') {
         gains.set(label, gain * normalizer);
@@ -356,6 +376,12 @@ export class SurroundAudioEngine {
     for (const node of this.channelNodes.values()) {
       node.disconnect();
     }
+    // Disconnect and drop any downmix nodes from a prior call — these are
+    // rebuilt from scratch below and were never released otherwise.
+    for (const node of this.downmixNodes) {
+      node.disconnect();
+    }
+    this.downmixNodes = [];
 
     if (this.format === this.monitorFormat) {
       // Direct connection
@@ -366,19 +392,25 @@ export class SurroundAudioEngine {
       // Downmix to stereo
       const leftGain = this.audioContext.createGain();
       const rightGain = this.audioContext.createGain();
-      
+      this.downmixNodes.push(leftGain, rightGain);
+
       leftGain.connect(this.masterNode);
       rightGain.connect(this.masterNode);
-      
+
       for (const [label, node] of this.channelNodes) {
+        // ITU-R BS.775 Lo/Ro stereo downmix excludes LFE by default (unlike
+        // the offline path via createDownmix(), this live-monitoring routing
+        // has no DownmixConfig to opt back in, so LFE is always excluded).
+        if (label === 'LFE') continue;
         const matrix = DOWNMIX_51_TO_STEREO[label as ChannelLabel];
         if (matrix) {
           const leftSplit = this.audioContext.createGain();
           const rightSplit = this.audioContext.createGain();
-          
+          this.downmixNodes.push(leftSplit, rightSplit);
+
           leftSplit.gain.value = matrix[0];
           rightSplit.gain.value = matrix[1];
-          
+
           node.connect(leftSplit);
           node.connect(rightSplit);
           leftSplit.connect(leftGain);

@@ -211,11 +211,23 @@ export function convertFrameCount(
 ): number {
   // Exact: count * (src.den / src.num) * (tgt.num / tgt.den)
   //      = count * src.den * tgt.num / (src.num * tgt.den)
-  // Use BigInt to avoid precision loss for large counts
-  if (Number.isInteger(count) && count < 2 ** 50) {
-    const num = count * sourceRate.den * targetRate.num;
-    const den = sourceRate.num * targetRate.den;
-    return Math.floor(num / den);
+  //
+  // REGRESSION fix: this comment always claimed BigInt was used "to avoid
+  // precision loss for large counts", but the arithmetic below it was plain
+  // `number` multiplication -- never actually BigInt. The `count < 2**50`
+  // guard didn't help either: the intermediate product `count *
+  // sourceRate.den * targetRate.num` can exceed Number.MAX_SAFE_INTEGER
+  // (2**53) well before `count` itself reaches 2**50, once multiplied by
+  // the rate numerator/denominator factors, silently producing an off-by-one
+  // (or more) result near that boundary. Use real BigInt arithmetic so the
+  // numerator/denominator product is always computed exactly regardless of
+  // magnitude.
+  if (Number.isInteger(count)) {
+    const num = BigInt(count) * BigInt(sourceRate.den) * BigInt(targetRate.num);
+    const den = BigInt(sourceRate.num) * BigInt(targetRate.den);
+    // BigInt division truncates toward zero, which equals floor() for the
+    // non-negative counts/rates this function is defined over.
+    return Number(num / den);
   }
   return Math.floor(count * framesToSeconds(1, sourceRate) * targetRate.num / targetRate.den);
 }

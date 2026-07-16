@@ -88,8 +88,10 @@ export interface SceneDetector {
 export function computeLuminanceHistogram(
   data: Uint8ClampedArray,
   bins = 16,
+  out?: Float32Array, // optional pre-allocated buffer; caller must ensure length >= bins
 ): Float32Array {
-  const hist = new Float32Array(bins);
+  const hist = out ?? new Float32Array(bins);
+  if (out) hist.fill(0); // zero reused buffer before accumulating
   const pixelCount = Math.floor(data.length / 4);
   if (pixelCount === 0) return hist;
 
@@ -196,22 +198,27 @@ export function createSceneDetector(config: SceneDetectorConfig = {}): SceneDete
   const method          = config.method          ?? 'chi-square';
   const minDuration     = config.minSceneDuration ?? 8;
 
-  let prevHistogram: Float32Array | null = null;
+  // Pre-allocated histogram buffers swapped each frame to avoid per-frame allocation.
+  let currBuf = new Float32Array(bins);
+  let prevBuf = new Float32Array(bins);
+  let hasPrev = false;
   let count = 0;
   let lastCutFrame = -minDuration;   // so first cut is always eligible
 
   function addFrame(data: Uint8ClampedArray, _width: number, _height: number): SceneCut | null {
-    const hist = computeLuminanceHistogram(data, bins);
-    const frameIndex = count;
-    count += 1;
+    computeLuminanceHistogram(data, bins, currBuf);
+    const frameIndex = count++;
 
-    if (prevHistogram === null) {
-      prevHistogram = hist;
+    if (!hasPrev) {
+      // Swap so currBuf becomes prevBuf for the next frame.
+      const tmp = currBuf; currBuf = prevBuf; prevBuf = tmp;
+      hasPrev = true;
       return null;
     }
 
-    const distance = resolvedDistance(prevHistogram, hist, method);
-    prevHistogram = hist;
+    const distance = resolvedDistance(prevBuf, currBuf, method);
+    // Swap buffers: current becomes previous for next frame.
+    const tmp = currBuf; currBuf = prevBuf; prevBuf = tmp;
 
     const isCut = distance >= threshold && (frameIndex - lastCutFrame) >= minDuration;
     if (isCut) {
@@ -226,7 +233,7 @@ export function createSceneDetector(config: SceneDetectorConfig = {}): SceneDete
   }
 
   function reset(): void {
-    prevHistogram = null;
+    hasPrev = false;
     count = 0;
     lastCutFrame = -minDuration;
   }

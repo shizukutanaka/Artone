@@ -264,6 +264,34 @@ describe('estimateNoise', () => {
     expect(result.sigma).toBeCloseTo(mean, 8);
   });
 
+  it('REGRESSION: estimate is within the right order of magnitude of the true sigma (not divided by N twice)', () => {
+    // A prior bug divided by N (interior pixel count) twice, underestimating
+    // sigma by a factor of N — e.g. true sigma=15 on a 1920x1080 image came
+    // out as ~0.0000054. Use a large-enough image for the estimator's bias
+    // to be small, and assert the estimate lands within 50% of the true sigma.
+    const trueSigma = 20;
+    const src = makeSyntheticNoisyImage(64, 64, [128, 128, 128, 255], trueSigma, 7);
+    const result = estimateNoise(src, 64, 64);
+    expect(result.sigma).toBeGreaterThan(trueSigma * 0.5);
+    expect(result.sigma).toBeLessThan(trueSigma * 1.5);
+  });
+
+  it('REGRESSION: estimate matches true sigma within 10% (was ~25% low from a wrong-kernel/normalization mismatch)', () => {
+    // Before fix: the 5-tap "plus" Laplacian (4c-l-r-u-d, sum-of-squared-
+    // coefficients=20) was used with the true 9-tap Immerkaer kernel's
+    // normalization constant (6=sqrt(36)), so every estimate came out at
+    // sqrt(20)/6 ≈ 0.745x the true sigma — a systematic ~25% underestimate
+    // that the ±50% tolerance above doesn't catch. Reading all 4 diagonal
+    // neighbors (the full 3×3 kernel) fixes this without touching the
+    // constant, since the true kernel's coefficients already sum-of-squares
+    // to exactly 36.
+    const trueSigma = 20;
+    const src = makeSyntheticNoisyImage(64, 64, [128, 128, 128, 255], trueSigma, 7);
+    const result = estimateNoise(src, 64, 64);
+    expect(result.sigma).toBeGreaterThan(trueSigma * 0.9);
+    expect(result.sigma).toBeLessThan(trueSigma * 1.1);
+  });
+
   it('2×2 image (N=0 interior pixels) returns sigma=0 not NaN (0*Infinity guard)', () => {
     // A 2×2 image has no interior pixels; scaleFactor was Infinity, channelSums=0 → NaN.
     const src = solidImage(2, 2, [128, 128, 128, 255]);

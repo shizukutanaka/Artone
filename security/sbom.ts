@@ -18,6 +18,8 @@ export interface Component {
   purl?: string; // package URL
   license: string | null;
   supplier?: string;
+  /** `value` is hex-encoded (the only producer, generate.ts's normalizeHash,
+   *  already converts npm's base64 integrity value to hex). */
   hash?: { algorithm: string; value: string };
   homepage?: string;
   description?: string;
@@ -86,13 +88,6 @@ const LICENSE_CATEGORIES: Record<string, LicenseCategory> = {
 export class LicenseAnalyzer {
   static categorize(license: string | null): LicenseCategory {
     if (!license) return 'unknown';
-    // 正確マッチ: SPDX identifier の単語境界で判定
-    const tokens = license
-      .split(/\s+(?:OR|AND|WITH)\s+|[(),]/i)
-      .map((t) => t.trim().replace(/^["']|["']$/g, ''))
-      .filter(Boolean);
-
-    let strongest: LicenseCategory = 'permissive';
     const order: LicenseCategory[] = [
       'unknown',
       'permissive',
@@ -100,7 +95,37 @@ export class LicenseAnalyzer {
       'strong-copyleft',
       'proprietary',
     ];
+    const stripped = license.replace(/[(),]/g, ' ').trim();
 
+    // REGRESSION fix: a pure SPDX "OR" expression (e.g. "MIT OR GPL-3.0") is
+    // a dual/multi-license CHOICE -- the licensee may pick whichever term
+    // they prefer, so the correct compatibility category is the WEAKEST
+    // (most permissive) option available, not the strongest. The previous
+    // code treated OR identically to AND and always took the strongest
+    // term, so a project under MIT would be wrongly flagged as conflicting
+    // with a dependency that is *also* available under MIT (just offered
+    // alongside GPL as an alternative). AND/WITH combinations (every term
+    // must be satisfied simultaneously) and anything with mixed/nested
+    // structure keep the previous strongest-wins behavior, which is the
+    // correct (conservative) answer for those cases.
+    if (/\bOR\b/i.test(stripped) && !/\bAND\b/i.test(stripped)) {
+      const orTokens = stripped
+        .split(/\s+OR\s+/i)
+        .map((t) => t.trim().replace(/^["']|["']$/g, ''))
+        .filter(Boolean);
+      const cats = orTokens.map((t) => LICENSE_CATEGORIES[t]).filter((c): c is LicenseCategory => !!c);
+      if (cats.length === 0) return 'unknown';
+      return cats.reduce((weakest, c) => (order.indexOf(c) < order.indexOf(weakest) ? c : weakest));
+    }
+
+    // 正確マッチ: SPDX identifier の単語境界で判定 (comma-separated lists are
+    // also treated as AND-equivalent, matching the original tokenization)
+    const tokens = license
+      .split(/\s+(?:OR|AND|WITH)\s+|[(),]/i)
+      .map((t) => t.trim().replace(/^["']|["']$/g, ''))
+      .filter(Boolean);
+
+    let strongest: LicenseCategory = 'permissive';
     let matched = false;
     for (const tok of tokens) {
       const cat = LICENSE_CATEGORIES[tok];
@@ -199,6 +224,21 @@ export class VulnerabilityScanner {
     // OR 結合 ("1.x || 2.x")
     if (trimmed.includes('||')) {
       return trimmed.split('||').some((sub) => this.versionMatches(version, sub.trim()));
+    }
+
+    // ハイフン範囲 ("1.0.0 - 2.0.0" → inclusive range, node-semver syntax)
+    // REGRESSION fix: without this branch, the range fell through to the AND
+    // split below, splitting into e.g. ["1.0.0", "-", "2.0.0"] and requiring
+    // ALL THREE tokens (including the literal "-") to independently match --
+    // "-" can never equal any real version, so parts.every(...) was always
+    // false. The range therefore matched NO version, for any input: a
+    // silent, fail-open false negative in a vulnerability scanner (a CVE
+    // declared with a hyphen range would never be flagged, even for a
+    // version squarely inside it).
+    const hyphenMatch = trimmed.match(/^(\S+)\s+-\s+(\S+)$/);
+    if (hyphenMatch) {
+      const [, lo, hi] = hyphenMatch;
+      return this.compareVersions(version, lo) >= 0 && this.compareVersions(version, hi) <= 0;
     }
 
     // AND 結合 (">=1.0.0 <2.0.0")
@@ -326,9 +366,13 @@ export class SBOMGenerator {
       lines.push(`PackageLicenseConcluded: ${c.license ?? 'NOASSERTION'}`);
       lines.push(`PackageLicenseDeclared: ${c.license ?? 'NOASSERTION'}`);
       lines.push(`PackageDownloadLocation: ${c.homepage ?? 'NOASSERTION'}`);
-      if (c.hash) {
+      if (c.hash && /^[0-9a-f]+$/i.test(c.hash.value)) {
         // SPDX 仕様: PackageChecksum: <ALGO>: <hex>
-        // npm integrity は base64 なので hex 変換
+        // c.hash.value is already hex (generate.ts's normalizeHash converts
+        // npm's base64 integrity value once, at construction time) — do not
+        // re-decode it here. Re-running it through a base64→hex conversion
+        // silently produced a corrupt checksum, since hex digits happen to
+        // also be valid base64 characters (no throw, just wrong bytes).
         const algoMap: Record<string, string> = {
           sha1: 'SHA1',
           sha256: 'SHA256',
@@ -337,36 +381,12 @@ export class SBOMGenerator {
           md5: 'MD5',
         };
         const spdxAlgo = algoMap[c.hash.algorithm.toLowerCase()] ?? c.hash.algorithm.toUpperCase();
-        const hexValue = base64ToHex(c.hash.value);
-        if (hexValue) {
-          lines.push(`PackageChecksum: ${spdxAlgo}: ${hexValue}`);
-        }
+        lines.push(`PackageChecksum: ${spdxAlgo}: ${c.hash.value.toLowerCase()}`);
       }
       lines.push('');
     }
 
     return lines.join('\n');
-  }
-}
-
-/**
- * Base64 → 16進文字列。Node Buffer / atob 両対応。
- * SPDX 仕様準拠の checksum 出力に必要。
- */
-function base64ToHex(b64: string): string | null {
-  try {
-    if (typeof Buffer !== 'undefined') {
-      return Buffer.from(b64, 'base64').toString('hex');
-    }
-    // ブラウザ fallback
-    const bin = atob(b64);
-    let hex = '';
-    for (let i = 0; i < bin.length; i++) {
-      hex += bin.charCodeAt(i).toString(16).padStart(2, '0');
-    }
-    return hex;
-  } catch {
-    return null;
   }
 }
 

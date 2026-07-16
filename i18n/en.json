@@ -57,6 +57,11 @@
     "paste": "Paste",
     "selectAll": "Select All"
   },
+  "history": {
+    "opsCount": "{count} operations",
+    "clear": "Clear",
+    "empty": "No history"
+  },
   "timeline": {
     "title": "Timeline",
     "play": "Play",
@@ -187,6 +192,9 @@
     "all": "All",
     "empty": "Drop or import media",
     "noMatch": "No matches",
+    "itemsLabel": "items",
+    "sidebarClose": "Close media panel",
+    "sidebarOpen": "Open media panel",
     "status": {
       "pending": "Pending",
       "proxy": "Proxy",
@@ -214,7 +222,8 @@
     },
     "generic": "Error: {message}",
     "init": {
-      "title": "Initialization Error"
+      "title": "Initialization Error",
+      "partial": "Some features failed to start: {message}"
     },
     "unexpected": {
       "title": "Unexpected Error",
@@ -229,7 +238,8 @@
     "restore": "Restore",
     "discard": "Discard",
     "autoSave": "Auto-save",
-    "restorePrompt": "Unsaved work detected from {time}. Restore?"
+    "restorePrompt": "Unsaved work detected from {time}. Restore?",
+    "autoSaveFailed": "Auto-save is not working. Your changes may not be saved."
   },
   "performance": {
     "fps": "FPS: {value}",
@@ -280,6 +290,8 @@
       "setInPoint": "Set In Point",
       "setOutPoint": "Set Out Point",
       "clearInOut": "Clear In / Out",
+      "lift": "Lift",
+      "extract": "Extract",
       "zoomIn": "Zoom In",
       "zoomOut": "Zoom Out",
       "zoomFit": "Zoom to Fit",
@@ -319,6 +331,7 @@
     "placeholder": "Search commands, effects, settings...",
     "hint": "↑↓ Navigate · Enter Execute · Esc Close",
     "count": "{count} results",
+    "noResults": "No results found",
     "cmd": {
       "cut": "Cut",
       "copy": "Copy",
@@ -425,7 +438,10 @@
       "scale": "Scale",
       "rotation": "Rotation",
       "alpha": "α",
-      "enabled": "Enabled"
+      "enabled": "Enabled",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {
@@ -440,43 +456,5 @@
     "tracks": "{count, plural, one {# track} other {# tracks}}",
     "minutes": "{count, plural, one {# minute} other {# minutes}}",
     "seconds": "{count, plural, one {# second} other {# seconds}}"
-  },
-  "interchange": {
-    "title": "Import / Export",
-    "exportOTIO": "Export as OpenTimelineIO",
-    "exportEDL": "Export as EDL",
-    "exportFCPXML": "Export as FCPXML",
-    "importOTIO": "Import OpenTimelineIO",
-    "importFCPXML": "Import FCPXML",
-    "validation": {
-      "valid": "Valid timeline",
-      "invalid": "Invalid format: {error}",
-      "schemaUnsupported": "Unsupported schema version"
-    }
-  },
-  "bench": {
-    "running": "Running benchmarks...",
-    "complete": "Benchmarks complete in {ms}ms",
-    "regression": "Performance regression detected",
-    "improvement": "Performance improvement",
-    "baseline": "Baseline updated",
-    "noBaseline": "No baseline. Run with --update-baseline first"
-  },
-  "accessibility": {
-    "audit": "Accessibility Audit",
-    "level": "WCAG Level: {level}",
-    "passed": "Passed ({count} checks)",
-    "failed": "Failed ({count} issues)",
-    "contrastFail": "Contrast {ratio}:1 fails {required}:1",
-    "missingAlt": "Image missing alt attribute",
-    "missingLabel": "Form control missing label"
-  },
-  "security": {
-    "sbom": "Software Bill of Materials",
-    "components": "{count} components",
-    "vulnerabilities": "{count} vulnerabilities",
-    "licenseConflict": "License conflict: {warning}",
-    "auditPassed": "Supply chain audit passed",
-    "auditFailed": "Supply chain audit failed"
   }
 }

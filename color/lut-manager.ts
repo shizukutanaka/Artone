@@ -366,20 +366,22 @@ export class LUTManager {
     // willReadFrequently: the rendered image is read back via getImageData.
     const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
-    // Create gradient test image
+    // Create gradient test image directly via ImageData — avoids 16 384 template-string
+    // allocations + fillRect calls followed by getImageData (which was a round-trip
+    // through the rasterizer just to read the same pixel values back).
+    const imageData = ctx.createImageData(canvas.width, canvas.height);
+    const px = imageData.data;
     for (let y = 0; y < canvas.height; y++) {
       for (let x = 0; x < canvas.width; x++) {
-        const r = x / canvas.width;
-        const g = 1 - (y / canvas.height);
-        const b = 0.5;
-        
-        ctx.fillStyle = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
-        ctx.fillRect(x, y, 1, 1);
+        const idx = (y * canvas.width + x) * 4;
+        px[idx]     = Math.round((x / canvas.width) * 255);
+        px[idx + 1] = Math.round((1 - y / canvas.height) * 255);
+        px[idx + 2] = 128; // 0.5 * 255
+        px[idx + 3] = 255;
       }
     }
 
     // Apply LUT
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     this.applyLUT(imageData, lut.id, 1);
     ctx.putImageData(imageData, 0, 0);
 

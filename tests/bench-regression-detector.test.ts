@@ -16,6 +16,7 @@ import {
   deserializeBaseline,
   BaselineStore,
   bench,
+  checkBudgets,
   type BenchmarkSpec,
   type BenchmarkResult,
   type BenchmarkBaseline,
@@ -169,6 +170,23 @@ describe('RegressionDetector', () => {
     expect(report.improvements).toHaveLength(0);
   });
 
+  it('findMissingBaseline() reports benchmarks detect() silently skips', () => {
+    // REGRESSION: detect() silently `continue`s past any current result
+    // absent from baseline.results, with zero visible signal. If the suite
+    // grows and nobody re-runs bench:baseline, those benchmarks stay
+    // permanently unprotected -- findMissingBaseline() lets the CI runner
+    // surface that gap instead of leaving it invisible.
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100)]);
+    const current = [makeResult('a', 105), makeResult('new-bench', 5), makeResult('another-new', 3)];
+    expect(detector.findMissingBaseline(baseline, current)).toEqual(['new-bench', 'another-new']);
+  });
+
+  it('findMissingBaseline() returns empty when every current result has a baseline entry', () => {
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100)]);
+    const current = [makeResult('a', 105)];
+    expect(detector.findMissingBaseline(baseline, current)).toEqual([]);
+  });
+
   it('detect() classifies minor regression correctly', () => {
     // 10% slower → above minor(5%), below major(15%)
     const baseline = makeBaseline('1.0.0', [makeResult('a', 100)]);
@@ -192,6 +210,37 @@ describe('RegressionDetector', () => {
     // 35% slower → above critical(30%)
     const baseline = makeBaseline('1.0.0', [makeResult('a', 100)]);
     const current = [makeResult('a', 135)];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions[0].severity).toBe('critical');
+    expect(report.passed).toBe(false);
+  });
+
+  it('REGRESSION: an exact +5% delta registers as a (minor) regression, not nothing', () => {
+    // THRESHOLDS' own doc comment: "5%以上で minor" (5% OR MORE). The old
+    // `delta > t.minor` comparison required strictly greater than 5, so an
+    // exact 5.0% regression was silently not registered as a regression at
+    // all. Hold p95 delta equal to mean delta so max(meanDelta, p95Delta)
+    // lands exactly on the boundary being tested.
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100, { p95Ms: 100 })]);
+    const current = [makeResult('a', 105, { p95Ms: 105 })];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions).toHaveLength(1);
+    expect(report.regressions[0].severity).toBe('minor');
+  });
+
+  it('REGRESSION: an exact +15% delta classifies as major, not minor', () => {
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100, { p95Ms: 100 })]);
+    const current = [makeResult('a', 115, { p95Ms: 115 })];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions[0].severity).toBe('major');
+  });
+
+  it('REGRESSION: an exact +30% delta classifies as critical and fails CI', () => {
+    // Before fix, exactly +30% classified as 'major' (not >30), so a
+    // regression that hit the critical threshold exactly would NOT fail the
+    // build even though it meets the documented "30% or more" bar.
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100, { p95Ms: 100 })]);
+    const current = [makeResult('a', 130, { p95Ms: 130 })];
     const report = detector.detect(baseline, current);
     expect(report.regressions[0].severity).toBe('critical');
     expect(report.passed).toBe(false);
@@ -250,6 +299,90 @@ describe('RegressionDetector', () => {
     const current = [makeResult('a', 150)];
     const report = detector.detect(baseline, current);
     expect(report.regressions[0].deltaPercent).toBeCloseTo(50, 1);
+  });
+
+  it('REGRESSION: flags a p95 tail regression even when the mean looks stable', () => {
+    // bench/CLAUDE.md: "統計値は p50/p95/p99 含める。平均だけで判断しない".
+    // Before fix: detect() only ever compared meanMs, so a bench whose
+    // median/mean barely moved but whose tail latency blew up (e.g. GC
+    // pauses, a new slow path hit only occasionally) would silently pass.
+    const baseline = makeBaseline('1.0.0', [
+      makeResult('a', 100, { p95Ms: 105, p99Ms: 108 }),
+    ]);
+    const current = [
+      // mean only +2% (well under the 5% minor threshold)...
+      makeResult('a', 102, { p95Ms: 145, p99Ms: 150 }), // ...but p95 is +38%
+    ];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions).toHaveLength(1);
+    expect(report.regressions[0].severity).toBe('critical');
+    expect(report.regressions[0].p95DeltaPercent).toBeGreaterThan(30);
+  });
+
+  it('REGRESSION: an improved mean with a worse p95 is not misreported as an improvement', () => {
+    const baseline = makeBaseline('1.0.0', [
+      makeResult('a', 100, { p95Ms: 110 }),
+    ]);
+    const current = [
+      makeResult('a', 80, { p95Ms: 140 }), // mean -20% but p95 +27%
+    ];
+    const report = detector.detect(baseline, current);
+    expect(report.improvements).toHaveLength(0);
+    expect(report.regressions).toHaveLength(1);
+  });
+
+  it('Regression records baseline/current p95Ms alongside meanMs', () => {
+    const baseline = makeBaseline('1.0.0', [makeResult('a', 100, { p95Ms: 110 })]);
+    const current = [makeResult('a', 140, { p95Ms: 154 })];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions[0].baselineP95Ms).toBe(110);
+    expect(report.regressions[0].currentP95Ms).toBe(154);
+  });
+});
+
+// ── checkBudgets ──────────────────────────────────────────────────────────────
+
+describe('checkBudgets', () => {
+  it('REGRESSION: flags a bench whose mean exceeds its declared budget', () => {
+    // Before fix: BenchmarkSpec.budget was documented as "expected max time
+    // (ms) — warn on exceed" but no code anywhere read the field.
+    const specs: BenchmarkSpec[] = [
+      { name: 'render.fill', category: 'render', run: () => {}, budget: 16 },
+    ];
+    const results = [makeResult('render.fill', 25)];
+    const violations = checkBudgets(specs, results);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].name).toBe('render.fill');
+    expect(violations[0].budgetMs).toBe(16);
+    expect(violations[0].actualMeanMs).toBe(25);
+    expect(violations[0].exceedPercent).toBeCloseTo(56.25, 1);
+  });
+
+  it('does not flag a bench within its budget', () => {
+    const specs: BenchmarkSpec[] = [
+      { name: 'render.fill', category: 'render', run: () => {}, budget: 16 },
+    ];
+    const results = [makeResult('render.fill', 10)];
+    expect(checkBudgets(specs, results)).toHaveLength(0);
+  });
+
+  it('skips specs with no budget declared', () => {
+    const specs: BenchmarkSpec[] = [
+      { name: 'render.fill', category: 'render', run: () => {} },
+    ];
+    const results = [makeResult('render.fill', 999)];
+    expect(checkBudgets(specs, results)).toHaveLength(0);
+  });
+
+  it('skips specs with no matching result', () => {
+    const specs: BenchmarkSpec[] = [
+      { name: 'missing', category: 'render', run: () => {}, budget: 1 },
+    ];
+    expect(checkBudgets(specs, [])).toHaveLength(0);
+  });
+
+  it('bench.checkBudgets is exposed via the factory', () => {
+    expect(bench.checkBudgets).toBe(checkBudgets);
   });
 });
 

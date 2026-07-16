@@ -106,6 +106,20 @@ describe('RecoveryManager — saveSnapshot', () => {
     expect(b).toBeTruthy();
   });
 
+  it('REGRESSION: throttles a crash-snapshot storm (rapid repeated crash saves)', async () => {
+    // Before fix: only 'auto' saves were throttled. A repeating error (e.g.
+    // an unhandled rejection that keeps firing, or a bug that throws in a
+    // loop) calls saveSnapshot('crash', ...) once per event with no upper
+    // bound -- each successful write also runs enforceLimit(), so a burst of
+    // near-identical crash snapshots could blow past maxSnapshots and evict
+    // genuinely useful older backups (e.g. the last good pre-crash auto-save)
+    // in favor of dozens of duplicates of the same failing moment.
+    const first = await mgr.saveSnapshot('crash', 'p', 'P', makeData());
+    const second = await mgr.saveSnapshot('crash', 'p', 'P', makeData());
+    expect(first).toBeTruthy();
+    expect(second).toBeNull();
+  });
+
   it('computes a checksum for the snapshot', async () => {
     await mgr.saveSnapshot('manual', 'p', 'P', makeData());
     const snaps = await mgr.getSnapshots('p');
@@ -317,6 +331,24 @@ describe('RecoveryManager — enforceLimit', () => {
     const snaps = await mgr.getSnapshots('p');
     expect(snaps.length).toBeGreaterThanOrEqual(1);
     expect(snaps.some(s => s.id === id)).toBe(true);
+  });
+
+  it('REGRESSION: caps maxSnapshots per project, not globally', async () => {
+    // Before fix: enforceLimit() read getSnapshots() with no projectId and
+    // used one shared counter, so maxSnapshots was a single budget split
+    // across every project. Two active projects could starve each other
+    // down to fewer than maxSnapshots survivors each, even though neither
+    // individually exceeded the configured cap.
+    const mgr = makeManager({ maxSnapshots: 2 });
+    await mgr.init();
+    for (let i = 0; i < 3; i++) {
+      await mgr.saveSnapshot('manual', 'project-a', 'A', makeData({ playhead: i }));
+      await mgr.saveSnapshot('manual', 'project-b', 'B', makeData({ playhead: i }));
+    }
+    const snapsA = await mgr.getSnapshots('project-a');
+    const snapsB = await mgr.getSnapshots('project-b');
+    expect(snapsA.length).toBe(2);
+    expect(snapsB.length).toBe(2);
   });
 
   it('deletes many excess snapshots in a single transaction (atomic prune)', async () => {

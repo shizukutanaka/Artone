@@ -376,6 +376,43 @@ describe('MediaBrowser — importFiles', () => {
     await browser.importFiles([fakeFile('notes.txt')]);
     expect(fn).toHaveBeenCalled();
   });
+
+  it('REGRESSION: a video that never fires onloadedmetadata/onerror times out instead of hanging the whole batch forever', async () => {
+    // Before fix: extractVideoMetadata()'s Promise had no timeout, so a
+    // malformed container / blob-timing edge case that never fires either
+    // event left the `await` in importFile() pending forever. Since
+    // importFiles() processes files sequentially, that one stuck file
+    // permanently blocked every subsequent file in the same batch.
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(document, 'createElement').mockImplementation((() => {
+        // A video element whose src setter never invokes any handler —
+        // simulates the "neither event ever fires" failure mode.
+        const el: Record<string, unknown> = { preload: '', muted: false };
+        Object.defineProperty(el, 'src', { set() {}, configurable: true });
+        return el as unknown as HTMLElement;
+      }) as typeof document.createElement);
+
+      const browser = new MediaBrowser();
+      const progress: string[] = [];
+      const resultPromise = browser.importFiles(
+        [fakeFile('clip.mp4'), fakeFile('clip2.mp4')],
+        (p) => progress.push(`${p.file}:${p.status}`)
+      );
+
+      // Two files are processed sequentially, each with its own 30s timeout
+      // that only starts once the previous file's promise settles.
+      await vi.advanceTimersByTimeAsync(60_000);
+      const result = await resultPromise;
+
+      expect(result).toHaveLength(0);
+      expect(progress).toContain('clip.mp4:error');
+      // The timeout on file 1 must not block file 2 from being attempted.
+      expect(progress.some((p) => p.startsWith('clip2.mp4'))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ============================================================

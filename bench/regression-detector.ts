@@ -60,7 +60,17 @@ export interface Regression {
   baselineMeanMs: number;
   currentMeanMs: number;
   deltaPercent: number;
+  baselineP95Ms: number;
+  currentP95Ms: number;
+  p95DeltaPercent: number;
   severity: 'minor' | 'major' | 'critical';
+}
+
+export interface BudgetViolation {
+  name: string;
+  budgetMs: number;
+  actualMeanMs: number;
+  exceedPercent: number;
 }
 
 export interface Improvement {
@@ -99,7 +109,7 @@ export class BenchmarkRunner {
       await spec.run();
     }
 
-    // 自動反復決定: 1秒以下なら100回、それ以外は10回
+    // 自動反復決定 (probe 実測に基づく4段階): <10ms→1000回, <100ms→100回, <1000ms→30回, それ以外→10回
     let iterations = spec.iterations ?? 0;
     if (iterations === 0) {
       const probeStart = performance.now();
@@ -185,16 +195,33 @@ export class RegressionDetector {
       // "critical regression". Skip the comparison — there is no meaningful
       // percentage change relative to zero.
       if (base.meanMs === 0) continue;
-      const delta = ((cur.meanMs - base.meanMs) / base.meanMs) * 100;
+      const meanDelta = ((cur.meanMs - base.meanMs) / base.meanMs) * 100;
+      // bench/CLAUDE.md: "統計値は p50/p95/p99 含める。平均だけで判断しない" —
+      // a bench whose mean looks stable can still regress badly in its tail
+      // (p95), which matters more for a 60fps editor than the mean does.
+      // Judge severity from whichever of mean/p95 regressed worse.
+      const p95Delta = base.p95Ms > 0 ? ((cur.p95Ms - base.p95Ms) / base.p95Ms) * 100 : meanDelta;
+      const delta = Math.max(meanDelta, p95Delta);
 
-      if (delta > t.minor) {
+      // REGRESSION fix: THRESHOLDS' own doc comment says "5%以上で minor, 15%
+      // major, 30% critical" (5/15/30 percent OR MORE), but these comparisons
+      // used strict `>` -- a delta of exactly 5.0% was not registered as a
+      // regression at all, exactly 15.0% classified as 'minor' instead of
+      // 'major', and exactly 30.0% classified as 'major' instead of
+      // 'critical' (which would NOT fail CI, since only 'critical'
+      // regressions fail the build). Use >= to match the documented
+      // "or more" semantics at each boundary.
+      if (delta >= t.minor) {
         const severity =
-          delta > t.critical ? 'critical' : delta > t.major ? 'major' : 'minor';
+          delta >= t.critical ? 'critical' : delta >= t.major ? 'major' : 'minor';
         regressions.push({
           name: cur.name,
           baselineMeanMs: base.meanMs,
           currentMeanMs: cur.meanMs,
           deltaPercent: delta,
+          baselineP95Ms: base.p95Ms,
+          currentP95Ms: cur.p95Ms,
+          p95DeltaPercent: p95Delta,
           severity,
         });
       } else if (delta < -t.minor) {
@@ -213,6 +240,16 @@ export class RegressionDetector {
     return { baseline, current, regressions, improvements, passed };
   }
 
+  /**
+   * Names of current results absent from the baseline — these are silently
+   * skipped by detect() ("新規ベンチは比較対象外") and so have zero regression
+   * protection until the baseline is regenerated. Exposed so callers (the CI
+   * runner) can surface the gap instead of leaving it invisible.
+   */
+  findMissingBaseline(baseline: BenchmarkBaseline, current: BenchmarkResult[]): string[] {
+    return current.filter((r) => !baseline.results[r.name]).map((r) => r.name);
+  }
+
   formatReport(report: RegressionReport): string {
     const lines: string[] = [];
     lines.push('=== Performance Regression Report ===');
@@ -225,7 +262,8 @@ export class RegressionDetector {
       for (const r of report.regressions) {
         const tag = r.severity.toUpperCase();
         lines.push(
-          `  [${tag}] ${r.name}: ${r.baselineMeanMs.toFixed(2)}ms → ${r.currentMeanMs.toFixed(2)}ms (+${r.deltaPercent.toFixed(1)}%)`
+          `  [${tag}] ${r.name}: mean ${r.baselineMeanMs.toFixed(2)}ms → ${r.currentMeanMs.toFixed(2)}ms, ` +
+          `p95 ${r.baselineP95Ms.toFixed(2)}ms → ${r.currentP95Ms.toFixed(2)}ms (+${r.deltaPercent.toFixed(1)}%)`
         );
       }
       lines.push('');
@@ -247,6 +285,32 @@ export class RegressionDetector {
 
     return lines.join('\n');
   }
+}
+
+/**
+ * BenchmarkSpec.budget ("期待最大時間 (ms) — 超過で警告") を実際の計測値と
+ * 突き合わせる。ベースライン比較とは独立: budget は絶対時間の予算なので、
+ * ベースラインが無い新規ベンチでも即座に検査できる。
+ */
+export function checkBudgets(specs: BenchmarkSpec[], results: BenchmarkResult[]): BudgetViolation[] {
+  const violations: BudgetViolation[] = [];
+  const resultByName = new Map(results.map((r) => [r.name, r]));
+
+  for (const spec of specs) {
+    if (spec.budget === undefined) continue;
+    const result = resultByName.get(spec.name);
+    if (!result) continue;
+    if (result.meanMs > spec.budget) {
+      violations.push({
+        name: spec.name,
+        budgetMs: spec.budget,
+        actualMeanMs: result.meanMs,
+        exceedPercent: ((result.meanMs - spec.budget) / spec.budget) * 100,
+      });
+    }
+  }
+
+  return violations;
 }
 
 // === ベースライン管理 (関数: Pike 流の簡潔さ) ===
@@ -299,4 +363,5 @@ export const bench = {
   runner: () => new BenchmarkRunner(),
   detector: () => new RegressionDetector(),
   store: BaselineStore,
+  checkBudgets,
 };

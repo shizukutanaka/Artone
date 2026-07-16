@@ -5,7 +5,7 @@
  *   npm run sbom
  *
  * 出力:
- *   sbom.json   (CycloneDX 1.5)
+ *   sbom.json   (CycloneDX 1.7)
  *   sbom.spdx   (SPDX 2.3)
  *
  * package.json + package-lock.json から依存ツリーを抽出。
@@ -28,7 +28,7 @@ interface PackageJson {
   devDependencies?: Record<string, string>;
 }
 
-interface LockfileV3 {
+export interface LockfileV3 {
   name: string;
   version: string;
   packages: Record<
@@ -72,12 +72,25 @@ function normalizeHash(integrity: string | undefined): { algorithm: string; valu
   }
 }
 
-function extractComponents(lockfile: LockfileV3, includeDev: boolean): {
+export function extractComponents(lockfile: LockfileV3, includeDev: boolean): {
   components: Component[];
   dependencies: Dependency[];
 } {
   const components: Component[] = [];
-  const dependencies: Dependency[] = [];
+  const pending: Array<{ path: string; name: string; version: string; deps: Record<string, string> }> = [];
+  // REGRESSION fix: `info.dependencies` on a lockfile package entry holds the
+  // *declared semver range* (e.g. "^0.3.5"), not the resolved installed
+  // version. Every Component/Dependency.ref elsewhere is built as
+  // `name@resolvedVersion`, so a dependsOn entry built directly from the
+  // range string (the old behavior) could never match any real component
+  // ref -- the entire `dependencies` graph came out completely unlinked.
+  // Resolve each dependency name to its actual installed version via this
+  // map before building dependsOn. Prefers the shallowest (top-level)
+  // occurrence of a name when npm's hoisting has deduped it there, which is
+  // correct for the common case; deeply nested per-parent overrides are a
+  // real but rarer divergence not attempted here (would require replicating
+  // Node's full node_modules resolution walk).
+  const versionsByName = new Map<string, { version: string; depth: number }>();
 
   for (const [path, info] of Object.entries(lockfile.packages)) {
     if (path === '') continue; // ルート除外
@@ -100,13 +113,27 @@ function extractComponents(lockfile: LockfileV3, includeDev: boolean): {
       hash,
     });
 
+    const depth = path.split('node_modules/').length;
+    const existing = versionsByName.get(name);
+    if (!existing || depth < existing.depth) {
+      versionsByName.set(name, { version: info.version, depth });
+    }
+
     if (info.dependencies) {
-      dependencies.push({
-        ref: `${name}@${info.version}`,
-        dependsOn: Object.entries(info.dependencies).map(([n, v]) => `${n}@${v}`),
-      });
+      pending.push({ path, name, version: info.version, deps: info.dependencies });
     }
   }
+
+  const dependencies: Dependency[] = pending.map(({ name, version, deps }) => ({
+    ref: `${name}@${version}`,
+    dependsOn: Object.entries(deps).map(([n, range]) => {
+      const resolved = versionsByName.get(n);
+      // Fallback to the raw range only if the dependency itself was
+      // excluded (e.g. a dev-only sub-dependency filtered out above) --
+      // should be rare for a consistent lockfile.
+      return `${n}@${resolved?.version ?? range}`;
+    }),
+  }));
 
   return { components, dependencies };
 }
@@ -196,10 +223,18 @@ async function main(): Promise<void> {
   }
 
   console.log('');
-  console.log('Output: sbom.json (CycloneDX 1.5), sbom.spdx (SPDX 2.3)');
+  console.log('Output: sbom.json (CycloneDX 1.7), sbom.spdx (SPDX 2.3)');
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// REGRESSION fix: main() used to run unconditionally at module load, so
+// merely `import`ing this file (e.g. to unit-test extractComponents()) ran
+// the full SBOM generation pipeline against the real repo -- writing
+// sbom.json/sbom.spdx and potentially calling process.exit(1) as a side
+// effect of an import. Guard so main() only runs when this file is the
+// actual entry point (`tsx security/generate.ts` / `npm run sbom`).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

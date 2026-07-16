@@ -1,4 +1,5 @@
 import { color } from '../app/design-system';
+import { setHighQualityScaling } from '../app/utils';
 /**
  * Artone v3 — Media Browser
  * 
@@ -11,6 +12,13 @@ import { color } from '../app/design-system';
  * 
  * @version 1.0.0
  */
+
+// Some malformed containers / blob-timing edge cases never fire
+// onloadedmetadata/onerror at all (proxy-workflow.ts's encodeProxy already
+// guards against this exact failure mode for the same reason). Without a
+// timeout, importFiles()'s sequential `for...await` loop would hang on that
+// one file forever, blocking every subsequent file in the same import batch.
+const METADATA_TIMEOUT_MS = 30_000;
 
 // ============================================================
 // Types
@@ -77,7 +85,13 @@ const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v', 'ogv'];
 const AUDIO_EXTENSIONS = ['mp3', 'wav', 'ogg', 'aac', 'm4a', 'flac', 'wma'];
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
 
-function getMediaType(filename: string): MediaType | null {
+/**
+ * Classify a file as video/audio/image by its extension (case-insensitive),
+ * or null if unrecognized. Exported so the DropZone can accept the same set
+ * of containers the file picker does, even when the browser reports an empty
+ * or nonstandard MIME type for them (common for .mkv/.mov/.avi).
+ */
+export function getMediaType(filename: string): MediaType | null {
   const ext = filename.split('.').pop()?.toLowerCase() || '';
   
   if (VIDEO_EXTENSIONS.includes(ext)) return 'video';
@@ -246,7 +260,14 @@ export class MediaBrowser {
       const video = document.createElement('video');
       video.preload = 'metadata';
 
+      const timer = setTimeout(() => {
+        video.onloadedmetadata = null;
+        video.onerror = null;
+        reject(new Error(`Video metadata load timeout after ${METADATA_TIMEOUT_MS}ms`));
+      }, METADATA_TIMEOUT_MS);
+
       video.onloadedmetadata = () => {
+        clearTimeout(timer);
         resolve({
           width: video.videoWidth,
           height: video.videoHeight,
@@ -255,7 +276,10 @@ export class MediaBrowser {
         });
       };
 
-      video.onerror = () => reject(new Error('Failed to load video'));
+      video.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error('Failed to load video'));
+      };
       video.src = url;
     });
   }
@@ -269,7 +293,14 @@ export class MediaBrowser {
       const audio = document.createElement('audio');
       audio.preload = 'metadata';
 
+      const timer = setTimeout(() => {
+        audio.onloadedmetadata = null;
+        audio.onerror = null;
+        reject(new Error(`Audio metadata load timeout after ${METADATA_TIMEOUT_MS}ms`));
+      }, METADATA_TIMEOUT_MS);
+
       audio.onloadedmetadata = () => {
+        clearTimeout(timer);
         resolve({
           duration: audio.duration,
           sampleRate: 48000, // Default
@@ -277,7 +308,10 @@ export class MediaBrowser {
         });
       };
 
-      audio.onerror = () => reject(new Error('Failed to load audio'));
+      audio.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error('Failed to load audio'));
+      };
       audio.src = url;
     });
   }
@@ -311,6 +345,20 @@ export class MediaBrowser {
       video.preload = 'metadata';
       video.muted = true;
 
+      // Matches this function's own graceful-fallback convention (resolve
+      // with '' on failure, same as onerror below) rather than rejecting —
+      // a missing thumbnail should not fail the whole import.
+      const timer = setTimeout(() => {
+        video.onloadeddata = null;
+        video.onseeked = null;
+        video.onerror = null;
+        resolve('');
+      }, METADATA_TIMEOUT_MS);
+      const settle = (value: string): void => {
+        clearTimeout(timer);
+        resolve(value);
+      };
+
       video.onloadeddata = () => {
         video.currentTime = video.duration * 0.1; // 10% into video
       };
@@ -320,28 +368,31 @@ export class MediaBrowser {
         // would make the canvas size NaN and emit a broken thumbnail. Fail
         // gracefully like the onerror path instead.
         const longest = Math.max(width, height);
-        if (!(longest > 0)) { resolve(''); return; }
+        if (!(longest > 0)) { settle(''); return; }
         const canvas = document.createElement('canvas');
         const scale = 160 / longest;
         canvas.width = width * scale;
         canvas.height = height * scale;
 
         const ctx = canvas.getContext('2d')!;
+        setHighQualityScaling(ctx);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        settle(canvas.toDataURL('image/jpeg', 0.7));
       };
 
-      video.onerror = () => resolve('');
+      video.onerror = () => settle('');
       video.src = url;
     });
   }
 
   private async generateAudioWaveform(url: string): Promise<string> {
+    let audioContext: AudioContext | null = null;
     try {
       const response = await fetch(url);
+      if (!response.ok) throw new Error(`generateAudioWaveform: fetch failed ${response.status} ${response.statusText}`);
       const arrayBuffer = await response.arrayBuffer();
-      const audioContext = new AudioContext();
+      audioContext = new AudioContext();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
       const data = audioBuffer.getChannelData(0);
@@ -373,10 +424,12 @@ export class MediaBrowser {
         ctx.fillRect(x, y, canvas.width / samples - 1, barHeight);
       }
 
-      audioContext.close();
       return canvas.toDataURL('image/png');
     } catch {
       return ''; // Thumbnail generation failed — return empty string
+    } finally {
+      // Close in finally so the OS audio context is released even if decodeAudioData throws.
+      audioContext?.close();
     }
   }
 
@@ -395,6 +448,7 @@ export class MediaBrowser {
         canvas.height = img.height * scale;
 
         const ctx = canvas.getContext('2d')!;
+        setHighQualityScaling(ctx);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
         resolve(canvas.toDataURL('image/jpeg', 0.7));

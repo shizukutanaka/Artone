@@ -85,10 +85,32 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
   /** Capacity in elements (always a power of two). */
   readonly capacity: number;
 
-  // When backed by SharedArrayBuffer these are Int32Arrays backed by sab;
-  // otherwise they are plain number[] with one slot each.
+  // Non-shared (single-thread) fallback storage.
   private _rPos: number;
   private _wPos: number;
+
+  // REGRESSION fix: this class's own docstring and constructor example
+  // promised that read/write positions "MUST be stored in Int32Array and
+  // updated via Atomics" when backed by SharedArrayBuffer, and that the
+  // class "handles both modes automatically" -- but _rPos/_wPos were always
+  // plain per-instance number fields, with no SharedArrayBuffer/Atomics code
+  // path at all. Two independently-constructed instances wrapping the same
+  // underlying SharedArrayBuffer (exactly the documented producer-thread /
+  // consumer-thread pattern) each had their own disconnected position
+  // counters starting at 0 and never seeing each other's progress --
+  // silently breaking the "lock-free SPSC ring buffer for cross-thread
+  // audio transfer" this module exists to provide.
+  //
+  // When `data` is a view into a SharedArrayBuffer with at least 8 bytes
+  // reserved before its own byteOffset (the exact layout the class's own
+  // example constructs: `new Float32Array(sab, 8)`), the two Int32 position
+  // counters live in that reserved header region of the SAME shared buffer,
+  // accessed via Atomics.load/store so every thread sharing the buffer sees
+  // a consistent, memory-fenced view. A brand-new SharedArrayBuffer is
+  // guaranteed zero-initialized, so no explicit reset is needed here --
+  // resetting unconditionally would clobber an already-in-progress peer
+  // thread's position if this instance is constructed after that thread's.
+  private readonly _sharedPos: Int32Array | null;
 
   /**
    * Create a ring buffer.
@@ -96,7 +118,8 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
    * @param capacity   Desired number of elements. Rounded down to the nearest
    *                   power of two; minimum 2.
    * @param data       Optional pre-allocated typed array of length ≥ capacity.
-   *                   Pass a Float32Array backed by SharedArrayBuffer to enable
+   *                   Pass a Float32Array backed by SharedArrayBuffer (with at
+   *                   least 8 bytes reserved before its byteOffset) to enable
    *                   cross-thread use. Default: a new Float32Array.
    * @param ArrayCtor  Typed-array constructor. Default: Float32Array.
    */
@@ -112,13 +135,43 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
     this._buf     = data ?? (new ArrayCtor(n) as T);
     this._rPos    = 0;
     this._wPos    = 0;
+
+    this._sharedPos =
+      typeof SharedArrayBuffer !== 'undefined' &&
+      this._buf.buffer instanceof SharedArrayBuffer &&
+      this._buf.byteOffset >= 8
+        ? new Int32Array(this._buf.buffer, this._buf.byteOffset - 8, 2)
+        : null;
+  }
+
+  /** Current read position — Atomics-backed when cross-thread shared. */
+  private get rPos(): number {
+    return this._sharedPos ? Atomics.load(this._sharedPos, 0) : this._rPos;
+  }
+  private set rPos(v: number) {
+    if (this._sharedPos) Atomics.store(this._sharedPos, 0, v);
+    else this._rPos = v;
+  }
+
+  /** Current write position — Atomics-backed when cross-thread shared. */
+  private get wPos(): number {
+    return this._sharedPos ? Atomics.load(this._sharedPos, 1) : this._wPos;
+  }
+  private set wPos(v: number) {
+    if (this._sharedPos) Atomics.store(this._sharedPos, 1, v);
+    else this._wPos = v;
+  }
+
+  /** `true` when positions are stored in a shared, Atomics-backed buffer. */
+  get isCrossThreadShared(): boolean {
+    return this._sharedPos !== null;
   }
 
   // ── Capacity queries ─────────────────────────────────────────────────────
 
   /** Number of elements currently available to read. */
   get availableRead(): number {
-    return (this._wPos - this._rPos) & 0x7fffffff; // handle 32-bit wrap
+    return (this.wPos - this.rPos) & 0x7fffffff; // handle 32-bit wrap
   }
 
   /** Number of free slots available to write. */
@@ -128,7 +181,7 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
 
   /** `true` if the buffer is empty. */
   get isEmpty(): boolean {
-    return this._rPos === this._wPos;
+    return this.rPos === this.wPos;
   }
 
   /** `true` if the buffer is full (no write space remaining). */
@@ -148,7 +201,7 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
     const n = Math.min(count ?? src.length, this.availableWrite);
     if (n === 0) return 0;
 
-    const wPos = this._wPos;
+    const wPos = this.wPos;
     const wIdx = wPos & this._mask;
 
     if (wIdx + n <= this.capacity) {
@@ -161,7 +214,7 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
       for (let i = 0; i < n - first; i++) (this._buf as ArrayLike<number> & { [k: number]: number })[i] = (src as ArrayLike<number>)[first + i];
     }
 
-    this._wPos = (wPos + n) & 0x7fffffff;
+    this.wPos = (wPos + n) & 0x7fffffff;
     return n;
   }
 
@@ -171,9 +224,9 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
    */
   writeSample(value: number): boolean {
     if (this.isFull) return false;
-    const wIdx = this._wPos & this._mask;
+    const wIdx = this.wPos & this._mask;
     (this._buf as ArrayLike<number> & { [k: number]: number })[wIdx] = value;
-    this._wPos = (this._wPos + 1) & 0x7fffffff;
+    this.wPos = (this.wPos + 1) & 0x7fffffff;
     return true;
   }
 
@@ -188,7 +241,7 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
     const n = Math.min(count ?? dst.length, this.availableRead);
     if (n === 0) return 0;
 
-    const rPos = this._rPos;
+    const rPos = this.rPos;
     const rIdx = rPos & this._mask;
 
     if (rIdx + n <= this.capacity) {
@@ -199,7 +252,7 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
       for (let i = 0; i < n - first; i++) (dst as { [k: number]: number })[first + i] = (this._buf as ArrayLike<number>)[i];
     }
 
-    this._rPos = (rPos + n) & 0x7fffffff;
+    this.rPos = (rPos + n) & 0x7fffffff;
     return n;
   }
 
@@ -209,9 +262,9 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
    */
   readSample(): number | undefined {
     if (this.isEmpty) return undefined;
-    const rIdx = this._rPos & this._mask;
+    const rIdx = this.rPos & this._mask;
     const val  = (this._buf as ArrayLike<number>)[rIdx] as number;
-    this._rPos = (this._rPos + 1) & 0x7fffffff;
+    this.rPos = (this.rPos + 1) & 0x7fffffff;
     return val;
   }
 
@@ -221,7 +274,7 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
    */
   skip(count: number): number {
     const n = Math.min(count, this.availableRead);
-    this._rPos = (this._rPos + n) & 0x7fffffff;
+    this.rPos = (this.rPos + n) & 0x7fffffff;
     return n;
   }
 
@@ -231,15 +284,15 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
    */
   peek(): number | undefined {
     if (this.isEmpty) return undefined;
-    return (this._buf as ArrayLike<number>)[this._rPos & this._mask] as number;
+    return (this._buf as ArrayLike<number>)[this.rPos & this._mask] as number;
   }
 
   // ── State ────────────────────────────────────────────────────────────────
 
   /** Reset the ring buffer to empty (discards all data). */
   reset(): void {
-    this._rPos = 0;
-    this._wPos = 0;
+    this.rPos = 0;
+    this.wPos = 0;
   }
 
   /** Return a snapshot of the current buffer state (for diagnostics). */
@@ -248,8 +301,8 @@ export class RingBuffer<T extends TypedArray = Float32Array> {
       capacity:       this.capacity,
       availableRead:  this.availableRead,
       availableWrite: this.availableWrite,
-      readPos:        this._rPos,
-      writePos:       this._wPos,
+      readPos:        this.rPos,
+      writePos:       this.wPos,
     };
   }
 }

@@ -182,6 +182,93 @@ describe('HistoryManager — command merging', () => {
 
     expect(hm.getStats().count).toBe(2);
   });
+
+  it('REGRESSION: merging after an undo clears the stale redo tail instead of leaving it reachable', () => {
+    // Before fix: the merge branch replaced commands[position] in place but
+    // never truncated commands beyond it (unlike the normal execute path).
+    // A stale "future" command left over from a prior undo() stayed in the
+    // array and canRedo() reported true for it -- redo() would then run
+    // that stale command's redo() against the state the merge produced,
+    // not the state it was actually designed for, corrupting data.
+    const hm = makeManager();
+    const cell = clipCell({ id: 'c1', trackId: 'track-A', startFrame: 0 });
+    const other = { value: 0 };
+
+    const cmd1 = CommandFactory.clipMove('c1', 'track-A', 'track-A', 0, 10, cell.get, cell.set);
+    cmd1.timestamp = 1000;
+    hm.execute(cmd1); // A: 0 -> 10
+
+    const cmd2 = counterCmd(other); // unrelated command type, does not merge with cmd1
+    hm.execute(cmd2);
+
+    hm.undo(); // back to position 0 (cmd2 now sits as a stale "future" entry)
+
+    const cmd3 = CommandFactory.clipMove('c1', 'track-A', 'track-A', 10, 30, cell.get, cell.set);
+    cmd3.timestamp = 1100; // within cmd1's 500ms merge window -> merges with cmd1
+    hm.execute(cmd3);
+
+    expect(hm.getStats().count).toBe(1); // stale cmd2 must be gone, not just overwritten at index 0
+    expect(hm.canRedo()).toBe(false);
+    expect(cell.clip.startFrame).toBe(30);
+  });
+});
+
+// ============================================================
+// Branches
+// ============================================================
+
+describe('HistoryManager — branches', () => {
+  it('REGRESSION: switchBranch() replays a branch\'s own edits when switching back into it', () => {
+    // Before fix: HistoryBranch.commands was always [] (nothing ever pushed
+    // into it), and even populated it couldn't help since CommandSnapshot
+    // has no live redo() function. The "redo the new branch" half of
+    // switchBranch() iterated that always-empty array and only bumped
+    // `position` per element -- switching back into a branch never actually
+    // replayed its edits; the live value stayed at whatever undoing the
+    // branch left it at.
+    const hm = makeManager();
+    const cell = { value: 0 };
+
+    hm.execute(counterCmd(cell, 1)); // main: 0 -> 1
+
+    const branchId = hm.createBranch('feature');
+    hm.execute(counterCmd(cell, 10)); // branch: 1 -> 11
+
+    hm.switchBranch('main');
+    expect(cell.value).toBe(1); // branch edit correctly undone
+
+    hm.switchBranch(branchId);
+    expect(cell.value).toBe(11); // branch edit must be reapplied, not lost
+  });
+
+  it('REGRESSION: switchBranch() does not double-undo commands already undone inside the branch', () => {
+    // Before fix: switching away from a branch sliced
+    // `this.commands.slice(parentPosition + 1)` -- to the END of the array,
+    // not to the current position -- and undid every one of those commands.
+    // If the user had already called undo() one or more times while still
+    // inside the branch, the commands between position+1 and the array end
+    // were already undone; switchBranch() undid them a SECOND time,
+    // corrupting the live value.
+    const hm = makeManager();
+    const cell = { value: 0 };
+
+    hm.execute(counterCmd(cell, 1)); // main: 0 -> 1
+
+    hm.createBranch('feature');
+    hm.execute(counterCmd(cell, 10)); // branch: 1 -> 11
+    hm.execute(counterCmd(cell, 100)); // branch: 11 -> 111
+
+    hm.undo(); // undo the +100 within the branch: 111 -> 11
+    expect(cell.value).toBe(11);
+
+    hm.switchBranch('main');
+    // Only the still-applied +10 command should be undone here (111 -> 11
+    // was already handled by the explicit undo() above). Before the fix,
+    // the already-undone +100 command's undo() fired again on top of the
+    // +10 command's undo(), landing on a doubly-corrupted value (-99)
+    // instead of the correct 1.
+    expect(cell.value).toBe(1);
+  });
 });
 
 // ============================================================
@@ -292,6 +379,40 @@ describe('HistoryManager — goToPosition', () => {
     hm.goToPosition(99);
     expect(cell.value).toBe(before);
   });
+
+  it('PERF: emits exactly one notification regardless of how many steps are jumped', () => {
+    const hm = makeManager();
+    const cell = { value: 0 };
+    // Build a 10-entry history
+    for (let i = 0; i < 10; i++) hm.execute(counterCmd(cell));
+    expect(cell.value).toBe(10);
+
+    const cb = vi.fn();
+    hm.subscribe(cb);
+
+    // Jump 10 positions back — must fire exactly one listener call, not 10
+    hm.goToPosition(-1);
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cell.value).toBe(0);
+
+    cb.mockClear();
+
+    // Jump 10 positions forward — again exactly one call
+    hm.goToPosition(9);
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cell.value).toBe(10);
+  });
+
+  it('no notification when already at target position', () => {
+    const hm = makeManager();
+    const cell = { value: 0 };
+    hm.execute(counterCmd(cell));
+
+    const cb = vi.fn();
+    hm.subscribe(cb);
+    hm.goToPosition(0); // already there
+    expect(cb).not.toHaveBeenCalled();
+  });
 });
 
 // ============================================================
@@ -392,6 +513,55 @@ describe('CommandFactory.clipDelete', () => {
 });
 
 // ============================================================
+// CommandFactory.effectAdd / keyframeAdd — id collision on undo
+// ============================================================
+
+describe('CommandFactory.effectAdd', () => {
+  it('REGRESSION: undo removes only the added effect, not every other id-less effect', () => {
+    // Before fix: an id-less effect made undo's `e.id !== savedEffect.id`
+    // filter match `undefined !== undefined` (false) for EVERY id-less
+    // effect on the clip, deleting all of them instead of just the one added.
+    const { get, set } = clipCell({ id: 'c1', effects: [{ type: 'blur' }] }); // pre-existing id-less effect
+    const cmd = CommandFactory.effectAdd('c1', { type: 'sharpen' }, get, set);
+
+    cmd.execute();
+    expect(get().effects).toHaveLength(2);
+
+    cmd.undo();
+    expect(get().effects).toHaveLength(1);
+    expect(get().effects![0].type).toBe('blur'); // the pre-existing effect survives
+  });
+
+  it('redo re-adds exactly the same effect', () => {
+    const { get, set } = clipCell({ id: 'c1', effects: [] });
+    const cmd = CommandFactory.effectAdd('c1', { type: 'vignette' }, get, set);
+    cmd.execute();
+    cmd.undo();
+    cmd.redo();
+    expect(get().effects).toHaveLength(1);
+    expect(get().effects![0].type).toBe('vignette');
+  });
+});
+
+describe('CommandFactory.keyframeAdd', () => {
+  it('REGRESSION: undo removes only the added keyframe, not every other id-less keyframe', () => {
+    const { get, set } = clipCell({
+      id: 'c1',
+      keyframes: { opacity: [{ frame: 0, value: 1 }] }, // pre-existing id-less keyframe
+    });
+    const cmd = CommandFactory.keyframeAdd('c1', 'opacity', { frame: 10, value: 0.5 }, get, set);
+
+    cmd.execute();
+    expect((get().keyframes as Record<string, unknown[]>).opacity).toHaveLength(2);
+
+    cmd.undo();
+    const remaining = (get().keyframes as Record<string, { frame: number }[]>).opacity;
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].frame).toBe(0); // the pre-existing keyframe survives
+  });
+});
+
+// ============================================================
 // CommandFactory — composite
 // ============================================================
 
@@ -446,5 +616,53 @@ describe('HistoryPanelUI — XSS prevention', () => {
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img');
     expect(html).toContain('&quot;');
+  });
+});
+
+// ============================================================
+// CommandFactory.structural — generic reversible command
+// ============================================================
+
+describe('CommandFactory.structural', () => {
+  it('execute runs apply, undo runs revert, redo runs apply again', () => {
+    const log: string[] = [];
+    const cmd = CommandFactory.structural(
+      'clip.lift',
+      'Lift range',
+      () => log.push('apply'),
+      () => log.push('revert'),
+    );
+    cmd.execute();
+    cmd.undo();
+    cmd.redo();
+    expect(log).toEqual(['apply', 'revert', 'apply']);
+  });
+
+  it('carries its type and description', () => {
+    const cmd = CommandFactory.structural('clip.extract', 'Extract range', () => {}, () => {});
+    expect(cmd.type).toBe('clip.extract');
+    expect(cmd.description).toBe('Extract range');
+  });
+
+  it('is undoable through HistoryManager (state restored)', () => {
+    const store = new Map<string, number>([['a', 1]]);
+    const h = new HistoryManager({ autoPersist: false });
+    const cmd = CommandFactory.structural(
+      'clip.lift',
+      'Lift',
+      () => store.set('a', 2),
+      () => store.set('a', 1),
+    );
+    h.execute(cmd);
+    expect(store.get('a')).toBe(2);
+    h.undo();
+    expect(store.get('a')).toBe(1);
+    h.redo();
+    expect(store.get('a')).toBe(2);
+  });
+
+  it('exposes a default opaque delta keyed by type', () => {
+    const cmd = CommandFactory.structural('clip.lift', 'Lift', () => {}, () => {});
+    expect(cmd.getDelta().path).toEqual(['clip.lift']);
   });
 });

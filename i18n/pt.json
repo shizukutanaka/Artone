@@ -57,6 +57,11 @@
     "paste": "Colar",
     "selectAll": "Selecionar tudo"
   },
+  "history": {
+    "opsCount": "{count} operações",
+    "clear": "Limpar",
+    "empty": "Sem histórico"
+  },
   "timeline": {
     "title": "Linha do tempo",
     "play": "Reproduzir",
@@ -187,6 +192,9 @@
     "all": "Tudo",
     "empty": "Solte ou importe mídia",
     "noMatch": "Sem correspondências",
+    "itemsLabel": "itens",
+    "sidebarClose": "Fechar painel de mídia",
+    "sidebarOpen": "Abrir painel de mídia",
     "status": {
       "pending": "Pendente",
       "proxy": "Proxy",
@@ -214,7 +222,8 @@
     },
     "generic": "Erro: {message}",
     "init": {
-      "title": "Erro de inicialização"
+      "title": "Erro de inicialização",
+      "partial": "Alguns recursos falharam ao iniciar: {message}"
     },
     "details": "Detalhes do erro",
     "restart": "Reiniciar",
@@ -229,7 +238,8 @@
     "restore": "Restaurar",
     "discard": "Descartar",
     "autoSave": "Auto-salvar",
-    "restorePrompt": "Trabalho não salvo detectado de {time}. Restaurar?"
+    "restorePrompt": "Trabalho não salvo detectado de {time}. Restaurar?",
+    "autoSaveFailed": "O salvamento automático não está funcionando. Suas alterações podem não ser salvas."
   },
   "performance": {
     "fps": "FPS: {value}",
@@ -280,6 +290,8 @@
       "setInPoint": "Definir ponto de entrada",
       "setOutPoint": "Definir ponto de saída",
       "clearInOut": "Limpar entrada / saída",
+      "lift": "Levantar",
+      "extract": "Extrair",
       "zoomIn": "Ampliar",
       "zoomOut": "Reduzir",
       "zoomFit": "Ajustar à tela",
@@ -358,7 +370,10 @@
       "scale": "Escala",
       "rotation": "Rotação",
       "alpha": "α",
-      "enabled": "Ativado"
+      "enabled": "Ativado",
+      "x": "X",
+      "y": "Y",
+      "fps": "FPS"
     }
   },
   "captions": {
@@ -374,6 +389,7 @@
     "placeholder": "Pesquisar comandos, efeitos, configurações...",
     "hint": "↑↓ Navegar · Enter Executar · Esc Fechar",
     "count": "{count} resultados",
+    "noResults": "Nenhum resultado encontrado",
     "cmd": {
       "cut": "Recortar",
       "copy": "Copiar",

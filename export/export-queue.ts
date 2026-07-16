@@ -158,6 +158,9 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
   let pending: QueueJob<T>[] = [];
   const active = new Set<string>();
   let paused = false;
+  // Jobs whose retry setTimeout hasn't fired yet — neither pending nor active,
+  // but not finished either. drain() must not resolve while this is nonzero.
+  let scheduledRetries = 0;
 
   // ─── internal helpers ────────────────────────────────────────────────────
 
@@ -178,12 +181,20 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
   }
 
   function scheduleRetry(job: QueueJob<T>, attemptNumber: number): void {
+    // Caller (runJob's finally) already incremented scheduledRetries before
+    // notifying listeners, so drain() can't observe a false "all done" state.
     const delay = retryDelay * Math.pow(2, attemptNumber - 1);
     setTimeout(() => {
+      scheduledRetries--;
       // Guard: cancel() may have been called during the retry delay. Without
       // this check the job would be resurrected in the pending queue even though
       // the caller already received cancel()→true.
-      if (job.status === 'cancelled') return;
+      if (job.status === 'cancelled') {
+        // scheduledRetries just dropped — let drain() re-check even though
+        // this job itself isn't going anywhere.
+        notify(job);
+        return;
+      }
       // status is already 'pending' (set in runJob finally before notify)
       pending.push(job);
       sortPending();
@@ -256,6 +267,11 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
       if (needsRetry) {
         job.status = 'pending';
         job.progress = 0;
+        // Must increment BEFORE notify() below: drain()'s listener re-checks
+        // its empty condition synchronously on that same notify() call, and
+        // the job hasn't reached `pending` yet (scheduleRetry's setTimeout
+        // hasn't fired) — without this, drain() could resolve right here.
+        scheduledRetries++;
       }
       // active.delete MUST precede notify so drain() can observe an empty active set
       notify(job);
@@ -311,12 +327,24 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
   }
 
   function cancelAll(): void {
-    const pendingCopy = [...pending];
     pending = [];
-    for (const job of pendingCopy) {
-      job.status = 'cancelled';
-      job.completedAt = Date.now();
-      notify(job);
+    const now = Date.now();
+    // REGRESSION fix: this used to iterate only the `pending` array, so a job
+    // in retry back-off — status 'pending' but NOT in the array, waiting on
+    // scheduleRetry's setTimeout — was missed. When its timer fired,
+    // scheduleRetry saw status still 'pending' (not 'cancelled') and re-queued
+    // it, so the job executed anyway despite cancelAll(). Iterate every job
+    // and cancel all that are still 'pending' (both array-queued and
+    // retry-limbo); active jobs are intentionally left running per this
+    // method's contract ("active 中のジョブは継続"). A cancelled retry-limbo
+    // job's setTimeout still fires and decrements scheduledRetries, but
+    // scheduleRetry's 'cancelled' guard now short-circuits the re-queue.
+    for (const job of jobs.values()) {
+      if (job.status === 'pending') {
+        job.status = 'cancelled';
+        job.completedAt = now;
+        notify(job);
+      }
     }
   }
 
@@ -368,12 +396,12 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
   }
 
   function drain(): Promise<void> {
-    if (pending.length === 0 && active.size === 0) {
+    if (pending.length === 0 && active.size === 0 && scheduledRetries === 0) {
       return Promise.resolve();
     }
     return new Promise<void>((resolve) => {
       const unsub = onStatusChange(() => {
-        if (pending.length === 0 && active.size === 0) {
+        if (pending.length === 0 && active.size === 0 && scheduledRetries === 0) {
           unsub();
           resolve();
         }

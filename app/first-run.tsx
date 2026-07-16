@@ -107,10 +107,26 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
     ...ds.text('caption'),
   };
 
+  // REGRESSION fix: containerStyle references the `artone-fade-in` keyframes
+  // on every step, but the <style> tag defining them used to live only in
+  // Step 2's JSX -- so Steps 0 and 1 (including the very first Welcome
+  // screen) referenced a nonexistent animation and never faded in at all.
+  // Rendered as the first child of every step's container so it's always
+  // mounted regardless of which step branch returns.
+  const fadeInKeyframes = (
+    <style>{`
+      @keyframes artone-fade-in {
+        from { opacity: 0; transform: scale(0.97); }
+        to { opacity: 1; transform: scale(1); }
+      }
+    `}</style>
+  );
+
   // --- Step 0: Welcome ---
   if (step === 0) {
     return (
       <div key={animKey} style={containerStyle}>
+        {fadeInKeyframes}
         <button style={skipStyle} onClick={() => finish(true)}>
           {t('common.skip')}
         </button>
@@ -173,6 +189,7 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
   if (step === 1) {
     return (
       <div key={animKey} style={containerStyle}>
+        {fadeInKeyframes}
         <button style={skipStyle} onClick={() => finish(true)}>
           {t('common.skip')}
         </button>
@@ -245,6 +262,7 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
   // --- Step 2: Media Drop ---
   return (
     <div key={animKey} style={containerStyle}>
+      {fadeInKeyframes}
       <button style={skipStyle} onClick={() => finish()}>
         {t('firstRun.skipToDemo')}
       </button>
@@ -313,12 +331,6 @@ export const FirstRunExperience: React.FC<FirstRunProps> = ({ onComplete }) => {
           {mediaFiles.length > 0 ? t('firstRun.startEditing') : t('firstRun.startDemo')}
         </button>
       </div>
-      <style>{`
-        @keyframes artone-fade-in {
-          from { opacity: 0; transform: scale(0.97); }
-          to { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
     </div>
   );
 };

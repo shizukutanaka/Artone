@@ -60,7 +60,13 @@ export class ColorContrast {
   }
 
   static parseRGB(rgb: string): [number, number, number] | null {
-    const m = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)/);
+    // "rgba?\(" — was "rgb\(" only, which cannot match an "rgba(...)" string
+    // at all ("rgb(" is never a substring of "rgba(": the "(" follows the
+    // "a", not the "b"). parseColor() dispatches here for any string
+    // starting with "rgb", including "rgba", and findBackground() explicitly
+    // tries to parse near-opaque rgba backgrounds (alpha >= 0.99) as opaque
+    // — both silently failed and treated the color as unparseable.
+    const m = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
     if (!m) return null;
     return [parseInt(m[1]), parseInt(m[2]), parseInt(m[3])];
   }
@@ -153,7 +159,8 @@ export class A11yAuditor {
     for (const el of Array.from(textNodes)) {
       if (el.textContent?.trim() === '') continue;
       this.checks++;
-      const style = this.host.window.getComputedStyle(el);
+      let style: CSSStyleDeclaration;
+      try { style = this.host.window.getComputedStyle(el); } catch { this.passed++; continue; }
       const fg = ColorContrast.parseColor(style.color);
       const bg = this.findBackground(el);
       if (!fg || !bg) continue;
@@ -172,7 +179,16 @@ export class A11yAuditor {
           message: `Contrast ratio ${ratio.toFixed(2)}:1 fails WCAG AAA (need ${isLarge ? '4.5' : '7'}:1)`,
           fix: 'Increase color contrast between text and background',
         });
-      } else if (level === 'A' || (level === 'AA' && !isLarge)) {
+      } else if (level !== 'AAA') {
+        // REGRESSION fix: the previous condition was `level === 'A' ||
+        // (level === 'AA' && !isLarge)`, which only flagged large text when
+        // it was AA-only if !isLarge -- but large text can only ever be
+        // 'AAA' | 'AA' | 'FAIL' (see ColorContrast.level's isLargeText
+        // branch), so `level === 'AA' && !isLarge` was never true for large
+        // text at all. Large text with ratio in [3, 4.5) (AA but not AAA)
+        // silently fell through to `this.passed++` below -- exactly the
+        // "achieves AA but not AAA" case this rule exists to catch. Any
+        // non-FAIL, non-AAA level (large or normal text) must be flagged.
         this.issues.push({
           severity: 'major',
           rule: 'wcag-1.4.6',
@@ -188,7 +204,8 @@ export class A11yAuditor {
   private findBackground(el: Element): [number, number, number] | null {
     let cur: Element | null = el;
     while (cur) {
-      const style = this.host.window.getComputedStyle(cur);
+      let style: CSSStyleDeclaration;
+      try { style = this.host.window.getComputedStyle(cur); } catch { break; }
       const raw = style.backgroundColor;
 
       // 完全透明をスキップ

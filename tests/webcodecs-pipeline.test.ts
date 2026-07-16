@@ -16,6 +16,7 @@ import {
   SUPPORTED_CODECS,
   checkCodecSupport,
   getBestCodec,
+  VideoEncoderStream,
 } from '../core/webcodecs-pipeline';
 
 function fakeFrame(w = 64, h = 48, timestamp = 1000): VideoFrame {
@@ -239,11 +240,14 @@ function makeFakeCodec(
     decode(): void { /* output is delivered on flush */ }
     encode(): void { /* output is delivered on flush */ }
     async flush(): Promise<void> {
+      // Outputs are delivered before the error, mirroring a real codec that
+      // successfully produces some frames/chunks and only fails partway
+      // through the batch (e.g. a later corrupted chunk).
+      for (const item of emit()) this.init.output(item);
       if (flushError) {
         this.init.error(flushError);
         throw flushError;
       }
-      for (const item of emit()) this.init.output(item);
     }
     close(): void { this.state = 'closed'; }
   };
@@ -279,6 +283,29 @@ describe('VideoPipeline — batch decode/encode completion & cleanup', () => {
     const p = configuredDecoder();
     await expect(p.decodeFrames([chunk()])).rejects.toThrow('decode fail');
     expect(instances[0].state).toBe('closed');
+  });
+
+  it('REGRESSION: decodeFrames closes already-produced frames when flush rejects after some output', async () => {
+    // Before fix: frames emitted via output() before flush() rejects were
+    // simply discarded on the throw path — never closed, leaking their
+    // GPU/media resources.
+    const instances: Array<{ state: string }> = [];
+    const early1 = fakeFrame();
+    const early2 = fakeFrame();
+    vi.stubGlobal('VideoDecoder', makeFakeCodec(() => [early1, early2], instances, new Error('decode fail')));
+    const p = configuredDecoder();
+    await expect(p.decodeFrames([chunk(), chunk()])).rejects.toThrow('decode fail');
+    expect(early1.close).toHaveBeenCalled();
+    expect(early2.close).toHaveBeenCalled();
+  });
+
+  it('REGRESSION: decodeFrame closes an already-produced frame when flush rejects after output', async () => {
+    const instances: Array<{ state: string }> = [];
+    const early = fakeFrame();
+    vi.stubGlobal('VideoDecoder', makeFakeCodec(() => [early], instances, new Error('decode fail')));
+    const p = configuredDecoder();
+    await expect(p.decodeFrame(chunk())).rejects.toThrow('decode fail');
+    expect(early.close).toHaveBeenCalled();
   });
 
   it('decodeFrame returns the first frame and closes extras', async () => {
@@ -325,6 +352,38 @@ describe('VideoPipeline — batch decode/encode completion & cleanup', () => {
     const p = configuredEncoder();
     await expect(p.encodeFrames([fakeFrame()])).rejects.toThrow('encode fail');
     expect(instances[0].state).toBe('closed');
+  });
+});
+
+// ============================================================
+// VideoEncoderStream — transform() frame lifecycle
+// ============================================================
+
+describe('VideoEncoderStream — transform() frame lifecycle', () => {
+  it('REGRESSION: closes the frame even when encoder.encode() throws synchronously', async () => {
+    class ThrowingEncoder {
+      constructor(_init: { output: (c: unknown) => void; error: (e: Error) => void }) {}
+      configure(): void {}
+      encode(): void { throw new Error('encode failed'); }
+      async flush(): Promise<void> {}
+      close(): void {}
+    }
+    vi.stubGlobal('VideoEncoder', ThrowingEncoder);
+
+    const stream = new VideoEncoderStream({
+      codec: 'avc1.42001E', width: 64, height: 48, bitrate: 1_000_000,
+    } as unknown as VideoEncoderConfig);
+    // A TransformStream's readable side has highWaterMark 0 by default, so
+    // writable-side backpressure never clears — and transform() never even
+    // runs — unless something reads from stream.readable.
+    stream.readable.getReader().read().catch(() => { /* expected to reject too */ });
+    const writer = stream.writable.getWriter();
+    const frame = fakeFrame();
+
+    await expect(writer.write(frame)).rejects.toThrow('encode failed');
+    // Without the try/finally fix, encode() throwing skips frame.close()
+    // entirely and the VideoFrame leaks.
+    expect(frame.close).toHaveBeenCalled();
   });
 });
 
@@ -412,6 +471,32 @@ describe('VideoPipeline — extractFrameAtTime (timestamp seeking)', () => {
     const frame = await p.extractFrameAtTime(clip(), 999_000_000);
     expect(frame?.timestamp).toBe(10_100_000);
   });
+
+  it('REGRESSION: closes the selected frame when flush rejects after it was already chosen', async () => {
+    // Before fix: the output callback already closes every non-selected
+    // frame immediately, so at most one frame (`best`) is ever unclosed at a
+    // time -- but if flush() rejected after `best` was set, the function
+    // re-threw without closing it, leaking that one frame.
+    const selected = { timestamp: 10_066_000, close: vi.fn() };
+    class FailingSeekDecoder {
+      state = 'unconfigured';
+      private init: FakeInit;
+      constructor(init: FakeInit) { this.init = init; }
+      configure(): void { this.state = 'configured'; }
+      decode(): void { /* no-op */ }
+      async flush(): Promise<void> {
+        this.init.output(selected);
+        const err = new Error('decode fail');
+        this.init.error(err);
+        throw err;
+      }
+      close(): void { this.state = 'closed'; }
+    }
+    vi.stubGlobal('VideoDecoder', FailingSeekDecoder);
+    const p = configuredDecoder();
+    await expect(p.extractFrameAtTime(clip(), 10_066_000)).rejects.toThrow('decode fail');
+    expect(selected.close).toHaveBeenCalled();
+  });
 });
 
 // ============================================================
@@ -434,6 +519,10 @@ describe('VideoPipeline — transcode processor wiring', () => {
 
   class FakeStreamDecoder {
     state = 'unconfigured';
+    // Read by awaitDecodeQueueBelow before every decode() call; 0 keeps it
+    // under the default threshold so these simple synchronous fakes never
+    // need to exercise the addEventListener('dequeue', ...) wait path.
+    decodeQueueSize = 0;
     private init: FakeInit;
     constructor(init: FakeInit) { this.init = init; }
     configure(): void { this.state = 'configured'; }
@@ -500,6 +589,45 @@ describe('VideoPipeline — transcode processor wiring', () => {
     expect(progress.at(-1)).toBeCloseTo(1);
     expect(progress).toHaveLength(3);
   });
+
+  it('REGRESSION: does not deadlock when a decoder buffers multiple inputs before any output (B-frame reordering)', async () => {
+    // Before fix: VideoDecoderStream.transform() returned a Promise that only
+    // resolved on the NEXT output frame, assuming exactly one output per
+    // input chunk. TransformStream calls transform() strictly sequentially,
+    // so a decoder that consumes 2+ chunks before emitting its first output
+    // (as any B-frame-reordering decoder can) deadlocked: transform(chunk 1)
+    // never resolved, so chunk 2/3 were never fed, so the buffered output
+    // that chunk 2/3 would have unblocked never arrived either.
+    class BufferingFakeDecoder {
+      state = 'unconfigured';
+      decodeQueueSize = 0;
+      private init: FakeInit;
+      private pending: Array<{ timestamp: number }> = [];
+      constructor(init: FakeInit) { this.init = init; }
+      configure(): void { this.state = 'configured'; }
+      decode(chunk: { timestamp: number }): void {
+        this.pending.push(chunk);
+        // Only emit once at least 2 chunks have been fed — models a decoder
+        // that needs a lookahead buffer before it can output anything.
+        if (this.pending.length >= 2) {
+          for (const c of this.pending.splice(0)) {
+            this.init.output({ timestamp: c.timestamp, duration: 1000, close: vi.fn() });
+          }
+        }
+      }
+      async flush(): Promise<void> {
+        for (const c of this.pending.splice(0)) {
+          this.init.output({ timestamp: c.timestamp, duration: 1000, close: vi.fn() });
+        }
+      }
+      close(): void { this.state = 'closed'; }
+    }
+    vi.stubGlobal('VideoDecoder', BufferingFakeDecoder);
+
+    const p = fullyConfigured();
+    const out = await p.transcode(chunks());
+    expect(out).toHaveLength(3);
+  });
 });
 
 // ============================================================
@@ -547,8 +675,30 @@ describe('VideoPipeline — processors and stats', () => {
 
 describe('FrameProcessors', () => {
   it('grayscale returns a VideoFrame', async () => {
-    const out = await FrameProcessors.grayscale(fakeFrame());
+    const out = await FrameProcessors.grayscale()(fakeFrame());
     expect(out).toBeInstanceOf(VideoFrame);
+  });
+
+  it('REGRESSION: each grayscale() factory call owns an independent canvas, not a shared module-level one', async () => {
+    // Before fix: grayscale was a single shared FrameProcessor backed by a
+    // MODULE-LEVEL canvas/ctx -- the only processor here not following the
+    // lazy-init-per-closure pattern every other processor uses. Two
+    // concurrent pipelines calling it in parallel would race on the same
+    // canvas (one's drawImage()/getImageData() clobbered by the other's
+    // drawImage() before pixels were read back). Each factory call must now
+    // create and own its own OffscreenCanvas.
+    const ctorSpy = globalThis.OffscreenCanvas as unknown as { mock: { calls: unknown[] } };
+    const callsBefore = ctorSpy.mock.calls.length;
+
+    const a = FrameProcessors.grayscale();
+    const b = FrameProcessors.grayscale();
+    await a(fakeFrame(64, 48));
+    await b(fakeFrame(64, 48));
+
+    // Two independent factory instances, each processing one frame, must
+    // each construct their own canvas -- a shared module-level canvas would
+    // only construct once in total (reused across both calls).
+    expect(ctorSpy.mock.calls.length - callsBefore).toBe(2);
   });
 
   it('brightnessContrast returns a processor that yields a VideoFrame', async () => {

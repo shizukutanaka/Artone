@@ -352,6 +352,18 @@ describe('convertFrameCount', () => {
     // 1 hour at 24fps = 86400 frames; at 25fps = 90000 frames
     expect(convertFrameCount(86400, FR_24, FR_25)).toBe(90000);
   });
+
+  it('REGRESSION: exact near the previous 2**50 fast-path boundary (no float precision loss)', () => {
+    // Before fix: the code claimed "Use BigInt to avoid precision loss for
+    // large counts" but was plain `number` arithmetic guarded by
+    // `count < 2**50` -- a guard that doesn't actually bound the
+    // intermediate product (count * sourceRate.den * targetRate.num) below
+    // Number.MAX_SAFE_INTEGER (2**53). For this count (just under 2**50),
+    // the float path returned 2814749767094073 -- one frame too many versus
+    // the mathematically exact 2814749767094072 (verified independently via
+    // BigInt: floor(1125899906837629 * 1001 * 60000 / (24000 * 1001))).
+    expect(convertFrameCount(1_125_899_906_837_629, FR_23976, FR_5994)).toBe(2_814_749_767_094_072);
+  });
 });
 
 // ─── remapFrame ───────────────────────────────────────────────────────────────

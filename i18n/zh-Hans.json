@@ -57,6 +57,11 @@
     "paste": "粘贴",
     "selectAll": "全选"
   },
+  "history": {
+    "opsCount": "{count} 项操作",
+    "clear": "清除",
+    "empty": "无历史记录"
+  },
   "timeline": {
     "title": "时间线",
     "play": "播放",
@@ -187,6 +192,9 @@
     "all": "全部",
     "empty": "拖放或导入媒体",
     "noMatch": "无匹配结果",
+    "itemsLabel": "项",
+    "sidebarClose": "关闭媒体面板",
+    "sidebarOpen": "打开媒体面板",
     "status": {
       "pending": "待处理",
       "proxy": "代理",
@@ -214,7 +222,8 @@
     },
     "generic": "错误：{message}",
     "init": {
-      "title": "初始化错误"
+      "title": "初始化错误",
+      "partial": "部分功能启动失败：{message}"
     },
     "details": "错误详情",
     "restart": "重新启动",
@@ -229,7 +238,8 @@
     "restore": "恢复",
     "discard": "丢弃",
     "autoSave": "自动保存",
-    "restorePrompt": "检测到来自 {time} 的未保存工作。是否恢复？"
+    "restorePrompt": "检测到来自 {time} 的未保存工作。是否恢复？",
+    "autoSaveFailed": "自动保存未正常工作，您的更改可能不会被保存。"
   },
   "performance": {
     "fps": "FPS：{value}",
@@ -280,6 +290,8 @@
       "setInPoint": "设置入点",
       "setOutPoint": "设置出点",
       "clearInOut": "清除入点 / 出点",
+      "lift": "提升",
+      "extract": "提取",
       "zoomIn": "放大",
       "zoomOut": "缩小",
       "zoomFit": "适应屏幕",
@@ -358,7 +370,10 @@
       "scale": "缩放",
       "rotation": "旋转",
       "alpha": "α",
-      "enabled": "启用"
+      "enabled": "启用",
+      "x": "X",
+      "y": "Y",
+      "fps": "帧率"
     }
   },
   "captions": {
@@ -374,6 +389,7 @@
     "placeholder": "搜索命令、效果、设置...",
     "hint": "↑↓ 导航 · Enter 执行 · Esc 关闭",
     "count": "{count} 个结果",
+    "noResults": "未找到结果",
     "cmd": {
       "cut": "剪切",
       "copy": "复制",

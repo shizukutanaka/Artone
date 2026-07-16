@@ -13,7 +13,19 @@
  * - 動的読み込みで初期バンドル軽量化
  */
 
+import { ALL_TIER1_TIER2 } from './locales';
+
 export type LocaleCode = string; // BCP 47 (例: 'ja', 'en-US', 'zh-Hans')
+
+// Memoised key splits: lookup() is called on every t() call (every UI string render).
+// Translation keys are a small, fixed set — the cache reaches 100 % hit rate quickly
+// and eliminates the per-render `key.split('.')` allocation entirely.
+const _keySplitCache = new Map<string, string[]>();
+function splitKey(key: string): string[] {
+  let parts = _keySplitCache.get(key);
+  if (!parts) { parts = key.split('.'); _keySplitCache.set(key, parts); }
+  return parts;
+}
 
 export interface TranslationMap {
   [key: string]: string | TranslationMap;
@@ -68,9 +80,20 @@ const LANGUAGE_FAMILY: Record<string, string> = {
 
 /**
  * RTL (右→左) 言語リスト。
+ *
+ * REGRESSION fix: this used to be a hand-maintained list kept independently
+ * of locales.ts's own per-locale `rtl` field -- the two were never
+ * synchronized, and locales.ts's 'ckb' (Sorani Kurdish, rtl:true) had been
+ * added without a matching update here, so isRTL() silently returned false
+ * for it. Derive the locales.ts-covered half from ALL_TIER1_TIER2 (single
+ * source of truth going forward), keeping a short manual list only for
+ * codes real browsers report via navigator.language that aren't in
+ * locales.ts's officially supported locale set (legacy/alternate ISO codes
+ * and languages not yet tier-classified).
  */
-const RTL_LANGUAGES = new Set([
-  'ar', 'he', 'fa', 'ur', 'yi', 'ji', 'iw', 'ku', 'ps', 'sd',
+const RTL_LANGUAGES = new Set<string>([
+  'yi', 'ji', 'iw', 'ps', 'sd',
+  ...ALL_TIER1_TIER2.filter((l) => l.rtl).map((l) => l.code),
 ]);
 
 export class I18nManager {
@@ -127,10 +150,28 @@ export class I18nManager {
   async init(): Promise<void> {
     await this.loadLocale(this.config.defaultLocale);
     if (this.currentLocale !== this.config.defaultLocale) {
-      await this.loadLocale(this.currentLocale).catch(() => {
-        // フォールバック
-        this.currentLocale = this.config.defaultLocale;
-      });
+      // REGRESSION fix: navigator.language is almost always region-qualified
+      // (en-US, fr-FR, de-DE, pt-BR, ...), but only base-language files exist
+      // on disk (see i18n/*.json — no en-US.json etc.). Loading the raw
+      // detected tag directly 404'd for virtually every non-Japanese
+      // browser, and the catch reset currentLocale all the way back to
+      // defaultLocale ('ja') instead of the correct base language (e.g.
+      // 'en') that would have loaded successfully. Try the same reduction
+      // chain buildFallbackChain() already uses for key lookup (detected
+      // tag -> family -> base language -> configured fallback) and adopt
+      // whichever locale actually has a file, before giving up entirely.
+      let resolved: LocaleCode | null = null;
+      for (const candidate of this.buildFallbackChain(this.currentLocale)) {
+        if (candidate === this.config.defaultLocale) continue; // already loaded above
+        try {
+          await this.loadLocale(candidate);
+          resolved = candidate;
+          break;
+        } catch {
+          // try the next candidate in the chain
+        }
+      }
+      this.currentLocale = resolved ?? this.config.defaultLocale;
     }
     if (this.config.preload) {
       await Promise.allSettled(
@@ -242,7 +283,7 @@ export class I18nManager {
   private lookup(locale: LocaleCode, key: string): string | undefined {
     const map = this.translations.get(locale);
     if (!map) return undefined;
-    const parts = key.split('.');
+    const parts = splitKey(key);
     let current: string | TranslationMap = map;
     for (const part of parts) {
       if (typeof current !== 'object' || current === null) return undefined;
@@ -305,8 +346,14 @@ export class I18nManager {
           if (end !== -1) {
             const key = head[1];
             const body = template.slice(i + head[0].length, end); // option list, sans final '}'
+            // A missing/non-numeric count arg used to blank out the whole
+            // plural construct. Intl.PluralRules.select(NaN) actually
+            // resolves to 'other' (verified: does not throw), so just let
+            // selectPlural fall back to the 'other' option like real ICU
+            // does for an invalid plural argument, instead of special-casing
+            // NaN into an empty string here.
             const count = Number(params[key]);
-            result += Number.isNaN(count) ? '' : this.selectPlural(count, body, locale);
+            result += this.selectPlural(count, body, locale);
             i = end + 1;
             continue;
           }
@@ -337,8 +384,10 @@ export class I18nManager {
     const category = this.getPluralRules(locale).select(count);
     const ruleMap = this.parsePluralRules(rules);
     const chosen = ruleMap.get(category) ?? ruleMap.get('other') ?? '';
-    // ICU '#' is the count placeholder; may appear multiple times.
-    return chosen.replace(/#/g, String(count));
+    // ICU '#' is the count placeholder; may appear multiple times. A missing/
+    // non-numeric count has no sensible placeholder value — show nothing
+    // rather than the literal string "NaN".
+    return chosen.replace(/#/g, Number.isNaN(count) ? '' : String(count));
   }
 
   /**

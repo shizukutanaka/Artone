@@ -11,12 +11,13 @@
  * @version 3.2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ds, color, space, radius, motion, z, type FeatureTier, CSS_VARIABLES, typography } from './design-system';
 import { FirstRunExperience, type FirstRunResult, type ExperienceLevel } from './first-run';
 import { CommandPalette, createDefaultCommands, type PaletteItem } from './command-palette';
 import { safeStorageGet, safeStorageSet, formatTimecode } from './utils';
 import { DropZone } from './drop-zone';
+import { ErrorBoundary } from './error-boundary';
 import { EngineProvider, useEngine, configFromFirstRun } from './engine-context';
 import { t } from '../i18n/i18n-manager';
 import { Inspector, type Selection } from './Inspector';
@@ -37,7 +38,7 @@ function tierFromLevel(level: ExperienceLevel): FeatureTier {
 type EngineActions = ReturnType<typeof useEngine>['actions'];
 
 /** Global keyboard shortcut dispatcher. Extracted to keep EditorUI complexity low. */
-function buildKeydownHandler(
+export function buildKeydownHandler(
   actions: EngineActions,
   setCmdOpen: React.Dispatch<React.SetStateAction<boolean>>,
 ): (e: KeyboardEvent) => void {
@@ -52,10 +53,13 @@ function buildKeydownHandler(
     } else if (e.key === ' ') {
       e.preventDefault();
       actions.togglePlayPause();
-    } else if (mod && e.key === 'z' && !e.shiftKey) {
+    } else if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+      // `e.key` is the shifted character while Shift is held ('Z', not 'z'),
+      // so redo (Cmd/Ctrl+Shift+Z) never matched `e.key === 'z'' below —
+      // lowercase both sides so undo/redo are keyed only on Shift.
       e.preventDefault();
       actions.undo();
-    } else if (mod && e.key === 'z' && e.shiftKey) {
+    } else if (mod && e.key.toLowerCase() === 'z' && e.shiftKey) {
       e.preventDefault();
       actions.redo();
     } else if (mod && e.key === 's') {
@@ -65,15 +69,60 @@ function buildKeydownHandler(
   };
 }
 
+/**
+ * Apply an Inspector clip-selection edit back onto the timeline clip it
+ * describes. Only the fields with a real backing property on TimelineClip
+ * (name/start/duration) are propagated — Inspector's other ClipSelection
+ * fields (speed/opacity/position/scale/rotation) are presentational only
+ * for now (TimelineClip has no transform properties to write them back to).
+ * Returns the same array reference when there's nothing to apply, so callers
+ * can pass this straight to a setState updater without an extra no-op render.
+ */
+export function applyClipSelectionEdit(clips: TimelineClip[], next: Selection): TimelineClip[] {
+  if (next.type !== 'clip') return clips;
+  return clips.map((c) =>
+    c.id === next.id
+      ? { ...c, name: next.name, start: next.startTime, duration: next.duration }
+      : c
+  );
+}
+
+/**
+ * Files whose engine import actually succeeded, i.e. `files` minus
+ * `failed`. handleImport() must only add these to the local Media
+ * Browser/timeline state — a file the engine failed to import has no real
+ * backing media, so showing it as a normal, selectable clip would be a
+ * silent divergence between the UI and the actual project state.
+ */
+export function filterImportedFiles(files: File[], failed: Set<File>): File[] {
+  return files.filter((f) => !failed.has(f));
+}
+
+/** Callbacks dispatchAppCommand may invoke, grouped to stay within the 3-arg function limit. */
+export interface DispatchAppCommandHandlers {
+  setActivePanel: React.Dispatch<React.SetStateAction<string | null>>;
+  importFiles: (files: File[]) => void;
+  setError: (message: string) => void;
+}
+
 /** Routes app.emit commands to UI state. Extracted to keep EditorUI complexity low. */
-function dispatchAppCommand(
+export function dispatchAppCommand(
   name: string,
   payload: unknown,
-  setActivePanel: React.Dispatch<React.SetStateAction<string | null>>,
-  importFiles: (files: File[]) => void,
+  handlers: DispatchAppCommandHandlers,
 ): void {
+  const { setActivePanel, importFiles, setError } = handlers;
   switch (name) {
     case 'togglePanel':
+      // REGRESSION fix: 'timeline' and 'media' (F5/F6) have no case in the
+      // right-sidebar body switch below -- those two are always-visible,
+      // dedicated sections of their own (the main TimelineView and the
+      // left-side MediaBrowser), not right-sidebar content. Opening the
+      // sidebar for them produced a title bar over a completely empty
+      // body. Until/unless there's a real "hide the timeline/media
+      // browser" feature to wire this to, treat those two ids as a no-op
+      // instead of showing a broken empty panel.
+      if (payload === 'timeline' || payload === 'media') break;
       setActivePanel((p) => (p === payload ? null : (payload as string)));
       break;
     case 'showExport':
@@ -99,6 +148,23 @@ function dispatchAppCommand(
           document.documentElement.requestFullscreen().catch(() => undefined);
         }
       }
+      break;
+    case 'init:partial': {
+      // REGRESSION fix: ArtoneApp.initialize() collects init failures
+      // (project/audio/recovery/shortcuts/autosave) into an `errors` array
+      // and emits this event, but nothing ever consumed it -- the user got
+      // zero indication that e.g. recovery.init() failed and their session
+      // would not be crash-protected.
+      const errors = (payload as { errors?: string[] } | undefined)?.errors;
+      if (errors && errors.length > 0) {
+        setError(t('error.init.partial', { message: errors.join('; ') }));
+      }
+      break;
+    }
+    case 'recoveryError':
+      // Emitted when RecoveryManager's status subscription reports 'error'
+      // (e.g. auto-save started failing mid-session) -- previously silent.
+      setError(t('recovery.autoSaveFailed'));
       break;
     default:
       // Future extensibility: addMarker, nextMarker, prevMarker, toggleSnap, etc.
@@ -193,6 +259,23 @@ export const ArtoneShell: React.FC = () => {
   );
 };
 
+/**
+ * Application root: ArtoneShell wrapped in an ErrorBoundary.
+ *
+ * entry.tsx renders this (not ArtoneShell directly) so any uncaught error
+ * anywhere in the React tree hits the boundary's recovery UI instead of
+ * unmounting the whole app to a blank white screen. Extracted here (rather
+ * than inlined in entry.tsx) because entry.tsx runs bootstrap side effects
+ * on import — getElementById('#app'), setupI18n().init(), createRoot() —
+ * which make it untestable in isolation; this component has none, so the
+ * "shell is wrapped by a boundary" contract can be unit-tested directly.
+ */
+export const AppRoot: React.FC = () => (
+  <ErrorBoundary>
+    <ArtoneShell />
+  </ErrorBoundary>
+);
+
 // ============================================================
 // EditorUI — エンジン接続済みの本体
 // ============================================================
@@ -255,21 +338,41 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     });
   }, []);
 
+  // Inspector edits used to mutate only the local `selection` object — never
+  // the actual clip, so name/start/duration changes silently had no effect
+  // on the timeline. applyClipSelectionEdit propagates the fields that have
+  // a real backing property on TimelineClip.
+  const handleSelectionChange = useCallback((next: Selection) => {
+    setSelection(next);
+    setTimelineClips((prev) => applyClipSelectionEdit(prev, next));
+  }, []);
+
   /** Probe a video/audio File for its duration via a temporary media element. */
   const probeFileDuration = useCallback((file: File, objectUrl: string): Promise<number> => {
     return new Promise((resolve) => {
       const el = document.createElement(file.type.startsWith('audio') ? 'audio' : 'video');
       el.preload = 'metadata';
-      el.onloadedmetadata = () => { resolve(el.duration || 30); };
-      el.onerror = () => resolve(30);
+      const cleanup = () => {
+        el.onloadedmetadata = null;
+        el.onerror = null;
+        el.src = ''; // stop any in-progress buffering and drop the src reference
+      };
+      el.onloadedmetadata = () => { const dur = el.duration || 30; cleanup(); resolve(dur); };
+      el.onerror = () => { cleanup(); resolve(30); };
       el.src = objectUrl;
     });
   }, []);
 
   /** Import files into engine AND add them to the local media browser and timeline. */
   const handleImport = useCallback(async (files: File[]) => {
-    await actions.importFiles(files);
-    for (const file of files) {
+    // REGRESSION fix: this used to unconditionally add every file below
+    // regardless of whether the engine import actually succeeded --
+    // `engine.error` would show an "Import failed" toast, but the failed
+    // file still showed up as a normal, selectable clip in the Media
+    // Browser/timeline with no real backing media, and no way for the
+    // user to tell the two apart.
+    const failed = await actions.importFiles(files);
+    for (const file of filterImportedFiles(files, failed)) {
       const type: MediaItem['type'] =
         file.type.startsWith('video') ? 'video' :
         file.type.startsWith('audio') ? 'audio' : 'image';
@@ -303,12 +406,35 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     }
   }, [actions, probeFileDuration]);
 
+  // Stable MediaBrowser callbacks so the (memoized) browser does not re-render on
+  // every engine tick (e.g. the playhead advancing during playback). Functional
+  // setState keeps these dependency-free and referentially stable.
+  const handleMediaImport = useCallback((files: File[]) => {
+    handleImport(files).catch(() => undefined);
+  }, [handleImport]);
+
+  const handleMediaSelect = useCallback((item: MediaItem) => {
+    setSelectedMediaId(item.id);
+  }, []);
+
+  const handleMediaDelete = useCallback((id: string) => {
+    setMediaItems((prev) => {
+      // Release the blob URL created at import time; otherwise it leaks until
+      // document unload (revoke is a no-op if already released, so StrictMode
+      // double-invoke is safe).
+      const removed = prev.find((m) => m.id === id);
+      if (removed) URL.revokeObjectURL(removed.url);
+      return prev.filter((m) => m.id !== id);
+    });
+    setSelectedMediaId((cur) => (cur === id ? undefined : cur));
+  }, []);
+
   // First-Run で選択されたファイルをインポート
   useEffect(() => {
     if (engine.isReady && pendingFiles.length > 0) {
       handleImport(pendingFiles).catch(() => undefined);
     }
-  }, [engine.isReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [engine.isReady, pendingFiles, handleImport]);
 
   // グローバルショートカット
   useEffect(() => {
@@ -321,11 +447,22 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
   useEffect(() => {
     const cmd = engine.lastCommand;
     if (!cmd) return;
-    dispatchAppCommand(cmd.cmd.name, cmd.cmd.payload, setActivePanel, actions.importFiles);
+    // Route through handleImport (not the raw engine action) so files
+    // imported via the shortcut/menu "showImport" command also appear in
+    // the media browser and get an auto-placed timeline clip — previously
+    // this silently imported into the engine only, looking like a no-op.
+    dispatchAppCommand(cmd.cmd.name, cmd.cmd.payload, {
+      setActivePanel,
+      importFiles: (files) => { handleImport(files).catch(() => undefined); },
+      setError: (message) => actions.setError(message),
+    });
   }, [engine.lastCommand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // コマンドパレット — エンジンの実アクションを渡す
-  const commands: PaletteItem[] = createDefaultCommands({
+  // useMemo prevents recreating the commands array (and all its closures) on every
+  // render. actions is stable (engine-context useMemo), so this only rebuilds when
+  // the engine reinitializes (rare).
+  const commands = useMemo<PaletteItem[]>(() => createDefaultCommands({
     play: () => actions.togglePlayPause(),
     save: () => { actions.save(); },
     undo: () => actions.undo(),
@@ -337,7 +474,9 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
       input.accept = 'video/*,audio/*,image/*';
       input.onchange = () => {
         const files = Array.from(input.files ?? []);
-        if (files.length > 0) actions.importFiles(files);
+        // handleImport (not the raw engine action) so palette-imported files
+        // also land in the media browser / get an auto-placed clip.
+        if (files.length > 0) handleImport(files).catch(() => undefined);
       };
       input.click();
     },
@@ -350,7 +489,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     toggleTheme: () => {},
     showShortcuts: () => {},
     about: () => {},
-  });
+  }), [actions, handleImport]);
 
   const sidebarWidth = sidebarOpen ? 280 : 0;
 
@@ -421,6 +560,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
           </span>
           <button
             onClick={() => actions.togglePlayPause()}
+            aria-label={engine.isPlaying ? t('timeline.pause') : t('timeline.play')}
             style={{
               ...ds.button('primary'), width: 36, height: 36,
               borderRadius: radius.full, padding: 0,
@@ -453,32 +593,22 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               flexShrink: 0,
             }}>
               <span style={ds.text('title')}>{t('media.title')}</span>
-              <button onClick={() => setSidebarOpen(false)} style={ds.button('ghost')}>◁</button>
+              <button onClick={() => setSidebarOpen(false)} aria-label={t('media.sidebarClose')} style={ds.button('ghost')}>◁</button>
             </div>
             <div style={{ flex: 1, overflow: 'hidden' }}>
               <MediaBrowser
                 items={mediaItems}
                 selectedId={selectedMediaId}
-                onImport={(files) => { handleImport(files).catch(() => undefined); }}
-                onSelect={(item) => setSelectedMediaId(item.id)}
-                onDelete={(id) => {
-                  setMediaItems((prev) => {
-                    // Release the blob URL created at import time; otherwise it
-                    // leaks until document unload (revoke is a no-op if already
-                    // released, so StrictMode double-invoke is safe).
-                    const removed = prev.find((m) => m.id === id);
-                    if (removed) URL.revokeObjectURL(removed.url);
-                    return prev.filter((m) => m.id !== id);
-                  });
-                  if (selectedMediaId === id) setSelectedMediaId(undefined);
-                }}
+                onImport={handleMediaImport}
+                onSelect={handleMediaSelect}
+                onDelete={handleMediaDelete}
               />
             </div>
           </>}
         </aside>
 
         {/* 中央 (プレビュー + タイムライン) — DropZone でファイルドロップ受付 */}
-        <DropZone onFilesDropped={(files) => actions.importFiles(files)}>
+        <DropZone onFilesDropped={(files) => { handleImport(files).catch(() => undefined); }}>
           <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* プレビュー */}
           <div style={{
@@ -493,7 +623,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               {engine.isReady ? t('preview.webgpu') : '...'}
             </div>
             {!sidebarOpen && (
-              <button onClick={() => setSidebarOpen(true)}
+              <button onClick={() => setSidebarOpen(true)} aria-label={t('media.sidebarOpen')}
                 style={{ ...ds.button('ghost'), position: 'absolute', left: space[2], top: space[2] }}>▷</button>
             )}
           </div>
@@ -534,7 +664,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               flexShrink: 0,
             }}>
               <span style={ds.text('title')}>{panelTitle(activePanel)}</span>
-              <button onClick={() => setActivePanel(null)} style={ds.button('ghost')}>✕</button>
+              <button onClick={() => setActivePanel(null)} aria-label={t('common.close')} style={ds.button('ghost')}>✕</button>
             </div>
             <div style={{ flex: 1, overflow: 'auto', padding: space[3] }}>
               {activePanel === 'scopes' && (
@@ -549,13 +679,14 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
                 />
               )}
               {activePanel === 'inspector' && (
-                <Inspector selection={selection} onChange={setSelection} />
+                <Inspector selection={selection} onChange={handleSelectionChange} />
               )}
               {activePanel === 'export' && (
                 <ExportPanel onExport={actions.exportProject} />
               )}
               {(activePanel === 'color' || activePanel === 'audio' ||
-                activePanel === 'captions' || activePanel === 'text') && (
+                activePanel === 'captions' || activePanel === 'text' ||
+                activePanel === 'effects') && (
                 <PlaceholderPanel name={panelTitle(activePanel)} />
               )}
             </div>
@@ -583,6 +714,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
             </div>
             <button
               onClick={() => actions.clearError?.()}
+              aria-label={t('common.close')}
               style={{ ...ds.button('ghost'), flexShrink: 0, fontSize: 16 }}
             >✕</button>
           </div>

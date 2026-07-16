@@ -345,3 +345,68 @@ describe('RingBuffer — stress', () => {
     expect(totalRead).toBeGreaterThan(200000);
   });
 });
+
+// ─── Cross-thread (SharedArrayBuffer + Atomics) mode ──────────────────────────
+
+describe('RingBuffer — SharedArrayBuffer cross-thread mode', () => {
+  /** Build a Float32Array view with 8 header bytes reserved, per the class's documented convention. */
+  function makeSharedData(capacity: number): Float32Array {
+    const sab = new SharedArrayBuffer(capacity * Float32Array.BYTES_PER_ELEMENT + 8);
+    return new Float32Array(sab, 8);
+  }
+
+  it('a plain (non-shared) buffer is not cross-thread shared', () => {
+    const rb = createFloat32RingBuffer(16);
+    expect(rb.isCrossThreadShared).toBe(false);
+  });
+
+  it('a SharedArrayBuffer-backed buffer with 8 reserved header bytes is cross-thread shared', () => {
+    const rb = new RingBuffer(16, makeSharedData(16));
+    expect(rb.isCrossThreadShared).toBe(true);
+  });
+
+  it(
+    'REGRESSION: two independently-constructed instances wrapping the same SharedArrayBuffer see each other\'s progress',
+    () => {
+      // Before fix: _rPos/_wPos were always plain per-instance number fields,
+      // even when backed by SharedArrayBuffer -- two RingBuffer instances
+      // wrapping the same underlying buffer (exactly the documented
+      // producer-thread / consumer-thread pattern) each had their own
+      // disconnected position counters starting at 0, so the "consumer"
+      // instance could never see data the "producer" instance wrote.
+      const data = makeSharedData(16);
+      const producer = new RingBuffer(16, data);
+      const consumer = new RingBuffer(16, data);
+
+      const written = producer.write(seq(5, 10)); // [10,11,12,13,14]
+      expect(written).toBe(5);
+
+      // The consumer instance must observe the producer's write immediately
+      // (same underlying Int32 position counters), not report empty.
+      expect(consumer.isEmpty).toBe(false);
+      expect(consumer.availableRead).toBe(5);
+
+      const dst = new Float32Array(5);
+      const readCount = consumer.read(dst);
+      expect(readCount).toBe(5);
+      expect(Array.from(dst)).toEqual([10, 11, 12, 13, 14]);
+
+      // And the producer instance must observe the consumer's read (shared
+      // position), leaving the buffer empty from either instance's view.
+      expect(producer.isEmpty).toBe(true);
+      expect(producer.availableRead).toBe(0);
+    }
+  );
+
+  it('constructing a second instance does not reset an already-in-progress shared buffer', () => {
+    // Before fix (if a reset-on-construct had been added instead): a peer
+    // thread constructing its own RingBuffer wrapper after data was already
+    // written would clobber the in-progress position back to empty.
+    const data = makeSharedData(16);
+    const producer = new RingBuffer(16, data);
+    producer.write(seq(4, 100));
+
+    const consumerConstructedLater = new RingBuffer(16, data);
+    expect(consumerConstructedLater.availableRead).toBe(4);
+  });
+});

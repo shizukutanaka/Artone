@@ -99,6 +99,52 @@ describe('osvToCVE', () => {
     expect(cve.affectedVersions).toBe('1.0.0||1.0.1');
   });
 
+  it('REGRESSION: multiple introduced/fixed pairs produce disjoint ranges, not a collapsed single range', () => {
+    // Before fix: the loop kept only the LAST introduced/fixed event seen,
+    // so a package re-introducing the vulnerability after a backport-fix
+    // (vulnerable in [0,1.0.0), fixed, then re-vulnerable in [1.5.0,2.0.0),
+    // fixed again) collapsed to a single ">=1.5.0 <2.0.0" range -- silently
+    // reporting a version in the FIRST vulnerable window (e.g. 0.9.0) as
+    // safe, a false negative in the exact "critical CVE は自動的に CI 失敗"
+    // scan path.
+    const cve = osvToCVE(makeOSV({
+      affected: [{ package: { name: 'pkg', ecosystem: 'npm' }, ranges: [{
+        type: 'SEMVER',
+        events: [
+          { introduced: '0' }, { fixed: '1.0.0' },
+          { introduced: '1.5.0' }, { fixed: '2.0.0' },
+        ],
+      }] }],
+    }), 'pkg');
+    expect(cve.affectedVersions).toBe('<1.0.0||>=1.5.0 <2.0.0');
+  });
+
+  it('REGRESSION: a trailing open-ended introduced event (still vulnerable, never fixed) is preserved', () => {
+    const cve = osvToCVE(makeOSV({
+      affected: [{ package: { name: 'pkg', ecosystem: 'npm' }, ranges: [{
+        type: 'SEMVER',
+        events: [
+          { introduced: '0' }, { fixed: '1.0.0' },
+          { introduced: '3.0.0' }, // no closing fixed event -> still vulnerable
+        ],
+      }] }],
+    }), 'pkg');
+    expect(cve.affectedVersions).toBe('<1.0.0||>=3.0.0');
+  });
+
+  it('REGRESSION: fixedIn reports the most recent fix, not the first, across multiple ranges', () => {
+    const cve = osvToCVE(makeOSV({
+      affected: [{ package: { name: 'pkg', ecosystem: 'npm' }, ranges: [{
+        type: 'SEMVER',
+        events: [
+          { introduced: '0' }, { fixed: '1.0.0' },
+          { introduced: '1.5.0' }, { fixed: '2.0.0' },
+        ],
+      }] }],
+    }), 'pkg');
+    expect(cve.fixedIn).toBe('2.0.0');
+  });
+
   it('derives severity from a direct CVSS number string', () => {
     const cve = osvToCVE(makeOSV({ severity: [{ type: 'CVSS_V3', score: '9.8' }] }), 'pkg');
     expect(cve.cvss).toBeCloseTo(9.8, 5);

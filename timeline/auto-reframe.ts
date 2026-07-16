@@ -124,7 +124,7 @@ export function computeReframe(
       const dx = nx - cx;
       const dy = ny - cy;
       const dist = Math.hypot(dx, dy);
-      if (dist > maxSpeed && dist > 0) {
+      if (dist > maxSpeed) {
         nx = cx + (dx / dist) * maxSpeed;
         ny = cy + (dy / dist) * maxSpeed;
       }

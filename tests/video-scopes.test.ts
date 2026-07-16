@@ -164,15 +164,32 @@ describe('HistogramScope.getStats()', () => {
   it('skinTonePercentage is 0 for mid-gray image', () => {
     const img = solidImageData(4, 4, 128, 128, 128);
     const stats = scope.getStats(img);
-    // Gray has u≈0 v≈0 → angle near 0 or undefined; 15-35 deg skin range not hit
+    // Gray has u≈0, v≈0 — near the vectorscope origin, outside any hue sector.
     expect(stats.skinTonePercentage).toBe(0);
   });
 
-  it('skinTonePercentage is in [0, 100]', () => {
-    const img = solidImageData(4, 4, 200, 150, 100);
-    const stats = scope.getStats(img);
-    expect(stats.skinTonePercentage).toBeGreaterThanOrEqual(0);
-    expect(stats.skinTonePercentage).toBeLessThanOrEqual(100);
+  it('REGRESSION: skinTonePercentage actually detects real skin tones (was always ~0)', () => {
+    // Before fix: the angular sector was [15°,35°], but these skin colors'
+    // (Cb,Cr) angle is ~118°-144° — the sector selected blue-magenta/violet
+    // hues instead, so skinTonePercentage was always 0 regardless of input.
+    for (const [r, g, b] of [
+      [224, 160, 128], // light skin, ~125°, y=171
+      [200, 150, 100], // mid skin, ~138°, y=156
+      [92, 51, 38],    // dark skin, ~118°, y=58
+      [200, 172, 135], // pale skin, ~144°, y=175
+    ]) {
+      const img = solidImageData(4, 4, r, g, b);
+      const stats = scope.getStats(img);
+      expect(stats.skinTonePercentage).toBe(100);
+    }
+  });
+
+  it('does not flag clearly non-skin hues (green/blue/cyan) as skin', () => {
+    for (const [r, g, b] of [[0, 255, 0], [0, 0, 255], [0, 255, 255]]) {
+      const img = solidImageData(4, 4, r, g, b);
+      const stats = scope.getStats(img);
+      expect(stats.skinTonePercentage).toBe(0);
+    }
   });
 
   it('returns finite neutral stats for an empty frame (no NaN from 0/0)', () => {
@@ -347,6 +364,49 @@ describe('WaveformScope.analyze()', () => {
     const bitmap = scope.analyze(img);
     expect(bitmap).toBeDefined();
   });
+
+  it.skipIf(!canvasAvailable)(
+    'REGRESSION: parade mode does not bleed the R lane into the G lane\'s first column',
+    () => {
+      // Before fix: paradeX = Math.floor(x / 3) only lands exactly within
+      // [0, thirdWidth) when width is an exact multiple of 3. For width=400
+      // (thirdWidth = floor(400/3) = 133), the scope's last column (x=399)
+      // computed paradeX = floor(399/3) = 133 -- one past the R lane's own
+      // last column (132) and exactly the G lane's first column (0 + 133) --
+      // so a strong R-only pixel at the frame's last column bled red into
+      // what should be a pure G-lane readout.
+      const width = 400, height = 256;
+      const scope = new WaveformScope({ width, height });
+      scope.setMode('parade');
+
+      const frameWidth = width; // 1:1 mapping: frame column x -> scope column x
+      const data = new Uint8ClampedArray(frameWidth * 1 * 4); // all-black background
+      for (let x = 0; x < frameWidth; x++) data[x * 4 + 3] = 255; // opaque black
+      // A strong R-only pixel at the scope's last column.
+      const lastCol = frameWidth - 1;
+      data[lastCol * 4] = 200;     // R
+      data[lastCol * 4 + 1] = 0;   // G
+      data[lastCol * 4 + 2] = 0;   // B
+      data[lastCol * 4 + 3] = 255;
+      const img = new ImageData(data, frameWidth, 1);
+
+      scope.analyze(img);
+
+      const thirdWidth = Math.floor(width / 3); // 133
+      const waveData = (scope as unknown as { waveImageData: ImageData }).waveImageData.data;
+      const rowForR = height - Math.ceil((200 / 255) * height);
+
+      // R's own last column must show the red dot.
+      const rOwnOffset = (rowForR * width + (thirdWidth - 1)) * 4;
+      expect(waveData[rOwnOffset + 3]).toBeGreaterThan(0);
+
+      // The G lane's first column, at the same row, must remain untouched --
+      // no red (or any) dot bled in from the R lane's would-be overlapping
+      // column.
+      const gLaneFirstColOffset = (rowForR * width + thirdWidth) * 4;
+      expect(waveData[gLaneFirstColOffset + 3]).toBe(0);
+    }
+  );
 });
 
 describe('Vectorscope.analyze()', () => {

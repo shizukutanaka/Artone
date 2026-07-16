@@ -37,6 +37,9 @@ export interface Comment {
   replies: Comment[];
   resolved: boolean;
   clipId?: string;
+  /** Set on replies only, so resolveComment/deleteComment can locate and
+   *  splice them out of their parent's `replies` array by id. */
+  parentId?: string;
 }
 
 export interface Annotation {
@@ -81,6 +84,10 @@ export class CollaborationEngine {
   private users: Map<string, CollabUser> = new Map();
   private comments: Map<string, Comment> = new Map();
   private annotations: Map<string, Annotation> = new Map();
+  // Secondary index: frame number → annotation IDs for O(1) lookup.
+  // Kept in sync by addAnnotation()/deleteAnnotation() to avoid O(N)
+  // full-scan in getAnnotationsForFrame() which is called at 60fps during scrubbing.
+  private _annotationFrameIndex: Map<number, Set<string>> = new Map();
   private versions: Version[] = [];
   private localUser: CollabUser | null = null;
   private peers: Map<string, RTCPeerConnection> = new Map();
@@ -144,6 +151,13 @@ export class CollaborationEngine {
     }
     this.peers.clear();
     this.channels.clear();
+    // Clear per-session state so re-connecting starts clean. comments/annotations
+    // are project content and survive disconnect; they are NOT cleared here.
+    this.users.clear();
+    this.localUser = null;
+    this.vectorClock.clear();
+    this.docState.clear();
+    this.outgoing = [];
     this.connected = false;
     this.notify();
   }
@@ -233,10 +247,18 @@ export class CollaborationEngine {
       content,
       timestamp: Date.now(),
       replies: [],
-      resolved: false
+      resolved: false,
+      parentId
     };
 
     parent.replies.push(reply);
+    // Register the reply under its own id too — otherwise resolveComment/
+    // deleteComment (both plain `this.comments.get(id)` lookups) can never
+    // find it and silently no-op when a caller resolves/deletes a reply.
+    // The same object reference is held by both `parent.replies` and this
+    // map entry, so mutating one (e.g. `.resolved = true`) is visible via
+    // either path — no data duplication.
+    this.comments.set(reply.id, reply);
     this.broadcastUpdate('comment-reply', { parentId, reply });
     this.notify();
     return reply;
@@ -252,6 +274,18 @@ export class CollaborationEngine {
   }
 
   deleteComment(commentId: string): void {
+    const comment = this.comments.get(commentId);
+    if (comment?.parentId) {
+      const parent = this.comments.get(comment.parentId);
+      if (parent) {
+        parent.replies = parent.replies.filter(r => r.id !== commentId);
+      }
+    } else {
+      // Deleting a top-level comment must also drop its replies' own map
+      // entries, or they'd linger as orphaned, independently resolvable/
+      // deletable entries with no parent.
+      comment?.replies.forEach(r => this.comments.delete(r.id));
+    }
     this.comments.delete(commentId);
     this.broadcastUpdate('comment-delete', { commentId });
     this.notify();
@@ -272,19 +306,40 @@ export class CollaborationEngine {
     };
 
     this.annotations.set(annotation.id, annotation);
+    // Update secondary frame index
+    let frameSet = this._annotationFrameIndex.get(frame);
+    if (!frameSet) { frameSet = new Set(); this._annotationFrameIndex.set(frame, frameSet); }
+    frameSet.add(annotation.id);
     this.broadcastUpdate('annotation-add', annotation);
     this.notify();
     return annotation;
   }
 
   deleteAnnotation(annotationId: string): void {
+    const annotation = this.annotations.get(annotationId);
+    if (annotation) {
+      const frameSet = this._annotationFrameIndex.get(annotation.frame);
+      if (frameSet) {
+        frameSet.delete(annotationId);
+        // Remove the empty Set so the index doesn't accumulate stale keys.
+        if (frameSet.size === 0) this._annotationFrameIndex.delete(annotation.frame);
+      }
+    }
     this.annotations.delete(annotationId);
     this.broadcastUpdate('annotation-delete', { annotationId });
     this.notify();
   }
 
   getAnnotationsForFrame(frame: number): Annotation[] {
-    return Array.from(this.annotations.values()).filter(a => a.frame === frame);
+    // O(1) frame lookup via secondary index; was O(N) full scan at 60fps during scrubbing.
+    const ids = this._annotationFrameIndex.get(frame);
+    if (!ids || ids.size === 0) return [];
+    const result: Annotation[] = [];
+    for (const id of ids) {
+      const a = this.annotations.get(id);
+      if (a) result.push(a);
+    }
+    return result;
   }
 
   // ============================================================
@@ -350,6 +405,13 @@ export class CollaborationEngine {
       path, op, value,
       clock: Object.fromEntries(this.vectorClock)
     });
+    // REGRESSION fix: every other mutating method (addComment, resolveComment,
+    // deleteComment, addAnnotation, createVersion, restoreVersion, etc.) calls
+    // notify() so subscribers re-render. applyOperation mutated docState and
+    // broadcast the change but never notified local subscribers, so a UI bound
+    // via subscribe() would not reflect a local edit until some unrelated
+    // action happened to trigger notify().
+    this.notify();
   }
 
   /**
@@ -483,7 +545,11 @@ export class CollaborationEngine {
   }
 
   getComments(): Comment[] {
-    return Array.from(this.comments.values());
+    // Replies are also registered in `this.comments` (so resolveComment/
+    // deleteComment can find them by id) but must not surface here as
+    // top-level threads — they're already nested under their parent's
+    // `replies` array.
+    return Array.from(this.comments.values()).filter(c => !c.parentId);
   }
 
   getUnresolvedComments(): Comment[] {

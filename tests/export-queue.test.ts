@@ -256,6 +256,33 @@ describe('failure and retry', () => {
     expect(job.result).toBe('ok');
     expect(job.retries).toBe(1);
   });
+
+  it('REGRESSION: drain() does not resolve during the retry backoff gap', async () => {
+    // Before fix: drain() resolved as soon as pending.length===0 && active.size===0,
+    // which is also true in the gap between a failed attempt's `finally` (removes
+    // the job from `active`) and its scheduleRetry() setTimeout firing (re-adds it
+    // to `pending`) — so with only one job in the queue, drain() could resolve
+    // before the job actually retried or reached a final status.
+    const q = createExportQueue<string>({ retryDelay: 30 });
+    let attempt = 0;
+    const job = q.enqueue(async () => {
+      attempt++;
+      if (attempt < 2) throw new Error('transient');
+      return 'ok';
+    }, { maxRetries: 2 });
+
+    await q.drain();
+    expect(job.status).toBe('completed');
+    expect(job.result).toBe('ok');
+  });
+
+  it('REGRESSION: drain() waits out retries even when the job ultimately fails', async () => {
+    const q = createExportQueue({ retryDelay: 30 });
+    const job = q.enqueue(async () => { throw new Error('boom'); }, { maxRetries: 2 });
+    await q.drain();
+    expect(job.status).toBe('failed');
+    expect(job.retries).toBe(2);
+  });
 });
 
 // ─── pause / resume ──────────────────────────────────────────────────────────
@@ -418,5 +445,32 @@ describe('REGRESSION: cancel during retry delay does not resurrect the job', () 
     // After the fix: status stays cancelled and no further attempts run.
     expect(job.status).toBe('cancelled');
     expect(attempts).toBe(1); // no resurrection
+  });
+
+  it('REGRESSION: cancelAll() cancels a job in retry back-off, not just array-queued pending jobs', async () => {
+    // Bug: cancelAll() iterated only the `pending` array. A job in retry
+    // back-off is status 'pending' but NOT in that array (it's waiting on
+    // scheduleRetry's setTimeout), so cancelAll() missed it; when the timer
+    // fired, scheduleRetry saw status still 'pending' and re-queued it, and
+    // it executed anyway despite cancelAll().
+    const q = createExportQueue({ retryDelay: 50 });
+    let attempts = 0;
+    const job = q.enqueue(async () => {
+      attempts++;
+      throw new Error('always fail');
+    }, { maxRetries: 3 });
+
+    // Let the first attempt fail and the job drop into retry limbo.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(attempts).toBe(1);
+    expect(job.status).toBe('pending'); // in retry back-off, not in the pending array
+
+    q.cancelAll();
+    expect(job.status).toBe('cancelled');
+
+    // Past the retry delay: the timer fires but must not resurrect the job.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(job.status).toBe('cancelled');
+    expect(attempts).toBe(1); // no second attempt
   });
 });

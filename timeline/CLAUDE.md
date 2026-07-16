@@ -11,4 +11,6 @@
 - marker-manager.ts
 - multicam-editor.ts
 - nested-sequences.ts
+- range-edit.ts
 - text-based-editing.ts
+- trim-operations.ts

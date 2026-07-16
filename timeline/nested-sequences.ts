@@ -111,6 +111,12 @@ export class NestedSequenceManager {
   private compoundRefs: Map<string, CompoundClipRef> = new Map();
   private activeSequenceId: string | null = null;
   private listeners: Set<() => void> = new Set();
+  // Per-sequence compositing canvas cache for renderNestedFrame.
+  // Keyed by sequenceId; recreated only when sequence resolution changes.
+  private readonly _renderCanvases = new Map<
+    string,
+    { canvas: OffscreenCanvas; ctx: OffscreenCanvasRenderingContext2D; w: number; h: number }
+  >();
 
   // ============================================================
   // Sequence Management
@@ -166,7 +172,8 @@ export class NestedSequenceManager {
     }
 
     this.sequences.delete(sequenceId);
-    
+    this._renderCanvases.delete(sequenceId);
+
     if (this.activeSequenceId === sequenceId) {
       this.activeSequenceId = this.sequences.size > 0
         ? this.sequences.keys().next().value ?? null
@@ -546,10 +553,18 @@ export class NestedSequenceManager {
     const path = new Set(_ancestors);
     path.add(sequenceId);
 
-    // Create canvas for compositing
-    const canvas = new OffscreenCanvas(sequence.settings.width, sequence.settings.height);
-    // willReadFrequently: the composited frame is read back via getImageData.
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    // Lazy-grow compositing canvas per sequence — avoids per-frame OffscreenCanvas alloc.
+    const { width: sw, height: sh } = sequence.settings;
+    let cached = this._renderCanvases.get(sequenceId);
+    if (!cached || cached.w !== sw || cached.h !== sh) {
+      const canvas = new OffscreenCanvas(sw, sh);
+      // willReadFrequently: the composited frame is read back via getImageData.
+      const newCtx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!newCtx) return null; // context acquisition failed (exhausted limit, etc.)
+      cached = { canvas, ctx: newCtx, w: sw, h: sh };
+      this._renderCanvases.set(sequenceId, cached);
+    }
+    const { canvas, ctx } = cached;
 
     // Clear
     ctx.fillStyle = '#000';

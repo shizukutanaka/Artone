@@ -13,10 +13,10 @@
 import { color } from './design-system';
 import { createLogger } from './logger';
 import { t } from '../i18n/i18n-manager';
-import { safeStorageGet, safeStorageSet, safeStorageRemove } from './utils';
 import { requestPersistentStorage } from './storage-persistence';
-import { MagneticTimeline, serializeTimelineState, type SerializedTimelineState } from '../timeline/magnetic-timeline';
+import { MagneticTimeline, serializeTimelineState, deserializeTimelineState, type SerializedTimelineState } from '../timeline/magnetic-timeline';
 import { TextBasedEditor } from '../timeline/text-based-editing';
+import { MarkerManager } from '../timeline/marker-manager';
 import { MultiCamEditor } from '../timeline/multicam-editor';
 import { ColorGradingEngine } from '../color/grading-engine';
 import { AudioEngine } from '../audio/audio-engine';
@@ -33,7 +33,7 @@ import { CollaborationEngine } from '../collab/collaboration-engine';
 import { HistoryManager } from '../undo/history-manager';
 import { ScopesManager } from '../scopes/video-scopes';
 import { PerformanceMonitor, AutoQualityAdjuster } from '../perf/performance-monitor';
-import { RecoveryManager } from '../recovery/recovery-manager';
+import { RecoveryManager, type RecoveryData } from '../recovery/recovery-manager';
 import { ProxyWorkflow } from '../media/proxy-workflow';
 import { KeyframeAnimator } from '../animation/keyframe-animator';
 import { MotionGraphicsEngine } from '../animation/motion-graphics';
@@ -95,18 +95,6 @@ const DEFAULT_CONFIG: AppConfig = {
 // Types
 // ============================================================
 
-interface RecoveryData {
-  projectId: string;
-  projectName: string;
-  timestamp: number;
-  data: { tracks: unknown[]; settings: unknown };
-  version: string;
-  // Serialized (JSON-safe) form — the live TimelineState holds Maps/Set that
-  // JSON.stringify would silently flatten to "{}".
-  timelineState?: SerializedTimelineState;
-  playhead?: number;
-}
-
 export class ArtoneApp {
   // Core engines
   public timeline: MagneticTimeline;
@@ -132,6 +120,7 @@ export class ArtoneApp {
   public keyframes: KeyframeAnimator;
   public motionGfx: MotionGraphicsEngine;
   public captions: CaptionManager;
+  public markers: MarkerManager;
   public shortcuts: ShortcutManager;
 
   // State
@@ -141,22 +130,22 @@ export class ArtoneApp {
   private isPlaying = false;
   private playbackFrame = 0;
   private animationId: number | null = null;
-  private autoSaveTimer: number | null = null;
-  private recoveryKey = 'artone_recovery';
+  /** Wall-clock time (performance.now()) when play() was last called, for drift-free frame advance. */
+  private playbackStartWallTime = 0;
+  /** Timeline frame at the moment play() was called, so elapsed wall-time maps to the right frame. */
+  private playbackStartFrame = 0;
+  /** Unsubscribes from RecoveryManager status changes; set in initialize(), torn down in dispose(). */
+  private recoveryStatusUnsubscribe: (() => void) | null = null;
 
-  // Named handler references so they can be removed in dispose() without leaking
-  // closures that keep the ArtoneApp instance alive after disposal.
-  private readonly _onBeforeUnload = (): void => { this.saveRecoveryData(); };
+  // Crash snapshots (error / unhandledrejection / beforeunload) and the periodic
+  // auto-save timer are owned by RecoveryManager (transactional IndexedDB). The
+  // only event RecoveryManager does not cover is tab-hide, so we keep a single
+  // named handler here that snapshots when the page becomes hidden. Named so it
+  // can be removed in dispose() without leaking a closure that pins the instance.
   private readonly _onVisibilityChange = (): void => {
-    if (document.hidden) this.saveRecoveryData();
-  };
-  private readonly _onError = (e: ErrorEvent): void => {
-    log.error('Artone crash:', e.error);
-    this.saveRecoveryData();
-  };
-  private readonly _onUnhandledRejection = (e: PromiseRejectionEvent): void => {
-    log.error('Artone unhandled rejection:', e.reason);
-    this.saveRecoveryData();
+    if (!document.hidden) return;
+    const proj = this.project.getCurrentProject();
+    void this.recovery.saveSnapshot('auto', proj?.id, proj?.name, this.buildRecoveryData());
   };
 
   constructor(config: Partial<AppConfig> = {}) {
@@ -190,6 +179,7 @@ export class ArtoneApp {
     this.keyframes = new KeyframeAnimator();
     this.motionGfx = new MotionGraphicsEngine();
     this.captions = new CaptionManager();
+    this.markers = new MarkerManager();
     this.shortcuts = new ShortcutManager();
   }
 
@@ -210,6 +200,14 @@ export class ArtoneApp {
       }
     } catch (e) {
       errors.push({ module: 'storage-persistence', error: e });
+    }
+
+    // Open the recovery IndexedDB (sets up crash detection) BEFORE checking for
+    // a previous session's snapshot — checkRecovery() reads from it.
+    try {
+      await this.recovery.init();
+    } catch (e) {
+      errors.push({ module: 'recovery-init', error: e });
     }
 
     // Check for crash recovery
@@ -257,15 +255,25 @@ export class ArtoneApp {
 
     // 初期化結果をイベントで通知 (UI が表示可能)
     if (errors.length > 0) {
-      log.warn(`init completed with ${errors.length} error(s):`,
-        errors.map((e) => `${e.module}: ${e.error}`));
-      this.emit?.('init:partial', { errors });
+      const formatted = errors.map((e) => `${e.module}: ${(e.error as Error)?.message ?? e.error}`);
+      log.warn(`init completed with ${errors.length} error(s):`, formatted);
+      this.emit?.('init:partial', { errors: formatted });
     }
   }
 
   private setupKeyboardShortcuts(): void {
     const sm = this.shortcuts;
     const tl = this.timeline;
+
+    // REGRESSION fix: ShortcutManager.activeContext defaults to 'global',
+    // and nothing ever called setContext() anywhere in the app -- every
+    // shortcut registered with context:'timeline' (split, in/out points,
+    // zoom, markers, tools, snap-toggle -- the large majority of non-global
+    // shortcuts) was permanently unreachable, even though its callback was
+    // correctly registered. This app has a single, always-active editing
+    // surface (no separate per-panel focus tracking), so the timeline
+    // context is the natural default to activate at startup.
+    sm.setContext('timeline');
 
     sm.registerCallback('play',         () => this.togglePlayback());
     sm.registerCallback('stop',         () => this.pause());
@@ -285,7 +293,12 @@ export class ArtoneApp {
     });
     sm.registerCallback('undo',         () => this.history.undo());
     sm.registerCallback('redo',         () => this.history.redo());
+    // All structural edits go through history (CLAUDE.md: クリップ操作は全て Command Pattern 経由).
     sm.registerCallback('split',        () => this.splitAtPlayhead());
+    sm.registerCallback('delete',       () => { const c = tl.deleteSelectedCommand(); if (c) this.history.execute(c); });
+    sm.registerCallback('rippleDelete', () => { const c = tl.deleteSelectedCommand(); if (c) this.history.execute(c); });
+    sm.registerCallback('lift',         () => { const c = tl.liftCommand();    if (c) this.history.execute(c); });
+    sm.registerCallback('extract',      () => { const c = tl.extractCommand(); if (c) this.history.execute(c); });
     sm.registerCallback('selectAll',    () => tl.selectRange(0, Infinity));
     sm.registerCallback('deselect',     () => tl.deselectAll());
     sm.registerCallback('setInPoint',   () => tl.setInPoint());
@@ -328,6 +341,10 @@ export class ArtoneApp {
 
   play(): void {
     this.isPlaying = true;
+    // Record the wall-clock origin and the frame we're starting from so the RAF
+    // loop can derive the correct frame index without accumulating delta-error.
+    this.playbackStartWallTime = performance.now();
+    this.playbackStartFrame = this.playbackFrame;
     this.timeline.play();
     this.startPlaybackLoop();
   }
@@ -340,27 +357,27 @@ export class ArtoneApp {
 
   private startPlaybackLoop(): void {
     const fps = this.config.defaultFps;
-    const frameTime = 1000 / fps;
-    let lastTime = performance.now();
 
     const loop = (currentTime: number) => {
       if (!this.isPlaying) return;
 
-      // Performance monitoring
       this.perf.beginFrame();
 
-      const delta = currentTime - lastTime;
-      if (delta >= frameTime) {
-        lastTime = currentTime - (delta % frameTime);
-        
+      // Derive the current frame from wall-clock elapsed time so we don't
+      // accumulate per-RAF rounding error (the old delta-based approach drifted).
+      const elapsedSec = (currentTime - this.playbackStartWallTime) / 1000;
+      const newFrame = this.playbackStartFrame + Math.floor(elapsedSec * fps);
+
+      if (newFrame !== this.playbackFrame) {
+        this.playbackFrame = newFrame;
+        const timeSec = newFrame / fps;
+        this.timeline.setPlayhead(timeSec);
+        this.emit?.('playhead', { frame: newFrame, time: timeSec });
+
         this.perf.markPhase('timeline');
         this.renderPreviewFrame();
-        
-        // Auto quality adjustment
-        const quality = this.autoQuality.update();
-        if (quality < 1.0) {
-          // Quality scale は AutoQualityAdjuster が perf 経由で制御
-        }
+
+        this.autoQuality.update();
       }
 
       this.perf.endFrame();
@@ -399,12 +416,11 @@ export class ArtoneApp {
   // ============================================================
 
   splitAtPlayhead(): void {
-    const state = this.timeline.getState();
-    const clipsAtPlayhead = this.timeline.getClipsAtTime(state.playhead);
-
-    for (const clip of clipsAtPlayhead) {
+    const { playhead } = this.timeline.getState();
+    for (const clip of this.timeline.getClipsAtTime(playhead)) {
       if (!clip.locked) {
-        this.timeline.splitClip(clip.id, state.playhead);
+        const cmd = this.timeline.splitClipCommand(clip.id, playhead);
+        if (cmd) this.history.execute(cmd);
       }
     }
   }
@@ -438,79 +454,111 @@ export class ArtoneApp {
   private setupAutoSave(): void {
     if (!this.config.autoSave) return;
 
-    this.autoSaveTimer = window.setInterval(() => {
-      this.saveRecoveryData();
-    }, this.config.autoSaveInterval);
+    // Delegate the periodic auto-save AND crash snapshots to RecoveryManager,
+    // which persists to a transactional IndexedDB store (checksum-verified,
+    // multi-snapshot, capacity-bounded) — far more robust than localStorage.
+    const proj = this.project.getCurrentProject();
+    this.recovery.startAutoSave(
+      () => this.buildRecoveryData(),
+      proj?.id ?? 'untitled',
+      proj?.name ?? 'Untitled',
+    );
   }
 
   private setupCrashRecovery(): void {
-    window.addEventListener('beforeunload', this._onBeforeUnload);
+    // error / unhandledrejection / beforeunload crash snapshots are installed by
+    // RecoveryManager.init() → setupCrashDetection(). Tab-hide is the only case
+    // it does not cover, so we attach just that here (named handler for cleanup).
     document.addEventListener('visibilitychange', this._onVisibilityChange);
-    window.addEventListener('error', this._onError);
-    window.addEventListener('unhandledrejection', this._onUnhandledRejection);
   }
 
-  private saveRecoveryData(): void {
-    try {
-      const recoveryData = {
-        timestamp: Date.now(),
-        projectId: this.project.getCurrentProject()?.id,
-        // Serialize so the Maps (tracks, clips) and Set (selection) survive the
-        // JSON round-trip — otherwise the entire timeline is lost from the snapshot.
-        timelineState: serializeTimelineState(this.timeline.getState()),
-        playhead: this.playbackFrame,
-        historyPosition: this.history.getPosition()
-      };
-
-      safeStorageSet(this.recoveryKey, JSON.stringify(recoveryData));
-    } catch (e) {
-      log.warn('Failed to save recovery data:', e);
-    }
+  /**
+   * Build the recovery payload from live engine state.
+   *
+   * The authoritative timeline lives in `timeline` as a serialized form (Maps →
+   * entries, Set → array) so the IndexedDB JSON round-trip cannot silently
+   * flatten it to `{}`. The typed clip/track/selection arrays mirror that data
+   * in a self-describing shape for inspection and forward compatibility.
+   */
+  private buildRecoveryData(): RecoveryData {
+    const state = this.timeline.getState();
+    return {
+      timeline: serializeTimelineState(state),
+      clips: [...state.clips.values()],
+      tracks: [...state.tracks.values()],
+      // No effect state source exists yet: Clip carries no effects field and
+      // no effect registry is wired into the app, so there is nothing to
+      // capture here (tracked as a separate integration gap).
+      effects: [],
+      markers: this.markers.getAllMarkers(),
+      playhead: this.playbackFrame,
+      selection: [...state.selection],
+      historyPosition: this.history.getPosition(),
+      settings: { fps: this.config.defaultFps },
+    };
   }
 
   private async checkRecovery(): Promise<void> {
     try {
-      const saved = safeStorageGet(this.recoveryKey);
-      if (!saved) return;
+      const snapshot = await this.recovery.getLatestSnapshot();
+      if (!snapshot) return;
 
-      const recoveryData = JSON.parse(saved);
-      const age = Date.now() - recoveryData.timestamp;
+      // REGRESSION fix: this used to hardcode a 1-hour cutoff, independent of
+      // RecoveryManager's actual retention window (config.maxAge, 7 days by
+      // default). A snapshot 3 hours old is still very much alive in
+      // IndexedDB (enforceLimit() only purges past maxAge) but this check
+      // silently stopped offering it to the user well before it was ever
+      // actually deleted -- valid recovery data the user could still restore
+      // was simply never surfaced. Use the manager's real retention window.
+      if (Date.now() - snapshot.timestamp > this.recovery.getMaxAge()) return;
 
-      // Only recover if less than 1 hour old
-      if (age > 3600000) {
-        safeStorageRemove(this.recoveryKey);
-        return;
-      }
+      const shouldRecover = await this.showRecoveryDialog(snapshot.timestamp);
+      if (!shouldRecover) return;
 
-      // Show recovery dialog
-      const shouldRecover = await this.showRecoveryDialog(recoveryData);
-      
-      if (shouldRecover) {
-        await this.restoreFromRecovery(recoveryData);
-      }
-
-      safeStorageRemove(this.recoveryKey);
+      const data = await this.recovery.restoreSnapshot(snapshot.id);
+      if (data) await this.restoreFromRecovery(data, snapshot.projectId);
     } catch (e) {
       log.warn('Recovery check failed:', e);
     }
   }
 
-  private async showRecoveryDialog(data: RecoveryData): Promise<boolean> {
-    const time = new Date(data.timestamp).toLocaleTimeString();
+  private async showRecoveryDialog(timestamp: number): Promise<boolean> {
+    const time = new Date(timestamp).toLocaleTimeString();
     return confirm(t('recovery.restorePrompt', { time }));
   }
 
-  private async restoreFromRecovery(data: RecoveryData): Promise<void> {
-    if (data.projectId) {
-      await this.project.openProject(data.projectId);
+  private async restoreFromRecovery(data: RecoveryData, projectId?: string): Promise<void> {
+    if (projectId && projectId !== 'unknown') {
+      try {
+        await this.project.openProject(projectId);
+      } catch (e) {
+        // The project may have been deleted since the snapshot — keep the
+        // recovered playhead/timeline rather than aborting the whole restore.
+        log.warn('Recovery: failed to reopen project', e);
+      }
     }
 
-    if (data.timelineState) {
-      this.timeline.setPlayhead(data.timelineState.playhead);
+    // data.timeline is `unknown` (RecoveryData crosses an IndexedDB/JSON trust
+    // boundary) — deserializeTimelineState() is defensive against missing or
+    // malformed fields, so an untyped cast here is safe. Previously only
+    // data.playhead was restored and this call was missing entirely, silently
+    // discarding every recovered track/clip/selection.
+    this.timeline.loadState(
+      deserializeTimelineState(data.timeline as Partial<SerializedTimelineState> | null | undefined)
+    );
+
+    // importJSON() validates the payload is an array and normalizes each
+    // entry's tags/metadata (defensive against corrupt snapshots). Restore
+    // happens on a freshly constructed MarkerManager, so its additive
+    // semantics are correct here; regenerated marker ids are acceptable
+    // because nothing external references marker ids across a reload.
+    if (Array.isArray(data.markers) && data.markers.length > 0) {
+      this.markers.importJSON(JSON.stringify(data.markers));
     }
 
-    if (data.playhead !== undefined) {
+    if (typeof data.playhead === 'number') {
       this.playbackFrame = data.playhead;
+      this.timeline.setPlayhead(data.playhead);
     }
 
     // Recovery restore complete — emit event for UI notification
@@ -525,11 +573,29 @@ export class ArtoneApp {
     const errors: Array<{ module: string; error: unknown }> = [];
     try { await this.project.init?.(); } catch (e) { errors.push({ module: 'project', error: e }); }
     try { await this.audio.init?.(); } catch (e) { errors.push({ module: 'audio', error: e }); }
-    try { this.setupAutoSave(); } catch (e) { errors.push({ module: 'autosave', error: e }); }
+    // Open the recovery DB before checking for a prior snapshot or starting
+    // auto-save — both depend on the IndexedDB connection being live.
+    try { await this.recovery.init(); } catch (e) { errors.push({ module: 'recovery-init', error: e }); }
+    try { await this.checkRecovery(); } catch (e) { errors.push({ module: 'recovery', error: e }); }
+    // Missing here meant the ShortcutManager's document keydown listener was
+    // live (its constructor wires it unconditionally) but `callbacks` stayed
+    // empty forever — every J/K/L, split, in/out-point, marker, zoom, etc.
+    // shortcut silently did nothing in the shipping React app (entry.tsx →
+    // EngineProvider → ArtoneApp.initialize(), never the legacy init() path).
+    try { this.setupKeyboardShortcuts(); } catch (e) { errors.push({ module: 'shortcuts', error: e }); }
+    try { this.setupAutoSave(); this.setupCrashRecovery(); } catch (e) { errors.push({ module: 'autosave', error: e }); }
     if (errors.length > 0) {
       log.warn(`headless init: ${errors.length} error(s)`);
-      this.emit?.('init:partial', { errors });
+      this.emit?.('init:partial', { errors: errors.map((e) => `${e.module}: ${(e.error as Error)?.message ?? e.error}`) });
     }
+    // REGRESSION fix: RecoveryManager.getStatus()/subscribe() existed but
+    // nothing ever consumed them — if auto-save started failing every cycle
+    // (e.g. IndexedDB quota exceeded) the user got zero indication that their
+    // session was no longer crash-protected. Surface it the same way as any
+    // other engine error.
+    this.recoveryStatusUnsubscribe = this.recovery.subscribe((status) => {
+      if (status === 'error') this.emit?.('recoveryError');
+    });
   }
 
   getCurrentTime(): number {
@@ -545,8 +611,16 @@ export class ArtoneApp {
   }
 
   seek(time: number): void {
+    const fps = this.config.defaultFps;
+    this.playbackFrame = Math.floor(time * fps);
     this.timeline.setPlayhead(time);
-    this.playbackFrame = Math.floor(time * this.config.defaultFps);
+    // Re-anchor the RAF scheduler so playback continues from the new position
+    // without a jump when play() was active during the seek.
+    if (this.isPlaying) {
+      this.playbackStartWallTime = performance.now();
+      this.playbackStartFrame = this.playbackFrame;
+    }
+    this.emit?.('playhead', { frame: this.playbackFrame, time });
   }
 
   async save(): Promise<void> {
@@ -616,16 +690,16 @@ export class ArtoneApp {
   dispose(): void {
     this.stopPlaybackLoop();
 
-    if (this.autoSaveTimer) {
-      clearInterval(this.autoSaveTimer);
-    }
+    this.recoveryStatusUnsubscribe?.();
+    this.recoveryStatusUnsubscribe = null;
 
-    // Remove crash-recovery listeners so disposed instances are not kept alive
-    // by listener closures (prevents stale callbacks during HMR / test teardown).
-    window.removeEventListener('beforeunload', this._onBeforeUnload);
+    // RecoveryManager owns the auto-save timer + crash listeners; dispose() stops
+    // the timer and closes the IndexedDB connection.
+    this.recovery.dispose();
+
+    // Remove our tab-hide listener so disposed instances are not kept alive by a
+    // listener closure (prevents stale callbacks during HMR / test teardown).
     document.removeEventListener('visibilitychange', this._onVisibilityChange);
-    window.removeEventListener('error', this._onError);
-    window.removeEventListener('unhandledrejection', this._onUnhandledRejection);
 
     this.shortcuts.dispose();
     this.history.clear();

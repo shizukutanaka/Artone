@@ -306,15 +306,44 @@ function buildAvc1(width: number, height: number, sps: Uint8Array, pps: Uint8Arr
   ]);
 }
 
-/** Build 'mp4a' audio sample entry with esds (MPEG-4 Elementary Stream Descriptor). */
-function buildMp4a(sampleRate: number, channels: number): Uint8Array {
-  // Minimal esds box for AAC-LC (AudioSpecificConfig: 0x11 0x90 for 44.1kHz stereo or similar)
-  // ObjectType=2 (AAC-LC), SamplingFrequency index, ChannelConfig
-  // AudioSpecificConfig: objectType(5bits) + samplingFreqIndex(4bits) + channelConf(4bits)
-  const freqIndex = FREQ_INDEX[sampleRate] ?? 15;  // 15 = explicit frequency
+/**
+ * Build a 2-byte AAC-LC AudioSpecificConfig (ISO/IEC 14496-3): objectType(5
+ * bits, 2=AAC-LC) + samplingFreqIndex(4 bits) + channelConfig(4 bits) +
+ * frameLengthFlag/dependsOnCoreCoder/extensionFlag(1 bit each, all 0).
+ * Reused as-is for both the MP4 esds box below and WebM's CodecPrivate
+ * element (export-engine.ts) — Matroska embeds AAC using this same
+ * MPEG-4 AudioSpecificConfig per the Matroska codec spec.
+ *
+ * REGRESSION fix: a sampleRate outside FREQ_INDEX's 13 standard rates used to
+ * fall back to samplingFreqIndex=15 ("explicit frequency"), but per the spec
+ * that value requires 24 additional explicit-frequency bits following the
+ * 4-bit index — bits this function's fixed 2-byte layout has no room for.
+ * The result was a truncated, structurally invalid AudioSpecificConfig: a
+ * decoder reading index 15 expects the next 24 bits to be a frequency, not
+ * (as written here) the channelConfig/flag bits of a normal ASC — every
+ * subsequent bit is misinterpreted. export/CLAUDE.md: "データ損失は致命的" —
+ * fail loud with a clear error instead of emitting a silently-corrupt track.
+ *
+ * @throws if `sampleRate` is not one of the 13 rates AAC-LC's fixed-length
+ *   sampling-frequency-index table supports
+ */
+export function buildAacAudioSpecificConfig(sampleRate: number, channels: number): Uint8Array {
+  const freqIndex = FREQ_INDEX[sampleRate];
+  if (freqIndex === undefined) {
+    throw new Error(
+      `buildAacAudioSpecificConfig: unsupported AAC sample rate ${sampleRate}Hz ` +
+      `(must be one of: ${Object.keys(FREQ_INDEX).join(', ')})`
+    );
+  }
   const asc = new Uint8Array(2);
   asc[0] = (2 << 3) | (freqIndex >> 1);       // AAC-LC (objectType=2)
   asc[1] = ((freqIndex & 1) << 7) | (channels << 3);
+  return asc;
+}
+
+/** Build 'mp4a' audio sample entry with esds (MPEG-4 Elementary Stream Descriptor). */
+function buildMp4a(sampleRate: number, channels: number): Uint8Array {
+  const asc = buildAacAudioSpecificConfig(sampleRate, channels);
 
   // MPEG-4 Elementary Stream Descriptor (simplified ISO 14496-1)
   const esds = buildEsds(asc);
@@ -326,7 +355,16 @@ function buildMp4a(sampleRate: number, channels: number): Uint8Array {
     u16(16),              // sample size = 16 bits
     u16(0),               // pre_defined
     u16(0),               // reserved
-    u32((sampleRate & 0xFFFF) << 16),  // sampleRate 16.16 fixed-point
+    // sampleRate 16.16 fixed-point. REGRESSION fix: `(sampleRate & 0xFFFF)
+    // << 16` silently WRAPPED any rate above 65535 (e.g. 96000 -> 96000 &
+    // 0xFFFF = 30464, declaring ~30464Hz for a 96000Hz track) -- and 96000/
+    // 88200 are both real, standard AAC rates this file's own FREQ_INDEX
+    // table already supports, so this was reachable with ordinary high-res
+    // audio, not just exotic input. This legacy 16-bit-integer-part field
+    // cannot represent a rate above 65535 at all; per common ISOBMFF muxer
+    // practice, write 0 for those (decoders read the real rate from the
+    // AudioSpecificConfig in esds below, which is always correct).
+    u32(sampleRate <= 0xFFFF ? sampleRate << 16 : 0),
     esds,
   ]);
 }
@@ -380,6 +418,30 @@ function buildStsd(_isVideo: boolean, sampleEntry: Uint8Array, entryType: string
  */
 function buildStts(sampleCount: number, sampleDelta: number): Uint8Array {
   return fullBox('stts', 0, 0, concat([u32(1), u32(sampleCount), u32(sampleDelta)]));
+}
+
+/**
+ * Build stts from a per-sample list of deltas (audio-timescale ticks), run-
+ * length-encoding consecutive equal deltas into single entries. Unlike
+ * buildStts's fixed single-entry form, this correctly represents the final
+ * chunk of a track whose sample count isn't an exact multiple of the frame
+ * size (true for virtually any real-world audio buffer) instead of
+ * overstating the track's total duration.
+ */
+function buildSttsVariable(sampleDeltas: number[]): Uint8Array {
+  const entries: Array<{ count: number; delta: number }> = [];
+  for (const delta of sampleDeltas) {
+    const last = entries[entries.length - 1];
+    if (last && last.delta === delta) {
+      last.count++;
+    } else {
+      entries.push({ count: 1, delta });
+    }
+  }
+  return fullBox('stts', 0, 0, concat([
+    u32(entries.length),
+    concat(entries.map((e) => concat([u32(e.count), u32(e.delta)]))),
+  ]));
 }
 
 /** Build stss (sync sample table) — indices of keyframe samples (1-based). */
@@ -437,12 +499,13 @@ function buildVideoStbl(
 function buildAudioStbl(
   sampleCount: number,
   sampleSizes: number[],
+  sampleDeltas: number[],
   sampleEntry: Uint8Array,
   chunkOffset: number,
 ): Uint8Array {
   return box('stbl', concat([
     buildStsd(false, sampleEntry, 'mp4a'),
-    buildStts(sampleCount, 1024),   // AAC: 1024 samples per frame (constant)
+    buildSttsVariable(sampleDeltas),
     buildStsc(sampleCount),
     buildStsz(sampleSizes),
     buildStco(chunkOffset),
@@ -481,10 +544,11 @@ function buildAudioTrak(
   movieTimescale: number,
   audioTrack: MP4AudioTrack,
   sampleSizes: number[],
+  sampleDeltas: number[],
   chunkOffset: number,
 ): Uint8Array {
   const sampleEntry = buildMp4a(audioTrack.sampleRate, audioTrack.channels);
-  const stbl = buildAudioStbl(sampleSizes.length, sampleSizes, sampleEntry, chunkOffset);
+  const stbl = buildAudioStbl(sampleSizes.length, sampleSizes, sampleDeltas, sampleEntry, chunkOffset);
   const minf = box('minf', concat([buildSmhd(), buildDinf(), stbl]));
   const mdia = box('mdia', concat([
     buildMdhd(audioTrack.sampleRate, durationMs),
@@ -562,6 +626,13 @@ export function muxMP4(
 
   const audioFrames = hasAudio ? audioChunks!.map(c => c.data) : [];
   const audioSizes = audioFrames.map(f => f.length);
+  // Per-chunk delta in audio-timescale (sample rate) ticks, derived from each
+  // chunk's actual encoded duration — not assumed to be a constant 1024
+  // samples, which overstated the track's total duration whenever the
+  // sample count wasn't an exact multiple of the encoder's frame size.
+  const audioSampleDeltas = hasAudio
+    ? audioChunks!.map(c => Math.round((c.durationUs * audioTrack!.sampleRate) / 1_000_000))
+    : [];
 
   const ftyp = buildFtyp();
 
@@ -576,7 +647,7 @@ export function muxMP4(
       videoTrak,
     ];
     if (hasAudio) {
-      parts.push(buildAudioTrak(durationMs, movieTimescale, audioTrack!, audioSizes, audioChunkOffset));
+      parts.push(buildAudioTrak(durationMs, movieTimescale, audioTrack!, audioSizes, audioSampleDeltas, audioChunkOffset));
     }
     return box('moov', concat(parts));
   }

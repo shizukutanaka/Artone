@@ -5,6 +5,15 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ColorGradingEngine, type ColorWheels } from '../color/grading-engine';
 
+/** jsdom's File lacks .text(); this wrapper injects it. */
+function makeFile(content: string, name: string): File {
+  const file = new File([content], name);
+  if (typeof (file as unknown as { text?: unknown }).text !== 'function') {
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(content) });
+  }
+  return file;
+}
+
 // ─── helpers ───────────────────────────────────────────────────
 
 /** Access private method via type cast. */
@@ -382,5 +391,262 @@ describe('ColorGradingEngine — applyWheels (CPU path)', () => {
     expect(data[0]).toBeCloseTo(151, -1);
     expect(data[1]).toBeCloseTo(151, -1);
     expect(data[2]).toBeCloseTo(151, -1);
+  });
+
+  // REGRESSION: applyWheels (the CPU path — used whenever GPU is
+  // unavailable, or the grade has curves/a LUT/multiple nodes) never read
+  // wheels.hue at all, so a hue-wheel adjustment silently vanished as soon
+  // as the WGSL single-node fast path didn't apply, even though the GPU
+  // shader correctly rotates hue via rgb2hsl/hsl2rgb.
+  it('REGRESSION: hue=120 rotates pure red to pure green (matches GPU shader math)', () => {
+    const data = pixel(255, 0, 0);
+    const w = defaultWheels();
+    w.hue = 120;
+    applyWheels(engine, data, w);
+    expect(data[0]).toBeCloseTo(0, -1);
+    expect(data[1]).toBeCloseTo(255, -1);
+    expect(data[2]).toBeCloseTo(0, -1);
+  });
+
+  it('REGRESSION: hue=240 rotates pure red to pure blue', () => {
+    const data = pixel(255, 0, 0);
+    const w = defaultWheels();
+    w.hue = 240;
+    applyWheels(engine, data, w);
+    expect(data[0]).toBeCloseTo(0, -1);
+    expect(data[1]).toBeCloseTo(0, -1);
+    expect(data[2]).toBeCloseTo(255, -1);
+  });
+
+  it('hue rotation of an achromatic (gray) pixel is a no-op', () => {
+    const data = pixel(128, 128, 128);
+    const w = defaultWheels();
+    w.hue = 90;
+    applyWheels(engine, data, w);
+    expect(data[0]).toBeCloseTo(128, -1);
+    expect(data[1]).toBeCloseTo(128, -1);
+    expect(data[2]).toBeCloseTo(128, -1);
+  });
+
+  it('hue=0 (default) leaves color unchanged (fast-path skip)', () => {
+    const data = pixel(200, 100, 50);
+    applyWheels(engine, data, defaultWheels());
+    expect(data[0]).toBeCloseTo(200, -1);
+    expect(data[1]).toBeCloseTo(100, -1);
+    expect(data[2]).toBeCloseTo(50, -1);
+  });
+});
+
+// ─── HSL Qualifier / Power Window masking ────────────────────────
+
+import { rgbToHsl, computeQualifierMask, computeWindowMask, type HSLQualifier, type PowerWindow, type ColorNode } from '../color/grading-engine';
+
+/** Access the private blendWithMask() method via type cast. */
+function blendWithMask(
+  engine: ColorGradingEngine,
+  data: Uint8ClampedArray,
+  original: Uint8ClampedArray,
+  node: ColorNode,
+  width: number,
+  height: number,
+): void {
+  (engine as unknown as {
+    blendWithMask(d: Uint8ClampedArray, o: Uint8ClampedArray, n: ColorNode, w: number, h: number): void;
+  }).blendWithMask(data, original, node, width, height);
+}
+
+function defaultQualifier(over: Partial<HSLQualifier> = {}): HSLQualifier {
+  return {
+    enabled: true, hueCenter: 0, hueWidth: 30, hueSoft: 0.1,
+    satLow: 0.2, satHigh: 1, satSoft: 0.1,
+    lumLow: 0, lumHigh: 1, lumSoft: 0.1,
+    invert: false,
+    ...over,
+  };
+}
+
+function defaultWindow(over: Partial<PowerWindow> = {}): PowerWindow {
+  return {
+    id: 'w1', type: 'circle', enabled: true, invert: false,
+    x: 0.5, y: 0.5, width: 0.4, height: 0.4, rotation: 0, softness: 0.2,
+    ...over,
+  };
+}
+
+describe('rgbToHsl', () => {
+  it('pure red / green / blue map to 0° / 120° / 240°', () => {
+    expect(rgbToHsl(1, 0, 0).h).toBeCloseTo(0, 5);
+    expect(rgbToHsl(0, 1, 0).h).toBeCloseTo(120, 5);
+    expect(rgbToHsl(0, 0, 1).h).toBeCloseTo(240, 5);
+  });
+
+  it('white and black are achromatic (s=0) with l=1/0', () => {
+    expect(rgbToHsl(1, 1, 1)).toEqual({ h: 0, s: 0, l: 1 });
+    expect(rgbToHsl(0, 0, 0)).toEqual({ h: 0, s: 0, l: 0 });
+  });
+
+  it('mid gray has l=0.5, s=0', () => {
+    const { s, l } = rgbToHsl(0.5, 0.5, 0.5);
+    expect(s).toBe(0);
+    expect(l).toBeCloseTo(0.5, 5);
+  });
+});
+
+describe('computeQualifierMask', () => {
+  it('REGRESSION: a disabled qualifier always returns 1 (full effect, matches pre-fix behavior)', () => {
+    const q = defaultQualifier({ enabled: false });
+    expect(computeQualifierMask(q, 1, 0, 0)).toBe(1); // red
+    expect(computeQualifierMask(q, 0, 1, 0)).toBe(1); // green
+  });
+
+  it('an enabled qualifier fully selects a color inside its hue/sat/lum range', () => {
+    const q = defaultQualifier({ hueCenter: 0, hueWidth: 30, satLow: 0.5, satHigh: 1, lumLow: 0.3, lumHigh: 0.7 });
+    // Pure, saturated red at mid-lightness sits well inside all three ranges.
+    expect(computeQualifierMask(q, 0.8, 0.2, 0.2)).toBeCloseTo(1, 5);
+  });
+
+  it('a color far outside the hue range is fully rejected (mask 0)', () => {
+    const q = defaultQualifier({ hueCenter: 0, hueWidth: 30, hueSoft: 0.05 });
+    // Pure green (120°) is nowhere near a qualifier centered on red (0°).
+    expect(computeQualifierMask(q, 0, 1, 0)).toBeCloseTo(0, 5);
+  });
+
+  it('the hue soft ramp gives a partial (0<mask<1) value just past the hard edge', () => {
+    const q = defaultQualifier({ hueCenter: 0, hueWidth: 20, hueSoft: 0.1, satLow: 0, satHigh: 1, lumLow: 0, lumHigh: 1 });
+    // Hard edge at ±10°; soft ramp extends to ±(10+36)=46°. 25° should be
+    // partially selected: neither fully in (mask=1) nor fully out (mask=0).
+    // Construct an RGB whose hue is exactly 25°, full saturation, l=0.5.
+    // HSL(25°, 1, 0.5) -> RGB via standard conversion.
+    const c = 1; // chroma at s=1,l=0.5
+    const hp = 25 / 60;
+    const x = c * (1 - Math.abs((hp % 2) - 1));
+    const [r1, g1, b1] = hp < 1 ? [c, x, 0] : [x, c, 0];
+    const m = 0.5 - c / 2;
+    const mask = computeQualifierMask(q, r1 + m, g1 + m, b1 + m);
+    expect(mask).toBeGreaterThan(0);
+    expect(mask).toBeLessThan(1);
+  });
+
+  it('invert flips a full match to fully rejected', () => {
+    const q = defaultQualifier({ hueCenter: 0, hueWidth: 30, satLow: 0, satHigh: 1, lumLow: 0, lumHigh: 1, invert: true });
+    expect(computeQualifierMask(q, 1, 0, 0)).toBeCloseTo(0, 5); // red normally fully matches
+  });
+});
+
+describe('computeWindowMask', () => {
+  it('REGRESSION: a disabled window always returns 1 (full effect, matches pre-fix behavior)', () => {
+    const win = defaultWindow({ enabled: false });
+    expect(computeWindowMask(win, 0, 0, 100, 100)).toBe(1);
+  });
+
+  it('circle: the exact center is fully inside (mask 1)', () => {
+    const win = defaultWindow({ type: 'circle', x: 0.5, y: 0.5, width: 0.4, height: 0.4, softness: 0.2 });
+    expect(computeWindowMask(win, 50, 50, 100, 100)).toBeCloseTo(1, 5);
+  });
+
+  it('circle: a far corner is fully outside (mask 0)', () => {
+    const win = defaultWindow({ type: 'circle', x: 0.5, y: 0.5, width: 0.2, height: 0.2, softness: 0.1 });
+    expect(computeWindowMask(win, 0, 0, 100, 100)).toBe(0);
+  });
+
+  it('rectangle: a point just inside the box edge is fully selected', () => {
+    const win = defaultWindow({ type: 'rectangle', x: 0.5, y: 0.5, width: 0.6, height: 0.6, softness: 0.05 });
+    // Box half-extents are 30px each side of center (50,50) -> inner edge at ±(1-0.05)*30=28.5
+    expect(computeWindowMask(win, 50 + 20, 50, 100, 100)).toBeCloseTo(1, 5);
+  });
+
+  it('invert flips inside (1) to outside (0)', () => {
+    const win = defaultWindow({ type: 'circle', x: 0.5, y: 0.5, width: 0.4, height: 0.4, softness: 0.2, invert: true });
+    expect(computeWindowMask(win, 50, 50, 100, 100)).toBeCloseTo(0, 5);
+  });
+
+  it('gradient: ramps linearly from 0 at the left edge to 1 at the right edge', () => {
+    const win = defaultWindow({ type: 'gradient', x: 0.5, y: 0.5, width: 0.4, height: 0.4, rotation: 0 });
+    const left = computeWindowMask(win, 30, 50, 100, 100);
+    const center = computeWindowMask(win, 50, 50, 100, 100);
+    const right = computeWindowMask(win, 70, 50, 100, 100);
+    expect(left).toBeLessThan(center);
+    expect(center).toBeCloseTo(0.5, 1);
+    expect(center).toBeLessThan(right);
+  });
+});
+
+describe('ColorGradingEngine — blendWithMask', () => {
+  let engine: ColorGradingEngine;
+  beforeEach(() => { engine = new ColorGradingEngine(); });
+
+  function makeNode(over: Partial<Pick<ColorNode, 'qualifier' | 'windows'>>): ColorNode {
+    return {
+      id: 'n', type: 'corrector', label: '', enabled: true,
+      wheels: defaultWheels(), curves: { master: [], red: [], green: [], blue: [], hueVsSat: [], hueVsHue: [], lumVsSat: [] },
+      qualifier: defaultQualifier({ enabled: false }),
+      windows: [],
+      inputs: [], outputs: [], position: { x: 0, y: 0 }, blend: { mode: 'normal', opacity: 1 },
+      ...over,
+    };
+  }
+
+  it('REGRESSION: a node with an enabled qualifier only keeps the graded result where the qualifier matches', () => {
+    // Before fix: qualifier/windows were never consulted at all -- the
+    // graded (fully shifted) pixel was kept everywhere, with zero
+    // isolation, regardless of the node's qualifier/window configuration.
+    const node = makeNode({
+      qualifier: defaultQualifier({ hueCenter: 0, hueWidth: 20, hueSoft: 0.02, satLow: 0, satHigh: 1, lumLow: 0, lumHigh: 1 }),
+    });
+    // Two pixels: one red (matches qualifier), one green (does not).
+    const original = new Uint8ClampedArray([255, 0, 0, 255,   0, 255, 0, 255]);
+    const graded   = new Uint8ClampedArray([0, 0, 255, 255,   0, 0, 255, 255]); // both shifted to blue by the grade
+    blendWithMask(engine, graded, original, node, 2, 1);
+
+    // Red pixel: qualifier matched -> graded (blue) result kept.
+    expect(graded[0]).toBeCloseTo(0, 0);
+    expect(graded[2]).toBeCloseTo(255, 0);
+    // Green pixel: qualifier did not match -> reverted to the original color.
+    expect(graded[4]).toBeCloseTo(0, 0);
+    expect(graded[5]).toBeCloseTo(255, 0);
+    expect(graded[6]).toBeCloseTo(0, 0);
+  });
+
+  it('a node with neither qualifier nor windows enabled is untouched (mask always 1)', () => {
+    const node = makeNode({});
+    const original = new Uint8ClampedArray([10, 20, 30, 255]);
+    const graded   = new Uint8ClampedArray([200, 210, 220, 255]);
+    const gradedCopy = graded.slice();
+    blendWithMask(engine, graded, original, node, 1, 1);
+    expect(graded).toEqual(gradedCopy); // unchanged — fully graded result kept
+  });
+});
+
+// ─── loadCubeLUT ────────────────────────────────────────────────
+
+describe('ColorGradingEngine — loadCubeLUT', () => {
+  let engine: ColorGradingEngine;
+
+  beforeEach(() => { engine = new ColorGradingEngine(); });
+
+  const VALID_CUBE_2 = `LUT_3D_SIZE 2
+0.0 0.0 0.0
+1.0 0.0 0.0
+0.0 1.0 0.0
+1.0 1.0 0.0
+0.0 0.0 1.0
+1.0 0.0 1.0
+0.0 1.0 1.0
+1.0 1.0 1.0
+`;
+
+  it('REGRESSION: produces stride-3 RGB data (not stride-4), matching lut-apply.ts trilinear() reader', async () => {
+    const lut = await engine.loadCubeLUT(makeFile(VALID_CUBE_2, 'test.cube'));
+    expect(lut).not.toBeNull();
+    // size=2 cube has 8 cells; stride-3 => 24 floats. The prior bug appended a
+    // spurious 4th value per cell (stride 4 => 32 floats), which desynced
+    // every cell after the first against lut-apply.ts's stride-3 reader.
+    expect(lut!.data.length).toBe(2 * 2 * 2 * 3);
+  });
+
+  it('REGRESSION: rejects a truncated .cube (fewer than size^3 entries)', async () => {
+    const truncated = `LUT_3D_SIZE 2\n0.0 0.0 0.0\n1.0 0.0 0.0\n`;
+    const lut = await engine.loadCubeLUT(makeFile(truncated, 'bad.cube'));
+    expect(lut).toBeNull();
   });
 });

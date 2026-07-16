@@ -19,11 +19,12 @@ const renderBenchmarks: BenchmarkSpec[] = [
     name: 'render.fill_1080p',
     category: 'render',
     budget: 16, // 60fps 予算
+    setup: () => {
+      put('fill1080p', new Uint8ClampedArray(1920 * 1080 * 4));
+    },
     run: () => {
       // 単純な ImageData 塗りつぶし (CPU フォールバック計測)
-      const w = 1920;
-      const h = 1080;
-      const buf = new Uint8ClampedArray(w * h * 4);
+      const buf = get<Uint8ClampedArray>('fill1080p')!;
       for (let i = 0; i < buf.length; i += 4) {
         buf[i] = 255;
         buf[i + 1] = 128;
@@ -36,15 +37,18 @@ const renderBenchmarks: BenchmarkSpec[] = [
     name: 'render.matrix_compose_4k',
     category: 'render',
     budget: 8,
-    run: () => {
-      // 4x4 行列合成 (アフィン変換)
+    setup: () => {
       const a = new Float32Array(16);
       const b = new Float32Array(16);
       const r = new Float32Array(16);
-      for (let i = 0; i < 16; i++) {
-        a[i] = i + 1;
-        b[i] = (i + 1) * 0.5;
-      }
+      for (let i = 0; i < 16; i++) { a[i] = i + 1; b[i] = (i + 1) * 0.5; }
+      put('matA', a); put('matB', b); put('matR', r);
+    },
+    run: () => {
+      // 4x4 行列合成 (アフィン変換)
+      const a = get<Float32Array>('matA')!;
+      const b = get<Float32Array>('matB')!;
+      const r = get<Float32Array>('matR')!;
       for (let i = 0; i < 4; i++) {
         for (let j = 0; j < 4; j++) {
           let sum = 0;
@@ -63,13 +67,16 @@ const effectBenchmarks: BenchmarkSpec[] = [
     name: 'effect.color_lut_apply_1080p',
     category: 'effect',
     budget: 12,
-    run: () => {
-      const w = 1920;
-      const h = 1080;
-      const data = new Uint8ClampedArray(w * h * 4);
-      // 簡易 LUT 適用
+    setup: () => {
       const lut = new Uint8ClampedArray(256);
       for (let i = 0; i < 256; i++) lut[i] = Math.min(255, i * 1.2);
+      put('lutData', new Uint8ClampedArray(1920 * 1080 * 4));
+      put('lut256', lut);
+    },
+    run: () => {
+      // 簡易 LUT 適用
+      const data = get<Uint8ClampedArray>('lutData')!;
+      const lut = get<Uint8ClampedArray>('lut256')!;
       for (let i = 0; i < data.length; i += 4) {
         data[i] = lut[data[i]];
         data[i + 1] = lut[data[i + 1]];
@@ -81,12 +88,17 @@ const effectBenchmarks: BenchmarkSpec[] = [
     name: 'effect.gaussian_blur_720p',
     category: 'effect',
     budget: 20,
+    setup: () => {
+      put('blurSrc', new Float32Array(1280 * 720));
+      put('blurDst', new Float32Array(1280 * 720));
+      put('blurK', new Float32Array([0.06136, 0.24477, 0.38774, 0.24477, 0.06136]));
+    },
     run: () => {
       const w = 1280;
       const h = 720;
-      const data = new Float32Array(w * h);
-      const out = new Float32Array(w * h);
-      const k = [0.06136, 0.24477, 0.38774, 0.24477, 0.06136];
+      const data = get<Float32Array>('blurSrc')!;
+      const out = get<Float32Array>('blurDst')!;
+      const k = get<Float32Array>('blurK')!;
       for (let y = 2; y < h - 2; y++) {
         for (let x = 2; x < w - 2; x++) {
           let s = 0;
@@ -105,9 +117,10 @@ const codecBenchmarks: BenchmarkSpec[] = [
     name: 'decode.parse_box_atom',
     category: 'decode',
     budget: 1,
+    setup: () => { put('boxBuf', new Uint8Array(8192)); },
     run: () => {
       // MP4 box parsing シミュレーション
-      const buf = new Uint8Array(8192);
+      const buf = get<Uint8Array>('boxBuf')!;
       for (let i = 0; i < 1000; i++) {
         const size = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
         const type = String.fromCharCode(buf[4], buf[5], buf[6], buf[7]);
@@ -119,11 +132,16 @@ const codecBenchmarks: BenchmarkSpec[] = [
     name: 'encode.h264_frame_estimate',
     category: 'encode',
     budget: 5,
-    run: () => {
-      // フレームサイズ予測 (DCT 簡易計算)
+    setup: () => {
       const block = new Float32Array(64);
       for (let i = 0; i < 64; i++) block[i] = Math.sin(i);
-      const out = new Float32Array(64);
+      put('dctBlock', block);
+      put('dctOut', new Float32Array(64));
+    },
+    run: () => {
+      // フレームサイズ予測 (DCT 簡易計算)
+      const block = get<Float32Array>('dctBlock')!;
+      const out = get<Float32Array>('dctOut')!;
       for (let u = 0; u < 8; u++) {
         for (let v = 0; v < 8; v++) {
           let s = 0;
@@ -149,9 +167,13 @@ const exportBenchmarks: BenchmarkSpec[] = [
     name: 'export.muxer_chunk_write',
     category: 'export',
     budget: 2,
-    run: () => {
+    setup: () => {
       const chunk = new Uint8Array(65536);
       for (let i = 0; i < chunk.length; i++) chunk[i] = i & 0xff;
+      put('muxChunk', chunk);
+    },
+    run: () => {
+      const chunk = get<Uint8Array>('muxChunk')!;
       let crc = 0xffffffff;
       for (let i = 0; i < chunk.length; i++) {
         crc ^= chunk[i];
@@ -168,11 +190,12 @@ const startupBenchmarks: BenchmarkSpec[] = [
     name: 'startup.json_parse_5kb',
     category: 'startup',
     budget: 1,
-    run: () => {
-      // closure で setup データを保持 (globalThis 汚染回避)
+    setup: () => {
       const obj = { items: Array.from({ length: 100 }, (_, i) => ({ id: i, name: `item${i}` })) };
-      const json = JSON.stringify(obj);
-      JSON.parse(json);
+      put('jsonStr', JSON.stringify(obj));
+    },
+    run: () => {
+      JSON.parse(get<string>('jsonStr')!);
     },
   },
 ];

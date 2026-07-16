@@ -48,7 +48,7 @@ interface ParameterFlags {
   programChange: boolean;
 }
 
-interface PluginInstance {
+export interface PluginInstance {
   id: string;
   descriptor: PluginDescriptor;
   wasmModule: WebAssembly.Module;
@@ -58,6 +58,9 @@ interface PluginInstance {
   presets: PluginPreset[];
   currentPreset: number;
   bypassed: boolean;
+  /** O(1) lookup maps built once at instantiation — avoids .find()/.findIndex() per setParameter call. */
+  paramById: Map<string, ParameterDescriptor>;
+  paramIndexById: Map<string, number>;
 }
 
 interface PluginPreset {
@@ -120,112 +123,7 @@ export class PluginBridge {
   }
   
   private createWorkletProcessor(): string {
-    const processorCode = `
-      class WasmPluginProcessor extends AudioWorkletProcessor {
-        constructor(options) {
-          super();
-          this.wasmMemory = null;
-          this.processFunc = null;
-          // Exported WASM functions stored individually (wasmInstance is never set)
-          this.wasmSetParameter = null;
-          this.wasmAllocString = null;
-          this.inputPtr = 0;
-          this.outputPtr = 0;
-          this.blockSize = 128;
-          this.bypassed = false;
-          
-          this.port.onmessage = (e) => {
-            const { type, data } = e.data;
-            switch (type) {
-              case 'init':
-                this.initWasm(data.wasmBytes, data.blockSize);
-                break;
-              case 'setParameter':
-                this.setParameter(data.id, data.value);
-                break;
-              case 'bypass':
-                this.bypassed = data.bypassed;
-                break;
-            }
-          };
-        }
-        
-        async initWasm(wasmBytes, blockSize) {
-          this.blockSize = blockSize;
-          
-          const memory = new WebAssembly.Memory({ initial: 256, maximum: 512 });
-          this.wasmMemory = memory;
-          
-          const importObject = {
-            env: {
-              memory,
-              log: (ptr, len) => {
-                const bytes = new Uint8Array(memory.buffer, ptr, len);
-                const str = new TextDecoder().decode(bytes);
-                // Plugin stdout — forwarded to plugin sandbox log only
-              }
-            }
-          };
-          
-          const module = await WebAssembly.compile(wasmBytes);
-          const instance = await WebAssembly.instantiate(module, importObject);
-          
-          this.processFunc = instance.exports.process;
-          this.wasmSetParameter = instance.exports.setParameter || null;
-          this.wasmAllocString = instance.exports.allocString || null;
-          this.inputPtr = instance.exports.getInputBuffer();
-          this.outputPtr = instance.exports.getOutputBuffer();
-          
-          if (instance.exports.init) {
-            instance.exports.init(sampleRate, blockSize);
-          }
-          
-          this.port.postMessage({ type: 'ready' });
-        }
-        
-        setParameter(id, value) {
-          // Use the stored export references; wasmInstance is never set in this processor.
-          if (this.wasmSetParameter && this.wasmAllocString) {
-            const idBytes = new TextEncoder().encode(id);
-            const idPtr = this.wasmAllocString(idBytes.length);
-            new Uint8Array(this.wasmMemory.buffer, idPtr, idBytes.length).set(idBytes);
-            this.wasmSetParameter(idPtr, idBytes.length, value);
-          }
-        }
-        
-        process(inputs, outputs, parameters) {
-          if (this.bypassed || !this.processFunc) {
-            // Pass through
-            for (let ch = 0; ch < outputs[0].length; ch++) {
-              outputs[0][ch].set(inputs[0]?.[ch] || new Float32Array(this.blockSize));
-            }
-            return true;
-          }
-          
-          const inputView = new Float32Array(this.wasmMemory.buffer, this.inputPtr, this.blockSize * 2);
-          const outputView = new Float32Array(this.wasmMemory.buffer, this.outputPtr, this.blockSize * 2);
-          
-          // Copy input
-          for (let ch = 0; ch < Math.min(inputs[0]?.length || 0, 2); ch++) {
-            inputView.set(inputs[0][ch], ch * this.blockSize);
-          }
-          
-          // Process
-          this.processFunc(this.blockSize);
-          
-          // Copy output
-          for (let ch = 0; ch < Math.min(outputs[0].length, 2); ch++) {
-            outputs[0][ch].set(outputView.subarray(ch * this.blockSize, (ch + 1) * this.blockSize));
-          }
-          
-          return true;
-        }
-      }
-      
-      registerProcessor('wasm-plugin-processor', WasmPluginProcessor);
-    `;
-    
-    const blob = new Blob([processorCode], { type: 'application/javascript' });
+    const blob = new Blob([buildWasmProcessorCode()], { type: 'application/javascript' });
     return URL.createObjectURL(blob);
   }
   
@@ -234,6 +132,7 @@ export class PluginBridge {
   async scanPlugins(directory: string): Promise<PluginDescriptor[]> {
     // In browser: fetch plugin index from server
     const response = await fetch(`${directory}/index.json`);
+    if (!response.ok) throw new Error(`Failed to fetch plugin index: ${response.status} ${response.statusText}`);
     const plugins: PluginDescriptor[] = await response.json();
     
     for (const plugin of plugins) {
@@ -263,6 +162,7 @@ export class PluginBridge {
     
     // Fetch WASM
     const response = await fetch(descriptor.wasmUrl);
+    if (!response.ok) throw new Error(`Failed to fetch WASM for plugin ${pluginId}: ${response.status} ${response.statusText}`);
     const wasmBytes = await response.arrayBuffer();
     const wasmModule = await WebAssembly.compile(wasmBytes);
     
@@ -285,12 +185,19 @@ export class PluginBridge {
       });
     }
     
-    // Initialize parameters
+    // Initialize parameters and build O(1) lookup indices (paramById, paramIndexById).
+    // These avoid repeated .find()/.findIndex() in setParameter(), which is called
+    // at up to 60fps during automation playback.
     const parameters = new Map<string, number>();
-    for (const param of descriptor.parameters) {
+    const paramById = new Map<string, ParameterDescriptor>();
+    const paramIndexById = new Map<string, number>();
+    for (let i = 0; i < descriptor.parameters.length; i++) {
+      const param = descriptor.parameters[i];
       parameters.set(param.id, param.defaultValue);
+      paramById.set(param.id, param);
+      paramIndexById.set(param.id, i);
     }
-    
+
     const instance: PluginInstance = {
       id: instanceId,
       descriptor,
@@ -300,7 +207,9 @@ export class PluginBridge {
       parameters,
       presets: [],
       currentPreset: -1,
-      bypassed: false
+      bypassed: false,
+      paramById,
+      paramIndexById,
     };
     
     this.instances.set(instanceId, instance);
@@ -340,6 +249,21 @@ export class PluginBridge {
     // Abort any active UI listeners (message + document mousemove/mouseup).
     this.uiCleanups.get(instanceId)?.abort();
     this.uiCleanups.delete(instanceId);
+
+    // REGRESSION fix: unloading an instance used to leave its id in any
+    // PluginChain.plugins array it belonged to. getChainInput/getChainOutput
+    // index into that array via this.instances.get(...), so a stale id left
+    // a chain silently non-functional (undefined input/output) instead of
+    // falling back to its remaining, still-loaded neighbors, and every
+    // subsequent reorderChain/addToChain/removeFromChain carried the dead id
+    // forward permanently.
+    for (const chain of this.chains.values()) {
+      const idx = chain.plugins.indexOf(instanceId);
+      if (idx >= 0) {
+        chain.plugins.splice(idx, 1);
+        this.reconnectChain(chain);
+      }
+    }
   }
   
   // ==================== Parameter Control ====================
@@ -348,16 +272,16 @@ export class PluginBridge {
     const instance = this.instances.get(instanceId);
     if (!instance) return;
     
-    const param = instance.descriptor.parameters.find(p => p.id === parameterId);
+    const param = instance.paramById.get(parameterId);
     if (!param) return;
-    
+
     const clampedValue = Math.max(param.minValue, Math.min(param.maxValue, value));
     instance.parameters.set(parameterId, clampedValue);
-    
-    // Update WASM instance
+
+    // Update WASM instance — O(1) index lookup via pre-built map
     const exports = instance.wasmInstance.exports as { setParameter?: (id: number, value: number) => void };
     if (exports.setParameter) {
-      const paramIndex = instance.descriptor.parameters.findIndex(p => p.id === parameterId);
+      const paramIndex = instance.paramIndexById.get(parameterId)!;
       exports.setParameter(paramIndex, clampedValue);
     }
     
@@ -394,6 +318,7 @@ export class PluginBridge {
     const presetsUrl = instance.descriptor.wasmUrl.replace('.wasm', '.presets.json');
     try {
       const response = await fetch(presetsUrl);
+      if (!response.ok) return; // 404 expected when plugin has no presets
       const presets: PluginPreset[] = await response.json();
       instance.presets = presets;
     } catch {
@@ -474,7 +399,17 @@ export class PluginBridge {
   reorderChain(chainId: string, fromIndex: number, toIndex: number): void {
     const chain = this.chains.get(chainId);
     if (!chain) return;
-    
+    // REGRESSION fix: unlike addToChain/removeFromChain, this performed no
+    // bounds validation. An out-of-range fromIndex made splice(fromIndex, 1)
+    // remove nothing, so `removed` was undefined -- which the second splice
+    // then inserted as a literal element, permanently corrupting the chain's
+    // plugin list (every later index-based lookup/reorder would operate on
+    // an array containing a stray `undefined` entry).
+    if (
+      fromIndex < 0 || fromIndex >= chain.plugins.length ||
+      toIndex < 0 || toIndex >= chain.plugins.length
+    ) return;
+
     const [removed] = chain.plugins.splice(fromIndex, 1);
     chain.plugins.splice(toIndex, 0, removed);
     this.reconnectChain(chain);
@@ -542,22 +477,37 @@ export class PluginBridge {
     const blockSize = this.BLOCK_SIZE;
     const numBlocks = Math.ceil(inputBuffer.length / blockSize);
     
+    // REGRESSION fix: the real-time AudioWorkletProcessor.process() path
+    // clamps its channel loop (`Math.min(inCh.length, 2)` / `Math.min(outputs[0].length, 2)`)
+    // because the WASM side only ever reserves `descriptor.inputs`/`.outputs`
+    // channels' worth of buffer space per block. This offline path had no
+    // equivalent clamp: it iterated the *AudioBuffer's own* channel count,
+    // so bouncing a >stereo AudioBuffer (e.g. 5.1/7.1 surround) through any
+    // of the built-in plugins (all declared inputs:2/outputs:2) wrote
+    // channel-3..N sample blocks at inputPtr/outputPtr offsets past the
+    // 2-channel region the plugin actually reserved -- silently corrupting
+    // adjacent WASM linear memory (no RangeError, since the backing
+    // WebAssembly.Memory is far larger than the reserved region) instead of
+    // throwing or truncating safely.
+    const inChannels = Math.min(inputBuffer.numberOfChannels, instance.descriptor.inputs);
+    const outChannels = Math.min(outputBuffer.numberOfChannels, instance.descriptor.outputs);
+
     for (let block = 0; block < numBlocks; block++) {
       const offset = block * blockSize;
       const frames = Math.min(blockSize, inputBuffer.length - offset);
-      
+
       // Copy input
-      for (let ch = 0; ch < inputBuffer.numberOfChannels; ch++) {
+      for (let ch = 0; ch < inChannels; ch++) {
         const inputData = inputBuffer.getChannelData(ch).subarray(offset, offset + frames);
         const wasmInput = new Float32Array(memory.buffer, inputPtr + ch * blockSize * 4, blockSize);
         wasmInput.set(inputData);
       }
-      
+
       // Process
       exports.process(frames);
-      
+
       // Copy output
-      for (let ch = 0; ch < outputBuffer.numberOfChannels; ch++) {
+      for (let ch = 0; ch < outChannels; ch++) {
         const outputData = outputBuffer.getChannelData(ch);
         const wasmOutput = new Float32Array(memory.buffer, outputPtr + ch * blockSize * 4, blockSize);
         outputData.set(wasmOutput.subarray(0, frames), offset);
@@ -579,38 +529,35 @@ export class PluginBridge {
     this.uiCleanups.set(instanceId, uiController);
 
     if (instance.descriptor.uiUrl) {
-      // Determine expected message origin for cross-origin security checks.
-      // Relative URLs (e.g. /plugins/ui.html) resolve to the same origin as
-      // the host app; absolute URLs specify their own origin. '*' is never used
-      // to prevent parameter leakage to or injection from unrelated origins.
-      let expectedOrigin: string;
-      try {
-        expectedOrigin = new URL(instance.descriptor.uiUrl).origin;
-      } catch {
-        // Relative URL — plugin UI is served from the same origin
-        expectedOrigin = window.location.origin;
-      }
-
       // Load custom UI
       const iframe = document.createElement('iframe');
       iframe.src = instance.descriptor.uiUrl;
       iframe.style.cssText = 'width:100%;height:400px;border:none;';
+      // Contain the plugin-supplied page: no top-level navigation, no popups,
+      // no same-origin DOM access to the host. 'allow-same-origin' is
+      // deliberately omitted — combined with 'allow-scripts' for content that
+      // may share the host's origin, it would let the plugin reach back into
+      // the host page and effectively remove the sandbox.
+      iframe.setAttribute('sandbox', 'allow-scripts');
 
       iframe.onload = () => {
-        // Target the exact expected origin so parameters are never sent to an
-        // unintended origin if the iframe navigated away.
+        // Sandboxing without 'allow-same-origin' gives the framed document an
+        // opaque origin, so 'null' is the only targetOrigin that can reach it
+        // (a concrete origin string never matches an opaque one).
         iframe.contentWindow?.postMessage({
           type: 'init',
           parameters: Object.fromEntries(instance.parameters)
-        }, expectedOrigin);
+        }, 'null');
       };
 
       // Use signal so this listener is removed when unloadPlugin() or a
       // subsequent openPluginUI() call aborts uiController — preventing leaks
       // that previously accumulated one permanent listener per open call.
       window.addEventListener('message', (e) => {
-        // Reject messages from origins other than the plugin's own UI origin.
-        if (e.origin !== expectedOrigin) return;
+        // Match by window identity rather than origin string: the sandboxed
+        // iframe has an opaque origin, so this is the only reliable way to
+        // confirm a message actually came from this exact iframe.
+        if (e.source !== iframe.contentWindow) return;
         if (e.data.type === 'parameterChange' && e.data.instanceId === instanceId) {
           this.setParameter(instanceId, e.data.parameterId, e.data.value);
         }
@@ -726,7 +673,7 @@ export class PluginBridge {
         isDragging = true;
         startY = me.clientY;
         startValue = instance.parameters.get(param.id) || param.defaultValue;
-      });
+      }, { signal });
       
       // Pass signal so these document-level listeners are cleaned up when the
       // plugin UI is closed (unloadPlugin) or re-opened (openPluginUI).
@@ -754,7 +701,7 @@ export class PluginBridge {
       const newState = !instance.bypassed;
       this.setBypass(instance.id, newState);
       bypassBtn.classList.toggle('active', newState);
-    });
+    }, { signal });
     
     // Preset selector
     const presetSelect = container.querySelector('.plugin-preset-select') as HTMLSelectElement;
@@ -770,7 +717,7 @@ export class PluginBridge {
           }
         }
       }
-    });
+    }, { signal });
     
     return container;
   }
@@ -896,6 +843,183 @@ export const BUILTIN_PLUGINS: PluginDescriptor[] = [
   }
 ];
 
+// ==================== AudioWorklet Processor Source ====================
+
+/**
+ * Build the source for the `wasm-plugin-processor` AudioWorklet, loaded as a
+ * Blob module by {@link PluginBridge}.
+ *
+ * The `process()` callback runs on the real-time audio render thread (~every
+ * 2.9 ms at 44.1 kHz / 128-frame blocks). Per audio/CLAUDE.md and plugins/
+ * CLAUDE.md, this path must not allocate — any heap churn risks a GC pause that
+ * drops a block and produces an audible glitch (Chrome "Audio Worklet design
+ * patterns"; Zenn「ブラウザ上でリアルタイムに音声を処理するためのノウハウ」).
+ *
+ * Steady-state allocations are therefore eliminated:
+ * - The two `Float32Array` views over WASM memory are created once and reused;
+ *   they are rebuilt only when `wasmMemory.buffer` is detached (i.e. the WASM
+ *   instance grew its memory), which invalidates existing views.
+ * - The bypass path zero-fills the output in place instead of allocating a
+ *   silent `Float32Array` each call when an input channel is absent.
+ * - Output is copied with an index loop rather than `subarray()`, which would
+ *   allocate a fresh view per channel per block.
+ *
+ * Exported (rather than inlined) so the otherwise-untestable worklet source can
+ * be evaluated and exercised in unit tests — see tests/plugin-bridge.test.ts.
+ *
+ * # AI generated (reviewed)
+ */
+export function buildWasmProcessorCode(): string {
+  return `
+      class WasmPluginProcessor extends AudioWorkletProcessor {
+        constructor(options) {
+          super();
+          this.wasmMemory = null;
+          this.processFunc = null;
+          // Exported WASM functions stored individually (wasmInstance is never set)
+          this.wasmSetParameter = null;
+          this.wasmAllocString = null;
+          this.inputPtr = 0;
+          this.outputPtr = 0;
+          this.blockSize = 128;
+          this.bypassed = false;
+          // Cached typed-array views over WASM memory (see header). null until the
+          // first process() call after init; rebuilt only on buffer detach.
+          this.inputView = null;
+          this.outputView = null;
+          this.viewBuffer = null;
+          // REGRESSION fix: setParameter() used to construct a fresh
+          // TextEncoder AND let .encode() allocate a new Uint8Array on
+          // every call. setParameter can run continuously during
+          // automation playback (driven by port.onmessage), so both
+          // allocated on this real-time thread on every automated
+          // parameter change -- violating this module's own "起動時のみ
+          // アロケート / 動的アロケート禁止" rule for the same reason
+          // process() itself was already made allocation-free. Allocate
+          // the encoder and a reusable scratch buffer once, here, and use
+          // encodeInto() (writes into the existing buffer, no allocation)
+          // instead of encode() (always allocates a new Uint8Array).
+          // Parameter ids are short identifiers (e.g. "gain", "mix"); 64
+          // bytes is generous headroom.
+          this._textEncoder = new TextEncoder();
+          this._idEncodeBuf = new Uint8Array(64);
+
+          this.port.onmessage = (e) => {
+            const { type, data } = e.data;
+            switch (type) {
+              case 'init':
+                this.initWasm(data.wasmBytes, data.blockSize);
+                break;
+              case 'setParameter':
+                this.setParameter(data.id, data.value);
+                break;
+              case 'bypass':
+                this.bypassed = data.bypassed;
+                break;
+            }
+          };
+        }
+
+        async initWasm(wasmBytes, blockSize) {
+          this.blockSize = blockSize;
+          // Force the views to be rebuilt on the next process() with the new
+          // block size / buffer.
+          this.viewBuffer = null;
+
+          const memory = new WebAssembly.Memory({ initial: 256, maximum: 512 });
+          this.wasmMemory = memory;
+
+          const importObject = {
+            env: {
+              memory,
+              log: (ptr, len) => {
+                const bytes = new Uint8Array(memory.buffer, ptr, len);
+                const str = new TextDecoder().decode(bytes);
+                // Plugin stdout — forwarded to plugin sandbox log only
+              }
+            }
+          };
+
+          const module = await WebAssembly.compile(wasmBytes);
+          const instance = await WebAssembly.instantiate(module, importObject);
+
+          this.processFunc = instance.exports.process;
+          this.wasmSetParameter = instance.exports.setParameter || null;
+          this.wasmAllocString = instance.exports.allocString || null;
+          this.inputPtr = instance.exports.getInputBuffer();
+          this.outputPtr = instance.exports.getOutputBuffer();
+
+          if (instance.exports.init) {
+            instance.exports.init(sampleRate, blockSize);
+          }
+
+          this.port.postMessage({ type: 'ready' });
+        }
+
+        setParameter(id, value) {
+          // Use the stored export references; wasmInstance is never set in this processor.
+          if (this.wasmSetParameter && this.wasmAllocString) {
+            const { written } = this._textEncoder.encodeInto(id, this._idEncodeBuf);
+            // Allocate/copy the fixed scratch-buffer size (not the encoded
+            // length) so the copy below is a single whole-buffer .set() with
+            // no subarray/slice view needed on either side; wasmSetParameter
+            // is still told the real encoded length, so trailing unused
+            // bytes are never read.
+            const idPtr = this.wasmAllocString(this._idEncodeBuf.length);
+            new Uint8Array(this.wasmMemory.buffer, idPtr, this._idEncodeBuf.length).set(this._idEncodeBuf);
+            this.wasmSetParameter(idPtr, written, value);
+          }
+        }
+
+        process(inputs, outputs, parameters) {
+          if (this.bypassed || !this.processFunc) {
+            // Pass through — copy each available input channel, silence the rest.
+            // Zero-fill in place to avoid allocating a silent buffer per block.
+            const inCh = inputs[0];
+            for (let ch = 0; ch < outputs[0].length; ch++) {
+              const src = inCh && inCh[ch];
+              if (src) outputs[0][ch].set(src);
+              else outputs[0][ch].fill(0);
+            }
+            return true;
+          }
+
+          // Rebuild the WASM-memory views only when the backing buffer changed
+          // (first call, or memory growth detached the previous ArrayBuffer).
+          if (this.viewBuffer !== this.wasmMemory.buffer) {
+            this.viewBuffer = this.wasmMemory.buffer;
+            this.inputView = new Float32Array(this.viewBuffer, this.inputPtr, this.blockSize * 2);
+            this.outputView = new Float32Array(this.viewBuffer, this.outputPtr, this.blockSize * 2);
+          }
+          const inputView = this.inputView;
+          const outputView = this.outputView;
+          const blockSize = this.blockSize;
+
+          // Copy input into the WASM input buffer.
+          const inCh = inputs[0];
+          for (let ch = 0; ch < Math.min((inCh && inCh.length) || 0, 2); ch++) {
+            inputView.set(inCh[ch], ch * blockSize);
+          }
+
+          // Process
+          this.processFunc(blockSize);
+
+          // Copy output out of the WASM output buffer. An index loop avoids the
+          // per-channel view allocation that subarray() would incur each block.
+          for (let ch = 0; ch < Math.min(outputs[0].length, 2); ch++) {
+            const out = outputs[0][ch];
+            const base = ch * blockSize;
+            for (let i = 0; i < blockSize; i++) out[i] = outputView[base + i];
+          }
+
+          return true;
+        }
+      }
+
+      registerProcessor('wasm-plugin-processor', WasmPluginProcessor);
+    `;
+}
+
 // ==================== Export ====================
 
 export type {
@@ -904,7 +1028,6 @@ export type {
   PluginType,
   ParameterDescriptor,
   ParameterFlags,
-  PluginInstance,
   PluginPreset,
   PluginChain,
   ProcessBuffer

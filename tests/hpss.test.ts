@@ -10,6 +10,7 @@ import {
   createHPSSProcessor,
   percussivenessRatio,
   signalPsnr,
+  medianOfSlice,
 } from '../audio/hpss';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -398,3 +399,55 @@ function correlation(a: Float32Array, b: Float32Array): number {
   const denom = Math.sqrt(dA * dB);
   return denom < 1e-12 ? 0 : num / denom;
 }
+
+// ─── medianOfSlice (in-place quickselect) ──────────────────────────────────────
+
+/** Reference median: copy + numeric sort + middle element (len>>1). */
+function refMedian(values: number[]): number {
+  const a = Float64Array.from(values);
+  a.sort();
+  return a[a.length >> 1];
+}
+
+describe('medianOfSlice — quickselect median', () => {
+  it('matches the sort-based reference on small fixed cases', () => {
+    expect(medianOfSlice(Float64Array.from([3, 1, 2]), 3)).toBe(2);
+    expect(medianOfSlice(Float64Array.from([1]), 1)).toBe(1);
+    // len even → upper-middle element (len>>1), matching the original sort impl.
+    expect(medianOfSlice(Float64Array.from([4, 2, 1, 3]), 4)).toBe(refMedian([4, 2, 1, 3]));
+  });
+
+  it('handles duplicates, negatives, sorted and reverse-sorted input', () => {
+    const cases: number[][] = [
+      [5, 5, 5, 5, 5],
+      [-3, -1, -2, 0, 2, 1],
+      [1, 2, 3, 4, 5, 6, 7],          // already sorted (median-of-three worst case guard)
+      [7, 6, 5, 4, 3, 2, 1],          // reverse sorted
+      [2, 2, 1, 1, 3, 3, 2],
+    ];
+    for (const c of cases) {
+      expect(medianOfSlice(Float64Array.from(c), c.length)).toBe(refMedian(c));
+    }
+  });
+
+  it('matches the reference across randomized arrays (and leaves the median at k)', () => {
+    let seed = 13579;
+    const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let trial = 0; trial < 500; trial++) {
+      const n = 1 + Math.floor(rng() * 31);
+      const vals: number[] = [];
+      for (let i = 0; i < n; i++) vals.push(Math.floor(rng() * 200) - 100);
+      const buf = Float64Array.from(vals);
+      const got = medianOfSlice(buf, n);
+      expect(got).toBe(refMedian(vals));
+      // Post-condition: quickselect leaves the median value at index k = n>>1.
+      expect(buf[n >> 1]).toBe(got);
+    }
+  });
+
+  it('respects len < buffer length (only the prefix participates)', () => {
+    // Trailing garbage past `len` must not affect the result.
+    const buf = Float64Array.from([3, 1, 2, 999, -999]);
+    expect(medianOfSlice(buf, 3)).toBe(2);
+  });
+});

@@ -2,8 +2,10 @@
 
 > ブラウザ完結のプロ動画エディタ — 100% ローカル、サーバーレス、オフライン対応
 
+[![Version](https://img.shields.io/badge/Version-3.1.0-00C4CC)](./CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6)](https://www.typescriptlang.org/)
+[![Tests](https://img.shields.io/badge/Tests-4670%20passing-5bb974)](./tests)
 [![PWA](https://img.shields.io/badge/PWA-Ready-5bb974)](https://web.dev/progressive-web-apps/)
 
 DaVinci Resolve / Premiere Pro / Final Cut Pro 級の編集をブラウザだけで実現。インストール不要。データはすべてローカル。プライバシーは完全にあなたのもの。
@@ -16,7 +18,7 @@ DaVinci Resolve / Premiere Pro / Final Cut Pro 級の編集をブラウザだけ
 | 編集 | マグネティックタイムライン、マルチカム、ネストシーケンス |
 | カラー | DaVinci 級カラーグレーディング、HDR10/HLG、LUT |
 | オーディオ | Fairlight 級ミキサー、EQ/コンプレッサー、ノイズ低減 |
-| AI | ローカル AI (Transformers.js / WebGPU 推論)、自動字幕 |
+| AI | ローカル AI (Transformers.js、100% オンデバイス推論)、自動字幕 |
 | 互換 | OTIO 1.0、EDL、FCPXML — DaVinci/Premiere/FCP 往復編集 |
 | セキュリティ | SBOM (CycloneDX/SPDX)、CVE スキャン、OSV 連携 |
 | アクセシビリティ | WCAG 2.2 AAA、11 言語対応 (日本語/英語/中国語/韓国語他) |
@@ -72,7 +74,7 @@ http://localhost:5173 をブラウザで開く。
 - 推奨: WebGPU 対応 GPU
 - メモリ: 8GB+ (4K 編集は 16GB 推奨)
 
-WebGPU 非対応は Canvas 2D に自動フォールバック。WebCodecs 非対応は ffmpeg.wasm に自動フォールバック。
+WebGPU 非対応環境は Canvas 2D レンダリングに自動フォールバック (起動時の capability 検出で full / degraded / minimal を判定)。
 
 ## デプロイ
 

@@ -308,6 +308,25 @@ describe('SRT import/export', () => {
     expect(cm.exportSRT('nonexistent')).toBe('');
   });
 
+  it('REGRESSION: SRT millisecond component is not truncated-down by float error', () => {
+    // Before fix: `Math.floor((seconds % 1) * 1000)` truncated common values
+    // DOWN by 1ms — 5.005s -> ",004", 3.456s -> ",455" — because e.g.
+    // (5.005 % 1) * 1000 = 4.9999… floors to 4. Deriving from rounded integer
+    // milliseconds is exact.
+    const t = cm.createTrack('ms');
+    cm.addCaption(t.id, 3.456, 5.005, 'x'); // both endpoints chosen to hit the float-floor bug
+    const out = cm.exportSRT(t.id);
+    expect(out).toContain('00:00:03,456 --> 00:00:05,005');
+  });
+
+  it('REGRESSION: SRT rounds sub-millisecond time to the nearest ms, carrying rollover', () => {
+    // 59.9996s is closer to 60.000 than to 59.999; rounding must roll it over
+    // to 00:01:00,000 rather than the old floor's 00:00:59,999.
+    const t = cm.createTrack('rollover');
+    cm.addCaption(t.id, 59.9996, 61, 'x');
+    expect(cm.exportSRT(t.id)).toContain('00:01:00,000 -->');
+  });
+
   it('REGRESSION: importSRT handles Windows CRLF line endings', () => {
     // Standard SRT files use \r\n. Blocks separated by \r\n\r\n must still split
     // into individual cues (the /\n\n+/ splitter never matches inside \r\n\r\n).
@@ -364,6 +383,15 @@ describe('VTT import/export', () => {
   it('exportVTT uses dot millisecond separator', () => {
     const track = cm.importVTT(vtt);
     expect(cm.exportVTT(track.id)).toContain('00:00:01.000');
+  });
+
+  it('REGRESSION: VTT millisecond component is not truncated-down by float error', () => {
+    // exportVTT shares secondsToSRTTime's timecode derivation (comma -> dot),
+    // so it inherited the same float-floor bug: 5.005s -> ".004". The rounded
+    // integer-millisecond derivation fixes both formats together.
+    const t = cm.createTrack('vtt-ms');
+    cm.addCaption(t.id, 3.456, 5.005, 'x');
+    expect(cm.exportVTT(t.id)).toContain('00:00:03.456 --> 00:00:05.005');
   });
 
   it('REGRESSION: importVTT handles Windows CRLF line endings', () => {
@@ -461,6 +489,15 @@ describe('ASS import/export', () => {
     expect(out).toContain('[Script Info]');
     expect(out).toContain('Dialogue:');
     expect(out).toContain('First line');
+  });
+
+  it('REGRESSION: ASS centisecond component is not truncated-down by float error', () => {
+    // Same float-floor bug as SRT, at centisecond resolution: (4.13 % 1) * 100
+    // = 12.999… floored to 12, so 4.13s serialized as ".12" instead of ".13".
+    const t = cm.createTrack('ass-cs');
+    cm.addCaption(t.id, 4.13, 5.29, 'x'); // both endpoints hit the bug
+    const out = cm.exportASS(t.id);
+    expect(out).toContain('0:00:04.13,0:00:05.29');
   });
 });
 

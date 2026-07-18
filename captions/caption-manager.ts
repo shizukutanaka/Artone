@@ -648,10 +648,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   }
 
   private secondsToSRTTime(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 1000);
+    // REGRESSION fix: the previous `Math.floor((seconds % 1) * 1000)`
+    // truncated the millisecond component DOWN by float-representation error
+    // for common values — e.g. (5.005 % 1) * 1000 = 4.9999… → floor 4, so
+    // 5.005s serialized as "…05,004"; 3.456s as "…03,455". Round the whole
+    // duration to integer milliseconds ONCE, then derive h/m/s/ms with exact
+    // integer arithmetic — this is float-error-free and also carries a
+    // rounding-induced rollover (e.g. 59.9996s → 00:01:00,000) correctly.
+    const totalMs = Math.max(0, Math.round(seconds * 1000));
+    const ms = totalMs % 1000;
+    const totalS = (totalMs - ms) / 1000;
+    const s = totalS % 60;
+    const totalM = (totalS - s) / 60;
+    const m = totalM % 60;
+    const h = (totalM - m) / 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
   }
 
@@ -660,10 +670,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   }
 
   private secondsToASSTime(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const cs = Math.floor((seconds % 1) * 100);
+    // Same float-truncation fix as secondsToSRTTime, at centisecond
+    // resolution (ASS uses h:mm:ss.cc). Round to integer centiseconds first.
+    const totalCs = Math.max(0, Math.round(seconds * 100));
+    const cs = totalCs % 100;
+    const totalS = (totalCs - cs) / 100;
+    const s = totalS % 60;
+    const totalM = (totalS - s) / 60;
+    const m = totalM % 60;
+    const h = (totalM - m) / 60;
     return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
   }
 

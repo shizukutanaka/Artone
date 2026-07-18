@@ -8,6 +8,7 @@ Artone v3 の全変更を記録。
 ## [Unreleased]
 
 ### Fixed
+- **`captions/caption-manager.ts` の SRT/VTT/ASS タイムコードのミリ秒/センチ秒成分が浮動小数点誤差で切り捨てられ、書き出し時刻が実際より約1ms/1cs 手前にずれるバグを修正** (captions、フレーム精度)。`secondsToSRTTime()`/`secondsToASSTime()` は端数を `Math.floor((seconds % 1) * 1000)` (ASS は `* 100`) で求めていたが、`(5.005 % 1) * 1000 = 4.9999…` のように多くの一般的な値で二進表現誤差により真値をわずかに下回るため `floor` が1つ小さい値を返し、5.005s → `…05,004`、3.456s → `…03,455`、ASS 4.13s → `.12` と誤って書き出していた (VTT は `secondsToSRTTime` を共有するため同じずれを継承)。修正: 継続時間を先に整数ミリ秒/センチ秒へ **1度だけ丸め** (`Math.round(seconds * 1000)`)、そこから h/m/s/ms を純整数演算で導出 — 浮動小数点誤差ゼロで、丸めによる桁上がり (例: 59.9996s → `00:01:00,000`) も正しく処理する。回帰テスト4件追加 (SRT ミリ秒・SRT 桁上がりロールオーバー・VTT ミリ秒・ASS センチ秒、git stash で regress-then-fix 確認済み)。テスト総数 4673 → 4677。
 - **`captions/readability.ts` `normalizeCues()` が字幕を重複させ、`auditCues()` がそれを検出できなかったバグを修正** (captions、放送規格準拠)。`normalizeCues()` は各キューの表示時間を最小読速 (`maxCps`) と最小表示時間 (`minDurationSec`) の下限まで延長するが、延長は各キュー独立に行われ隣接キューとの重なりを考慮していなかったため、密に並んだ ASR キューでは前のキューの終了が次のキューの開始を追い越す**重複キュー**を生成していた (全放送字幕規格 Netflix/EBU/BBC が禁止する不正状態)。これは典型的な発話入力でも実際に発生する (`tests/readability.test.ts` の round-trip テストが証明)。修正: (1) `normalizeCues()` に**カスケード**を追加 — 各キューの開始を「前キュー終了 + `minGapSec`」まで後ろ倒しし (自然な開始が既に空いていれば据え置き)、出力を重複ゼロに。(2) `auditCues()` の検出対象に `'overlap'` 型を追加 (`cue.end > next.start` を検出) — 関数の docstring が謳う「放送規格違反の検出」に重複が含まれていなかったギャップを解消。回帰テスト4件追加 (直接の overlap 検出・境界接触の非検出・カスケード動作、git stash で regress-then-fix 確認済み)。テスト総数 4670 → 4673。
 
 ## [3.1.0] - 2026-07-16

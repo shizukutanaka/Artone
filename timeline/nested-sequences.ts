@@ -297,10 +297,22 @@ export class NestedSequenceManager {
       const restoredClip: Clip = {
         ...clip,
         id: crypto.randomUUID(),
-        // Map a nested-internal start back to the parent timeline. The nested
-        // clip may be trimmed (mediaIn > 0), so subtract that offset — mirroring
-        // renderNestedFrame's nestedTime = (t - startTime) + mediaIn mapping.
-        startTime: clip.startTime + nestedClip.startTime - nestedClip.mediaIn
+        // Map a nested-internal clip back to the parent timeline as the exact
+        // inverse of renderNestedFrame's forward mapping
+        //   nestedTime = (t - nestedClip.startTime) * nestedClip.speed + nestedClip.mediaIn.
+        // A child sitting at internal time τ (clip.startTime) is therefore
+        // shown at parent time  t = (τ - mediaIn) / speed + nestedClip.startTime;
+        // its on-timeline duration is compressed/stretched by 1/speed; and its
+        // own retime composes multiplicatively with the nested ref's speed.
+        // The previous code omitted the `/ speed` and the duration/speed
+        // rescale, so any retimed nested clip (speed !== 1) unnested to wrong
+        // positions AND wrong durations (correct only for the speed === 1 case
+        // its comment silently assumed). mediaIn is media-relative and so is
+        // left unchanged.
+        startTime:
+          (clip.startTime - nestedClip.mediaIn) / nestedClip.speed + nestedClip.startTime,
+        duration: clip.duration / nestedClip.speed,
+        speed: clip.speed * nestedClip.speed
       };
       sequence.clips.push(restoredClip);
     }

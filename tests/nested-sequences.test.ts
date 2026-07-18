@@ -191,6 +191,38 @@ describe('unnestSequence', () => {
     expect(starts).toEqual([95, 105]);
   });
 
+  it('REGRESSION: applies the nested clip speed (retime) on unnest', () => {
+    // unnestSequence must be the exact inverse of renderNestedFrame's
+    //   nestedTime = (t - startTime) * speed + mediaIn.
+    // Before the fix it omitted the `/ speed` on position and never rescaled
+    // the child duration or composed the child's own speed, so a retimed
+    // nested clip (speed !== 1) unnested to wrong positions AND durations —
+    // the restored clips no longer reproduced the same frames.
+    const main = mgr.createSequence('Main');
+    const c1 = addClip(main.id, { startTime: 0, duration: 10, speed: 1 });
+    const c2 = addClip(main.id, { startTime: 10, duration: 10, speed: 1 });
+    const nested = mgr.nestSequence(main.id, [c1.id, c2.id])!;
+    const ref = mgr.getSequence(main.id)!.clips.find(c => c.sequenceId === nested.id)!;
+
+    // Retime the nested ref 2× (Artone convention: speed > 1 = faster) and move it.
+    ref.speed = 2;
+    ref.mediaIn = 0;
+    ref.startTime = 100;
+
+    mgr.unnestSequence(main.id, ref.id);
+    const restored = mgr
+      .getSequence(main.id)!
+      .clips.slice()
+      .sort((a, b) => a.startTime - b.startTime);
+
+    // Internal starts 0 and 10 → parent = internal/2 + 100 = 100 and 105.
+    expect(restored.map(c => c.startTime)).toEqual([100, 105]);
+    // On-timeline duration compresses by 1/speed: 10 → 5.
+    expect(restored.map(c => c.duration)).toEqual([5, 5]);
+    // Child retime composes with the nested ref's: 1 * 2 = 2.
+    expect(restored.map(c => c.speed)).toEqual([2, 2]);
+  });
+
   it('returns false for a non-nested clip', () => {
     const main = mgr.createSequence('Main');
     const c = addClip(main.id, {});

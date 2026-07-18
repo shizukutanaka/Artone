@@ -243,6 +243,49 @@ describe('auditCues', () => {
     const lcvs = violations.filter((v) => v.type === 'line_count');
     expect(lcvs.length).toBeGreaterThan(0);
   });
+
+  it('REGRESSION: detects temporal overlap between adjacent cues', () => {
+    // Every broadcast subtitle spec requires non-overlapping, ordered cues, but
+    // auditCues used to check only cps/line_length/line_count -- an overlap
+    // (one cue ending after the next begins) passed the audit silently.
+    const violations = auditCues([
+      { start: 0, end: 2, text: 'first', cps: 3 },
+      { start: 1, end: 3, text: 'second', cps: 3 },
+    ]);
+    const overlaps = violations.filter((v) => v.type === 'overlap');
+    expect(overlaps).toHaveLength(1);
+    expect(overlaps[0].index).toBe(0); // reported on the cue whose end overruns
+    expect(overlaps[0].detail).toContain('overlap');
+  });
+
+  it('does not flag cues that merely touch at a boundary (end === next.start)', () => {
+    const violations = auditCues([
+      { start: 0, end: 1, text: 'a', cps: 1 },
+      { start: 1, end: 2, text: 'b', cps: 1 },
+    ]);
+    expect(violations.filter((v) => v.type === 'overlap')).toHaveLength(0);
+  });
+
+  it('REGRESSION: normalizeCues cascades densely-packed cues so its own output has no overlap', () => {
+    // Two back-to-back short ASR cues: each is extended to the 1.0s
+    // minDuration floor, so cue 0 naturally runs 0 -> 1.0 while cue 1's
+    // source start is 0.5. Before the cascade fix, normalizeCues emitted
+    // both at their extended durations from their source starts, producing
+    // an overlap (0.5s) -- invalid for any broadcast subtitle spec, and its
+    // own auditCues would flag it. The cascade now pushes cue 1's start to
+    // just after cue 0's end (+ minGapSec), so the output is overlap-free.
+    const normalized = normalizeCues(
+      [
+        { start: 0, end: 0.3, text: 'Hello' },
+        { start: 0.5, end: 0.8, text: 'World' },
+      ],
+      { profile: 'netflix' }
+    );
+    // cue 1 was pushed past cue 0's end (no overlap), not left at 0.5.
+    expect(normalized[1].start).toBeGreaterThanOrEqual(normalized[0].end);
+    const overlaps = auditCues(normalized, { profile: 'netflix' }).filter((v) => v.type === 'overlap');
+    expect(overlaps).toHaveLength(0);
+  });
 });
 
 // ============================================================

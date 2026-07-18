@@ -139,7 +139,11 @@ export class BenchmarkRunner {
   }
 }
 
-function computeStats(samples: number[]) {
+/**
+ * サンプル統計を計算する (テスト可能なよう export)。
+ * medianMs は真の統計的中央値 (偶数長は中央2値の平均) を返す。
+ */
+export function computeStats(samples: number[]) {
   const sorted = [...samples].sort((a, b) => a - b);
   const n = sorted.length;
   const sum = sorted.reduce((a, b) => a + b, 0);
@@ -148,13 +152,28 @@ function computeStats(samples: number[]) {
 
   return {
     meanMs: mean,
-    medianMs: percentile(sorted, 50),
+    medianMs: median(sorted),
     p95Ms: percentile(sorted, 95),
     p99Ms: percentile(sorted, 99),
     stdDevMs: Math.sqrt(variance),
     minMs: sorted[0],
     maxMs: sorted[n - 1],
   };
+}
+
+/**
+ * 統計的中央値。偶数長は中央2値の平均、奇数長は中央値そのもの。
+ * 以前は `percentile(sorted, 50)` を使っており、これは
+ * `sorted[floor(0.5·n)]` = 偶数長で上側の中央値を返していた (例:
+ * [10,20,30,40] → 30。真の中央値は 25)。medianMs は「median」と明示された
+ * 診断値であり (detect() のゲート判定には mean/p95 のみを使うため退行検出には
+ * 影響しないが) 統計値としては誤りだった。
+ */
+function median(sorted: number[]): number {
+  const n = sorted.length;
+  if (n === 0) return 0;
+  const mid = n >> 1;
+  return n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
 function percentile(sorted: number[], p: number): number {

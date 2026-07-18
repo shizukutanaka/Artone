@@ -266,11 +266,11 @@ export class VulnerabilityScanner {
       );
     }
 
-    // キャレット "^1.2.3" → >=1.2.3 <2.0.0
+    // キャレット: 最左の「非ゼロ」要素を変えない変更のみ許容する (node-semver 準拠)。
+    // 上限計算は caretUpperBound に切り出す (^0.y.z の zero-major 特例を含む)。
     if (trimmed.startsWith('^')) {
       const base = trimmed.slice(1);
-      const major = parseInt(base.split('.')[0]);
-      const upper = `${major + 1}.0.0`;
+      const upper = this.caretUpperBound(base);
       return (
         this.compareVersions(version, base) >= 0 &&
         this.compareVersions(version, upper) < 0
@@ -288,6 +288,22 @@ export class VulnerabilityScanner {
     if (op === '>=') return cmp >= 0;
     if (op === '=' || op === '==') return cmp === 0;
     return false;
+  }
+
+  /**
+   * キャレット範囲 "^x.y.z" の排他的上限を返す (node-semver 準拠)。
+   * キャレットは最左の「非ゼロ」要素を変えない変更のみ許容する:
+   *   ^1.2.3 → 2.0.0   (major を上げる)
+   *   ^0.2.3 → 0.3.0   (major=0 なので minor を上げる)
+   *   ^0.0.3 → 0.0.4   (major=minor=0 なので patch を上げる)
+   * 以前は常に (major+1).0.0 を上限にしており、^0.y.z を 0.x 全体と誤って
+   * 一致させ、脆弱性スキャナの過検出 (非脆弱バージョンでの偽陽性) を招いていた。
+   */
+  private caretUpperBound(base: string): string {
+    const [maj, min, pat] = base.split('.').map((n) => parseInt(n, 10) || 0);
+    if (maj > 0) return `${maj + 1}.0.0`;
+    if (min > 0) return `0.${min + 1}.0`;
+    return `0.0.${pat + 1}`;
   }
 
   /**

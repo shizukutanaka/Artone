@@ -240,6 +240,73 @@ describe('VulnerabilityScanner', () => {
     const atUpperBound = fresh.scan([{ name: 'example-pkg', version: '2.0.0', type: 'library', license: 'MIT' }]);
     expect(atUpperBound).toHaveLength(1);
   });
+
+  it('REGRESSION: caret range on a 0.x version is bounded by the next MINOR, not the next MAJOR', () => {
+    // Per node-semver, ^ only permits changes that keep the left-most NON-ZERO
+    // element fixed, so ^0.2.0 means >=0.2.0 <0.3.0. The old caret branch always
+    // used (major+1).0.0 = 1.0.0 as the upper bound, treating the whole 0.x line
+    // as one compatible range -- an over-match that flags every 0.3.0..0.9.x as
+    // vulnerable to a CVE declared against ^0.2.0 (fail-open false-POSITIVE that
+    // can fail CI on non-vulnerable versions).
+    const caretCve: CVE = {
+      id: 'CVE-2024-0003',
+      package: 'zero-pkg',
+      affectedVersions: '^0.2.0',
+      severity: 'high',
+      description: 'Test caret zero-major range',
+    };
+    const fresh = new VulnerabilityScanner();
+    fresh.loadDatabase([caretCve]);
+    const hit = (v: string) =>
+      fresh.scan([{ name: 'zero-pkg', version: v, type: 'library', license: 'MIT' }]).length > 0;
+
+    expect(hit('0.2.0')).toBe(true); // lower bound, inclusive
+    expect(hit('0.2.5')).toBe(true); // in range >=0.2.0 <0.3.0
+    expect(hit('0.3.0')).toBe(false); // next minor -- OUT (was wrongly true)
+    expect(hit('0.9.0')).toBe(false); // was wrongly true
+    expect(hit('1.0.0')).toBe(false); // upper bound of the OLD wrong range -- OUT
+  });
+
+  it('REGRESSION: caret range on a 0.0.x version is bounded by the next PATCH', () => {
+    // ^0.0.3 means >=0.0.3 <0.0.4 (only the exact patch), because both major and
+    // minor are zero. The old branch used 1.0.0 as the bound -- matching all of
+    // 0.0.x, 0.x and everything below 1.0.0.
+    const caretCve: CVE = {
+      id: 'CVE-2024-0004',
+      package: 'zz-pkg',
+      affectedVersions: '^0.0.3',
+      severity: 'high',
+      description: 'Test caret zero-minor range',
+    };
+    const fresh = new VulnerabilityScanner();
+    fresh.loadDatabase([caretCve]);
+    const hit = (v: string) =>
+      fresh.scan([{ name: 'zz-pkg', version: v, type: 'library', license: 'MIT' }]).length > 0;
+
+    expect(hit('0.0.3')).toBe(true);
+    expect(hit('0.0.4')).toBe(false); // next patch -- OUT (was wrongly true)
+    expect(hit('0.1.0')).toBe(false); // was wrongly true
+  });
+
+  it('caret on a normal major keeps working (>=1.2.3 <2.0.0)', () => {
+    // Guards that the zero-aware fix did not regress the standard major case.
+    const caretCve: CVE = {
+      id: 'CVE-2024-0005',
+      package: 'maj-pkg',
+      affectedVersions: '^1.2.3',
+      severity: 'high',
+      description: 'Test caret normal-major range',
+    };
+    const fresh = new VulnerabilityScanner();
+    fresh.loadDatabase([caretCve]);
+    const hit = (v: string) =>
+      fresh.scan([{ name: 'maj-pkg', version: v, type: 'library', license: 'MIT' }]).length > 0;
+
+    expect(hit('1.2.3')).toBe(true);
+    expect(hit('1.9.9')).toBe(true); // still within <2.0.0
+    expect(hit('1.2.2')).toBe(false); // below lower bound
+    expect(hit('2.0.0')).toBe(false); // next major -- OUT
+  });
 });
 
 describe('SupplyChainAuditor — audit + formatReport', () => {

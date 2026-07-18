@@ -17,6 +17,7 @@ import {
   BaselineStore,
   bench,
   checkBudgets,
+  computeStats,
   type BenchmarkSpec,
   type BenchmarkResult,
   type BenchmarkBaseline,
@@ -129,6 +130,29 @@ describe('BenchmarkRunner', () => {
     const result = await runner.runOne({ name: 'stats', category: 'render', iterations: 10, warmup: 0, run: () => {} });
     expect(result.minMs).toBeLessThanOrEqual(result.medianMs);
     expect(result.medianMs).toBeLessThanOrEqual(result.maxMs);
+  });
+
+  it('REGRESSION: medianMs is the true statistical median (even n averages the two middle samples)', () => {
+    // medianMs used percentile(sorted, 50) = sorted[floor(0.5·n)], which for an
+    // even-length set returns the UPPER of the two middle samples, not their
+    // average. [10,20,30,40] → 30, but the median is unambiguously (20+30)/2=25.
+    // computeStats sorts internally, so order of input must not matter.
+    expect(computeStats([40, 10, 30, 20]).medianMs).toBe(25);
+    // Two-sample bench (iterations: 2) reported the MAX as the median.
+    expect(computeStats([10, 100]).medianMs).toBe(55);
+    // Odd n is unchanged: the single middle sample.
+    expect(computeStats([10, 20, 30]).medianMs).toBe(20);
+    expect(computeStats([5]).medianMs).toBe(5);
+  });
+
+  it('computeStats reports mean/min/max consistently alongside the fixed median', () => {
+    const s = computeStats([40, 10, 30, 20]);
+    expect(s.meanMs).toBe(25);
+    expect(s.minMs).toBe(10);
+    expect(s.maxMs).toBe(40);
+    // median stays within [min, max].
+    expect(s.medianMs).toBeGreaterThanOrEqual(s.minMs);
+    expect(s.medianMs).toBeLessThanOrEqual(s.maxMs);
   });
 
   it('runOne() auto-determines iterations when spec.iterations is 0 (default)', async () => {

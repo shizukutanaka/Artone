@@ -721,6 +721,36 @@ describe('PluginBridge — openPluginUI', () => {
     expect(bridge.getParameter(inst.id, 'gain')).toBe(6);
   });
 
+  it('REGRESSION: a stored parameter value of exactly 0 is not replaced by the default', async () => {
+    // The generic UI used `parameters.get(id) || param.defaultValue`. For a
+    // parameter whose valid value is 0 with a NONZERO default (e.g. the built-in
+    // compressor threshold, range [-60, 0], default -20), `0 || -20` yields the
+    // default -- corrupting the value display, the knob rotation, and (worst) the
+    // drag start value, which then writes the default back on the first mousemove.
+    // `?? defaultValue` falls back only when the key is genuinely absent.
+    const desc = makeDescriptor({
+      parameters: [
+        { id: 'threshold', name: 'Threshold', shortName: 'Th', unit: 'dB', minValue: -60, maxValue: 0, defaultValue: -20, stepCount: 0, flags: { automatable: true, readonly: false, hidden: false, programChange: false } },
+      ],
+    });
+    const inst = injectInstance(bridge, desc);
+    bridge.setParameter(inst.id, 'threshold', 0); // 0 is valid — it is the maximum
+    const container = document.createElement('div');
+    await bridge.openPluginUI(inst.id, container);
+
+    // Display shows the real value 0, not the default -20.
+    expect(container.querySelector('.plugin-param-value')?.textContent).toBe('0.0 dB');
+    // Knob points at normalized 1.0 → angle -135 + 270 = 135, not -20's 45.
+    expect(container.querySelector('.knob-pointer')?.getAttribute('transform')).toBe('rotate(135 30 30)');
+
+    // Drag start value must be 0: a zero-delta drag must not move the parameter.
+    const knob = container.querySelector('.plugin-param-knob') as HTMLElement;
+    knob.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientY: 100 }));
+    document.dispatchEvent(new MouseEvent('mousemove', { bubbles: false, clientY: 100 })); // delta 0
+    expect(bridge.getParameter(inst.id, 'threshold')).toBe(0); // was snapped to -20 by the bug
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: false }));
+  });
+
   it('generic UI hides hidden parameters', async () => {
     const desc = makeDescriptor({
       parameters: [

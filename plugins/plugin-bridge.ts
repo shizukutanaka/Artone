@@ -659,7 +659,7 @@ export class PluginBridge {
           </svg>
         </div>
         <div class="plugin-param-name">${esc(param.shortName || param.name)}</div>
-        <div class="plugin-param-value">${esc(this.formatValue(instance.parameters.get(param.id) || param.defaultValue, param))}</div>
+        <div class="plugin-param-value">${esc(this.formatValue(instance.parameters.get(param.id) ?? param.defaultValue, param))}</div>
       `;
       
       // Knob interaction
@@ -672,7 +672,11 @@ export class PluginBridge {
         const me = e as MouseEvent;
         isDragging = true;
         startY = me.clientY;
-        startValue = instance.parameters.get(param.id) || param.defaultValue;
+        // ?? not ||: a stored value of exactly 0 is valid (e.g. the compressor
+        // threshold whose range is [-60, 0]); `0 || defaultValue` would snap the
+        // knob to the default on mousedown, then the first mousemove writes that
+        // default back as the parameter value. Fall back only when truly absent.
+        startValue = instance.parameters.get(param.id) ?? param.defaultValue;
       }, { signal });
       
       // Pass signal so these document-level listeners are cleaned up when the
@@ -691,7 +695,7 @@ export class PluginBridge {
 
       document.addEventListener('mouseup', () => { isDragging = false; }, { signal });
       
-      this.updateKnob(paramEl, param, instance.parameters.get(param.id) || param.defaultValue);
+      this.updateKnob(paramEl, param, instance.parameters.get(param.id) ?? param.defaultValue);
       paramsContainer.appendChild(paramEl);
     }
     
@@ -713,7 +717,7 @@ export class PluginBridge {
         for (const param of instance.descriptor.parameters) {
           const paramEl = paramsContainer.querySelector(`[data-param="${param.id}"]`);
           if (paramEl) {
-            this.updateKnob(paramEl as HTMLElement, param, instance.parameters.get(param.id) || param.defaultValue);
+            this.updateKnob(paramEl as HTMLElement, param, instance.parameters.get(param.id) ?? param.defaultValue);
           }
         }
       }

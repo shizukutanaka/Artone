@@ -240,6 +240,15 @@ export function normalizeCues(
     const originalDuration = Math.max(0, seg.end - seg.start);
     const groups = wrapCue(text, opts.maxCharsPerLine, opts.maxLines);
 
+    // Cascade: a cue's start is pushed to just after the previous output
+    // cue's end (+ minGapSec) whenever its natural start would land inside
+    // that cue. Without this, per-cue duration extension (minDurationSec /
+    // maxCps floors) makes densely-packed source cues overlap — an invalid
+    // state for every broadcast subtitle spec. When the natural start is
+    // already clear of the previous cue, it is kept as-is (no forced drift).
+    const prevEnd = result.length > 0 ? result[result.length - 1].end : -Infinity;
+    const cueStart = Math.max(seg.start, prevEnd + opts.minGapSec);
+
     if (groups.length === 1) {
       // Fast path: no splitting needed
       const displayText = groups[0].join('\n');
@@ -250,8 +259,8 @@ export function normalizeCues(
       const duration = Math.max(originalDuration, minBySpeed, opts.minDurationSec);
 
       result.push({
-        start: seg.start,
-        end: seg.start + duration,
+        start: cueStart,
+        end: cueStart + duration,
         text: displayText,
         cps: cps(displayText, duration),
       });
@@ -268,7 +277,7 @@ export function normalizeCues(
 
       const contentDuration = totalAvailable - totalGap;
 
-      let cursor = seg.start;
+      let cursor = cueStart;
       for (let i = 0; i < groupTexts.length; i++) {
         const displayText = groupTexts[i];
         const chars = groupChars[i];
@@ -303,7 +312,7 @@ export function normalizeCues(
 
 export interface ReadabilityViolation {
   index: number;
-  type: 'cps' | 'line_length' | 'line_count';
+  type: 'cps' | 'line_length' | 'line_count' | 'overlap';
   detail: string;
 }
 
@@ -348,6 +357,21 @@ export function auditCues(
         index: i,
         type: 'cps',
         detail: `${actualCps.toFixed(1)} CPS > max ${opts.maxCps}`,
+      });
+    }
+
+    // Temporal overlap with the following cue. Every broadcast subtitle spec
+    // (Netflix/EBU/BBC) requires cues to be non-overlapping and in order, yet
+    // normalizeCues can produce overlaps: its per-cue duration extension
+    // (minDurationSec / maxCps reading-speed floors) pushes a cue's end past
+    // the next cue's start whenever the source ASR cues are densely packed.
+    // Flag it on the earlier cue (the one whose end overruns).
+    const next = cues[i + 1];
+    if (next && c.end > next.start) {
+      violations.push({
+        index: i,
+        type: 'overlap',
+        detail: `cue ends at ${c.end.toFixed(3)}s > next cue start ${next.start.toFixed(3)}s (overlap ${(c.end - next.start).toFixed(3)}s)`,
       });
     }
   }

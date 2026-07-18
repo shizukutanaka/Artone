@@ -7,6 +7,9 @@ Artone v3 の全変更を記録。
 
 ## [Unreleased]
 
+### Fixed
+- **`captions/readability.ts` `normalizeCues()` が字幕を重複させ、`auditCues()` がそれを検出できなかったバグを修正** (captions、放送規格準拠)。`normalizeCues()` は各キューの表示時間を最小読速 (`maxCps`) と最小表示時間 (`minDurationSec`) の下限まで延長するが、延長は各キュー独立に行われ隣接キューとの重なりを考慮していなかったため、密に並んだ ASR キューでは前のキューの終了が次のキューの開始を追い越す**重複キュー**を生成していた (全放送字幕規格 Netflix/EBU/BBC が禁止する不正状態)。これは典型的な発話入力でも実際に発生する (`tests/readability.test.ts` の round-trip テストが証明)。修正: (1) `normalizeCues()` に**カスケード**を追加 — 各キューの開始を「前キュー終了 + `minGapSec`」まで後ろ倒しし (自然な開始が既に空いていれば据え置き)、出力を重複ゼロに。(2) `auditCues()` の検出対象に `'overlap'` 型を追加 (`cue.end > next.start` を検出) — 関数の docstring が謳う「放送規格違反の検出」に重複が含まれていなかったギャップを解消。回帰テスト4件追加 (直接の overlap 検出・境界接触の非検出・カスケード動作、git stash で regress-then-fix 確認済み)。テスト総数 4670 → 4673。
+
 ## [3.1.0] - 2026-07-16
 
 大規模品質改善リリース。全25ディレクトリの体系的監査により、セキュリティ2件 + バグ修正40件超を実施。

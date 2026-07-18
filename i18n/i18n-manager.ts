@@ -384,10 +384,18 @@ export class I18nManager {
     const category = this.getPluralRules(locale).select(count);
     const ruleMap = this.parsePluralRules(rules);
     const chosen = ruleMap.get(category) ?? ruleMap.get('other') ?? '';
-    // ICU '#' is the count placeholder; may appear multiple times. A missing/
-    // non-numeric count has no sensible placeholder value — show nothing
-    // rather than the literal string "NaN".
-    return chosen.replace(/#/g, Number.isNaN(count) ? '' : String(count));
+    // ICU '#' is the count placeholder; may appear multiple times. Per the ICU
+    // MessageFormat spec it renders the LOCALE-FORMATTED number (equivalent to
+    // {count, number}), so it must go through the same Intl.NumberFormat used
+    // by the {var} path (line ~321) — otherwise the SAME number renders two
+    // different ways ("1000" via '#' vs "1.000" via {count}) and grouping/
+    // digit-system localization is silently lost (e.g. de "1000 Minuten"
+    // instead of "1.000 Minuten"). A missing/non-numeric count has no sensible
+    // placeholder value — show nothing rather than the literal string "NaN".
+    return chosen.replace(
+      /#/g,
+      Number.isNaN(count) ? '' : this.getNumberFormatter(locale).format(count)
+    );
   }
 
   /**

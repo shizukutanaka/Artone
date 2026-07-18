@@ -138,6 +138,34 @@ describe('i18n — ICU plural interpolation (REGRESSION)', () => {
     expect(m.t('msg', { count: 4 })).toBe('4/4 done');
   });
 
+  it('REGRESSION: # is locale-number-formatted like {var}, not raw String(count)', () => {
+    // ICU '#' renders the LOCALE-FORMATTED number (equivalent to {count, number}).
+    // It previously used raw String(count), so a grouped magnitude lost its
+    // separators and diverged from the {count} path -- the SAME number rendered
+    // two ways. de groups thousands with '.', so count=1000 must be "1.000".
+    const de = makeManager();
+    (de as unknown as { translations: Map<string, unknown> }).translations.set('de', {
+      minutes: '{count, plural, one {# Minute} other {# Minuten}}',
+      viaVar: '{count} Minuten',
+    });
+    (de as unknown as { currentLocale: string }).currentLocale = 'de';
+    expect(de.t('minutes', { count: 1000 })).toBe('1.000 Minuten');
+    // '#' and {var} now render the same number identically.
+    expect(de.t('minutes', { count: 1000 })).toBe(de.t('viaVar', { count: 1000 }));
+
+    // en grouping too, and every '#' in the option is formatted.
+    const en = makeManager();
+    (en as unknown as { translations: Map<string, unknown> }).translations.set('en', {
+      done: '{count, plural, other {#/# done}}',
+    });
+    (en as unknown as { currentLocale: string }).currentLocale = 'en';
+    expect(en.t('done', { count: 1_000_000 })).toBe('1,000,000/1,000,000 done');
+
+    // Small counts (the values existing tests use) are unaffected: no grouping
+    // separators below 1000, so formatted === String there.
+    expect(de.t('minutes', { count: 5 })).toBe('5 Minuten');
+  });
+
   it('the bundled en.json plural format resolves correctly', () => {
     // Mirrors i18n/en.json "plurals.items".
     const m = mgrWith({ plurals: { items: '{count, plural, one {# item} other {# items}}' } });

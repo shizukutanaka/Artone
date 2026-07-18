@@ -133,6 +133,20 @@ describe('acescCOETF / acescEOTF', () => {
   it('1.0 encodes to (log2(1)+9.72)/17.52', () => {
     expect(acescCOETF(1.0)).toBeCloseTo(9.72 / 17.52, 6);
   });
+
+  it('REGRESSION: non-positive linear encodes to the ACEScc black constant (S-2014-006)', () => {
+    // Per Academy S-2014-006, lin ≤ 0 → (log2(2^-16) + 9.72) / 17.52 =
+    // -0.358447…, the standard ACEScc black code. The old x ≤ 0 branch put a
+    // second -16 where the +9.72 offset belongs and returned -1.8265, which is
+    // off the valid range AND discontinuous with the toe branch. Guard both
+    // the value and continuity so a future edit can't silently break either.
+    const black = (Math.log2(Math.pow(2, -16)) + 9.72) / 17.52; // -0.358447…
+    expect(acescCOETF(0)).toBeCloseTo(black, 9);
+    expect(acescCOETF(-1)).toBeCloseTo(black, 9);
+    // Continuous with the x→0⁺ limit of the toe branch and round-trips to 0.
+    expect(acescCOETF(0)).toBeCloseTo(acescCOETF(Number.MIN_VALUE), 9);
+    expect(acescEOTF(acescCOETF(0))).toBeCloseTo(0, 9);
+  });
 });
 
 // ============================================================

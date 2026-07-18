@@ -189,7 +189,13 @@ export function sRGBEOTF(x: number): number {
  * Domain: (-∞, 1] → (−∞, 1]. Negative ACEScg values are handled.
  */
 export function acescCOETF(x: number): number {
-  if (x <= 0) return (-16 + Math.log2(Math.pow(2, -15) * 0.5)) / 17.52;
+  // Non-positive linear maps to the ACEScc "black" code. Per S-2014-006 this
+  // is (log2(2^-16) + 9.72) / 17.52 = -0.358447…, matching the x→0⁺ limit of
+  // the toe branch below and the cut2 constant in acescEOTF. The previous code
+  // wrote a second `-16` where the +9.72 offset belongs (log2(2^-15·0.5) also
+  // equals -16), yielding -1.8265 — off the valid ACEScc range and
+  // discontinuous with the toe branch.
+  if (x <= 0) return (Math.log2(Math.pow(2, -16)) + 9.72) / 17.52;
   if (x < Math.pow(2, -15)) return (Math.log2(Math.pow(2, -16) + x * 0.5) + 9.72) / 17.52;
   return (Math.log2(x) + 9.72) / 17.52;
 }

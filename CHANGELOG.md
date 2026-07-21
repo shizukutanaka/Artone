@@ -7,6 +7,9 @@ Artone v3 の全変更を記録。
 
 ## [Unreleased]
 
+### Added
+- **プロダクト評価文書とモデル別エージェント指示書を追加** (docs)。`docs/product-assessment-2026-07.md` (長所・短所・改善案を実証データに基づき整理)、`docs/agent-instructions-opus.md` (アーキテクチャ級タスク P1〜P4 の担当・確立済みワークフロー・環境制約・リスクゾーン規則)、`docs/agent-instructions-sonnet.md` (純TS バグ修正ループのテンプレート・検証バー・触ってはいけない領域・テスト規約) の3件。全25ディレクトリの監査と PR #9〜#21 の検証済み修正から得た知見を、将来の Opus / Sonnet セッションが即戦力で継続できる形に文書化したもの。
+
 ### Fixed
 - **`plugins/plugin-bridge.ts` の汎用プラグイン UI が値ちょうど `0` のパラメータをデフォルト値に置換していたバグを修正** (plugins)。`createGenericUI()` はパラメータ現在値を `instance.parameters.get(id) || param.defaultValue` で読んでいたが、`parameters` は `Map<string, number>` であり値が `0` のとき `get()` は数値 `0` (falsy) を返すため、`0 || defaultValue` が**デフォルト値**に評価されていた。`0` は多くのパラメータで正当な値であり (例: 内蔵コンプレッサの `threshold` は範囲 `[-60, 0]`・デフォルト `-20`。`0` は最大値)、値表示・ノブ回転が誤るだけでなく、**ドラッグ開始値** (`startValue`) が `0` のノブで `mousedown` するとデフォルト値になり、最初の `mousemove` でその値が実パラメータへ書き戻される状態破壊を起こしていた。4箇所すべてを `?? param.defaultValue` (nullish 合体、キー不在時のみフォールバック) に修正。回帰テスト1件追加 (値 `0`・非ゼロデフォルトで値表示 `0.0 dB`・ノブ角 `rotate(135 ...)`・ゼロ delta ドラッグでパラメータが動かないこと。git stash で regress-then-fix 確認済み。既存テストは全パラメータをデフォルト値のまま読むため本バグがマスクされていた)。テスト総数 4685 → 4686。
 - **`i18n/i18n-manager.ts` の ICU 複数形プレースホルダ `#` がロケール数値整形されず、`{var}` 経路と不整合だったバグを修正** (i18n)。ICU MessageFormat では `plural` 内の `#` は**ロケール整形された数値** (= `{count, number}` 相当) を描画する仕様だが、`selectPlural()` は生の `String(count)` を代入しており、千位区切りや数字体系のローカライズが失われていた。同じファイルの `{var}` 補間 (line ~321) は数値を `Intl.NumberFormat` に通しており (「en-US は千位をカンマ区切り」というテスト済み契約)、**同じ数値が `{count}` と `#` で別々に描画される**内部矛盾が生じていた (例: de で `{count}` は `1.000` だが `#` は `1000`)。出荷済みロケール (de/ar/en/es/fr/ja/ko/pt/ru/zh-Hans) は数値・時間の複数形で `#` を多用しており、ドイツ語の時間ラベルが `1000 Minuten` (正しくは `1.000 Minuten`) と表示される実害があった。`#` を `{var}` 経路と同じキャッシュ済みフォーマッタに通すよう修正。回帰テスト1件追加 (de の `1.000`・`#` と `{var}` の一致・en の複数 `#`・小カウント非退行。git stash で regress-then-fix 確認済み。既存テストは count 0〜5 のみで千位区切り未検証だった)。テスト総数 4684 → 4685。

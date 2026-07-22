@@ -454,6 +454,16 @@ describe('exportSRT()', () => {
     expect(srt).toContain('1');
     expect(srt).toContain('-->');
   });
+
+  it('REGRESSION: SRT millisecond field is not truncated-down by float error', () => {
+    // formatSRTTime used `Math.floor((seconds % 1) * 1000)`, which truncated the
+    // ms field DOWN by IEEE-754 error for common values (3.456s -> ",455") --
+    // the same bug already fixed in captions/caption-manager.ts but left live in
+    // this Descript-style exporter. Deriving from rounded integer ms is exact.
+    const editor = makeEditor();
+    const id = importSimple(editor, words({ text: 'hi', start: 0, end: 3.456 }));
+    expect(editor.exportSRT(id)).toContain('--> 00:00:03,456');
+  });
 });
 
 describe('exportVTT()', () => {
@@ -463,6 +473,12 @@ describe('exportVTT()', () => {
       { text: 'hello', start: 0, end: 0.5 }
     ));
     expect(editor.exportVTT(id)).toMatch(/^WEBVTT/);
+  });
+
+  it('REGRESSION: VTT millisecond field is not truncated-down by float error', () => {
+    const editor = makeEditor();
+    const id = importSimple(editor, words({ text: 'hi', start: 0, end: 3.456 }));
+    expect(editor.exportVTT(id)).toContain('--> 00:00:03.456');
   });
 });
 

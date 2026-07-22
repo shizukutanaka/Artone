@@ -401,10 +401,17 @@ export class MarkerManager {
   }
 
   private formatTimeVTT(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 1000);
+    // Round to integer milliseconds ONCE, then integer-divide — the previous
+    // `Math.floor((seconds % 1) * 1000)` truncated the ms field DOWN by float
+    // error (e.g. 3.456s -> ".455"). Same fix as captions/caption-manager.ts;
+    // also carries a rounding-induced rollover (59.9996s -> 00:01:00.000).
+    const totalMs = Math.max(0, Math.round(seconds * 1000));
+    const ms = totalMs % 1000;
+    const totalS = (totalMs - ms) / 1000;
+    const s = totalS % 60;
+    const totalM = (totalS - s) / 60;
+    const m = totalM % 60;
+    const h = (totalM - m) / 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
   }
 
@@ -478,10 +485,18 @@ export class MarkerManager {
   }
 
   private formatTimecodeEDL(seconds: number, fps = 30): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const f = Math.floor((seconds % 1) * fps);
+    // Quantise to the nearest integer frame ONCE, then integer-divide. The
+    // previous `Math.floor((seconds % 1) * fps)` truncated the frame field DOWN
+    // by float error — e.g. 3.0333333s (= frame 91 @30fps) yielded frame 0
+    // instead of 1. Rounding matches timeline/CLAUDE.md's integer-frame rule and
+    // carries a frame rollover (0.9999s @30fps -> 00:00:01:00) correctly.
+    const totalF = Math.max(0, Math.round(seconds * fps));
+    const f = totalF % fps;
+    const totalS = (totalF - f) / fps;
+    const s = totalS % 60;
+    const totalM = (totalS - s) / 60;
+    const m = totalM % 60;
+    const h = (totalM - m) / 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}:${f.toString().padStart(2, '0')}`;
   }
 

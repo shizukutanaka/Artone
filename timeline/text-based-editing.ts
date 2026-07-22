@@ -486,21 +486,31 @@ export class TextBasedEditor {
   }
 
   private formatSRTTime(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 1000);
-    
+    const { h, m, s, ms } = this.splitMs(seconds);
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
   }
 
   private formatVTTTime(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 1000);
-    
+    const { h, m, s, ms } = this.splitMs(seconds);
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+  }
+
+  /**
+   * 秒を h/m/s/ms 整数フィールドへ分解する。継続時間を整数ミリ秒へ **1度だけ
+   * 丸めて** から純整数演算で導出する — 以前は `Math.floor((seconds % 1) * 1000)`
+   * が浮動小数点表現誤差でミリ秒を1つ切り捨てており (例: 3.456s → ",455")、
+   * captions/caption-manager.ts で修正済みの同じバグがこちらに残っていた。
+   * 丸めによる桁上がり (例: 59.9996s → 00:01:00,000) も正しく処理する。
+   */
+  private splitMs(seconds: number): { h: number; m: number; s: number; ms: number } {
+    const totalMs = Math.max(0, Math.round(seconds * 1000));
+    const ms = totalMs % 1000;
+    const totalS = (totalMs - ms) / 1000;
+    const s = totalS % 60;
+    const totalM = (totalS - s) / 60;
+    const m = totalM % 60;
+    const h = (totalM - m) / 60;
+    return { h, m, s, ms };
   }
 
   // ============================================================

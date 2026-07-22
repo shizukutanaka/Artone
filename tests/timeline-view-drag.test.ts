@@ -13,6 +13,7 @@ import {
   computeClipDrag,
   clipDragModeForX,
   computeRulerClickTime,
+  formatTime,
   CLIP_EDGE_PX,
   MIN_CLIP_DURATION,
   type ClipDragState,
@@ -202,5 +203,26 @@ describe('computeRulerClickTime', () => {
     // Same 5s click, but the whole ruler (and click) shifted 300px right —
     // e.g. a wider left panel or different scroll position.
     expect(computeRulerClickTime(1300, 800, PPS)).toBe(5);
+  });
+});
+
+describe('formatTime — ruler label (m:ss.cc)', () => {
+  it('formats whole and half seconds (the values the ruler actually emits)', () => {
+    expect(formatTime(0)).toBe('0:00.00');
+    expect(formatTime(0.5)).toBe('0:00.50');
+    expect(formatTime(65)).toBe('1:05.00');
+    expect(formatTime(90.5)).toBe('1:30.50');
+  });
+
+  it('REGRESSION: centisecond field is not truncated-down by float error', () => {
+    // Previously `Math.floor((seconds % 1) * 100)`: (4.13 % 1) * 100 = 12.999…
+    // floored to 12, so 4.13s rendered "0:04.12". Rounding to integer
+    // centiseconds first is exact. (Same bug fixed in the caption/marker
+    // formatters; here the ruler only feeds 0.5s multiples today, but the
+    // helper must be correct for any input.)
+    expect(formatTime(4.13)).toBe('0:04.13');
+    expect(formatTime(0.29)).toBe('0:00.29');
+    // Rounding carries into seconds correctly.
+    expect(formatTime(59.9996)).toBe('1:00.00');
   });
 });

@@ -402,6 +402,15 @@ describe('exportWebVTTChapters()', () => {
     mm.addMarker(0, 'chapter', { name: 'My Chapter' });
     expect(mm.exportWebVTTChapters()).toContain('My Chapter');
   });
+
+  it('REGRESSION: WebVTT chapter millisecond field is not truncated-down by float error', () => {
+    // formatTimeVTT used `Math.floor((seconds % 1) * 1000)`, truncating the ms
+    // field DOWN by float error (3.456s -> ".455"). Same root-cause bug as the
+    // one fixed in captions/caption-manager.ts. Rounded integer ms is exact.
+    const mm = makeManager();
+    mm.addMarker(3.456, 'chapter', { name: 'Ch' });
+    expect(mm.exportWebVTTChapters()).toContain('00:00:03.456');
+  });
 });
 
 describe('exportFFmpegChapters()', () => {
@@ -525,6 +534,17 @@ describe('exportEDL()', () => {
     mm.addMarker(90, 'standard', { name: 'Scene2' });
     const edl = mm.exportEDL();
     expect(edl).toContain('FROM CLIP NAME: Scene2');
+  });
+
+  it('REGRESSION: EDL frame field is not truncated-down by float error', () => {
+    // formatTimecodeEDL used `Math.floor((seconds % 1) * fps)`, truncating the
+    // frame field DOWN by float error: 3 + 1/30 s is frame 1 of second 3 at
+    // 30fps, but (frac * 30) computes 0.9999… and floored to frame 0. Quantising
+    // to the nearest integer frame first (per timeline/CLAUDE.md's integer-frame
+    // rule) is exact.
+    const mm = makeManager();
+    mm.addMarker(3 + 1 / 30, 'standard', { name: 'F' });
+    expect(mm.exportEDL()).toContain('00:00:03:01');
   });
 });
 

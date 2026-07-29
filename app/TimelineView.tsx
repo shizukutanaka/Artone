@@ -202,11 +202,24 @@ const Ruler: React.FC<{ duration: number; pxPerSecond: number; offset: number }>
 });
 Ruler.displayName = 'Ruler';
 
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  const ms = Math.floor((seconds % 1) * 100);
-  return `${m}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+/**
+ * ルーラー用の時刻ラベル整形 (m:ss.cc、cc はセンチ秒)。
+ *
+ * 継続時間を整数センチ秒へ **1度だけ丸めて** から純整数演算で分解する。
+ * 以前は `Math.floor((seconds % 1) * 100)` を使っており、`(4.13 % 1) * 100 =
+ * 12.999…` のように多くの値で二進表現誤差により1つ小さいセンチ秒を返した
+ * (captions / text-based-editing / marker-manager で修正済みの同じ機構のバグ)。
+ * 現状ルーラーの目盛りは 0.5 秒刻みのみを渡すため実害は顕在化しないが、汎用の
+ * 表示ヘルパとして任意入力で正しくし、コードベース全体の時刻整形と一貫させる。
+ * export はテスト可能化のため (既存 computeClipDrag 等と同様)。
+ */
+export function formatTime(seconds: number): string {
+  const totalCs = Math.max(0, Math.round(seconds * 100));
+  const cs = totalCs % 100;
+  const totalS = (totalCs - cs) / 100;
+  const s = totalS % 60;
+  const m = (totalS - s) / 60;
+  return `${m}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
 }
 
 // ============================================================

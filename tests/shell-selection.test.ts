@@ -5,7 +5,15 @@
  */
 
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { applyClipSelectionEdit, filterImportedFiles, dispatchAppCommand } from '../app/shell';
+import {
+  applyClipSelectionEdit,
+  filterImportedFiles,
+  dispatchAppCommand,
+  mergeEngineMetadata,
+  findEngineMetadata,
+  type EngineMediaMetadata,
+} from '../app/shell';
+import type { MediaItem } from '../app/MediaBrowser';
 import type { TimelineClip } from '../app/TimelineView';
 import type { Selection } from '../app/Inspector';
 import { setupI18n } from '../i18n/i18n-manager';
@@ -174,5 +182,83 @@ describe('dispatchAppCommand — init:partial / recoveryError', () => {
     expect(setError).toHaveBeenCalledOnce();
     expect(setError.mock.calls[0][0]).toEqual(expect.any(String));
     expect((setError.mock.calls[0][0] as string).length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================
+// mergeEngineMetadata / findEngineMetadata
+// (engine が生成したサムネイル等を UI へ反映する配線)
+// ============================================================
+
+function makeUIItem(over: Partial<MediaItem> = {}): MediaItem {
+  return {
+    id: 'media_1', name: 'clip.mp4', type: 'video', size: 1234,
+    url: 'blob:fake', duration: 30, proxyStatus: 'none', ...over,
+  };
+}
+
+describe('mergeEngineMetadata', () => {
+  it('REGRESSION: applies the engine-generated thumbnail to the UI item', () => {
+    // media/media-browser.ts renders a real frame to a data URL on import, but
+    // shell.tsx built its UI MediaItem straight from the File and never read it
+    // back — so thumbnailUrl was always undefined and MediaBrowser.tsx fell
+    // through to the 🎬 emoji forever. The user could never see their footage.
+    const merged = mergeEngineMetadata(makeUIItem(), {
+      name: 'clip.mp4', size: 1234, thumbnail: 'data:image/jpeg;base64,AAAA',
+    });
+    expect(merged.thumbnailUrl).toBe('data:image/jpeg;base64,AAAA');
+  });
+
+  it('applies engine resolution and measured duration over UI estimates', () => {
+    const merged = mergeEngineMetadata(makeUIItem({ duration: 30 }), {
+      name: 'clip.mp4', size: 1234, width: 1920, height: 1080, duration: 12.5,
+    });
+    expect(merged.width).toBe(1920);
+    expect(merged.height).toBe(1080);
+    // 30 was probeFileDuration's fallback guess; the engine measured 12.5.
+    expect(merged.duration).toBe(12.5);
+  });
+
+  it('keeps the base item when there is no engine metadata', () => {
+    const base = makeUIItem();
+    expect(mergeEngineMetadata(base, undefined)).toEqual(base);
+  });
+
+  it('does not let an empty/zero engine value clobber a good base value', () => {
+    const merged = mergeEngineMetadata(makeUIItem({ duration: 30 }), {
+      name: 'clip.mp4', size: 1234, thumbnail: '', duration: 0,
+    });
+    expect(merged.duration).toBe(30);      // 0 = engine could not measure
+    expect(merged.thumbnailUrl).toBeUndefined(); // '' = no thumbnail generated
+  });
+
+  it('preserves unrelated fields', () => {
+    const merged = mergeEngineMetadata(makeUIItem(), {
+      name: 'clip.mp4', size: 1234, thumbnail: 'data:x',
+    });
+    expect(merged.id).toBe('media_1');
+    expect(merged.url).toBe('blob:fake');
+    expect(merged.proxyStatus).toBe('none');
+  });
+});
+
+describe('findEngineMetadata', () => {
+  const items: EngineMediaMetadata[] = [
+    { name: 'a.mp4', size: 10, thumbnail: 'data:a' },
+    { name: 'b.mp4', size: 20, thumbnail: 'data:b' },
+  ];
+  const asFile = (name: string, size: number) =>
+    ({ name, size }) as unknown as File;
+
+  it('matches on name AND size', () => {
+    expect(findEngineMetadata(items, asFile('b.mp4', 20))?.thumbnail).toBe('data:b');
+  });
+
+  it('returns undefined when the size differs (same name, different file)', () => {
+    expect(findEngineMetadata(items, asFile('b.mp4', 99))).toBeUndefined();
+  });
+
+  it('returns undefined when nothing matches', () => {
+    expect(findEngineMetadata(items, asFile('zzz.mp4', 1))).toBeUndefined();
   });
 });

@@ -98,6 +98,53 @@ export function filterImportedFiles(files: File[], failed: Set<File>): File[] {
   return files.filter((f) => !failed.has(f));
 }
 
+/** `mergeEngineMetadata` が利用する engine 側メタデータの最小形。 */
+export interface EngineMediaMetadata {
+  name: string;
+  size: number;
+  thumbnail?: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+}
+
+/**
+ * engine が取り込み時に算出済みのメタデータを UI の MediaItem へ反映する。
+ *
+ * `media/media-browser.ts` の `importFile()` は実際に `<video>` からフレームを
+ * 描き出してサムネイル (data URL) を作り、解像度と尺も取得している。しかし
+ * shell 側は File から独自に UI アイテムを組み立てており、その成果物を一切
+ * 受け取っていなかった。結果 `MediaItem.thumbnailUrl` は常に undefined となり、
+ * `MediaBrowser.tsx` のサムネイル表示は必ず絵文字プレースホルダ (🎬) に
+ * フォールバックしていた — engine が正しく生成したフレームが捨てられ、
+ * ユーザーは取り込んだ映像を一度も見られない状態だった。
+ *
+ * engine 側の値は File を実際に読んで得たものなので、UI 側の推定値より優先する
+ * (尺は `probeFileDuration` の再プローブ値より engine の実測値が正確)。
+ * 対応する engine アイテムが無い場合は base をそのまま返す。
+ *
+ * @param base    File から組み立てた UI アイテム。
+ * @param engine  同一メディアの engine 側メタデータ (無ければ undefined)。
+ */
+export function mergeEngineMetadata(base: MediaItem, engine: EngineMediaMetadata | undefined): MediaItem {
+  if (!engine) return base;
+  return {
+    ...base,
+    thumbnailUrl: engine.thumbnail || base.thumbnailUrl,
+    width: engine.width ?? base.width,
+    height: engine.height ?? base.height,
+    duration: engine.duration && engine.duration > 0 ? engine.duration : base.duration,
+  };
+}
+
+/** 名前とサイズで engine 側メタデータを引く (shell の重複判定と同じキー)。 */
+export function findEngineMetadata(
+  items: readonly EngineMediaMetadata[],
+  file: File
+): EngineMediaMetadata | undefined {
+  return items.find((m) => m.name === file.name && m.size === file.size);
+}
+
 /** Callbacks dispatchAppCommand may invoke, grouped to stay within the 3-arg function limit. */
 export interface DispatchAppCommandHandlers {
   setActivePanel: React.Dispatch<React.SetStateAction<string | null>>;
@@ -372,17 +419,26 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     // Browser/timeline with no real backing media, and no way for the
     // user to tell the two apart.
     const failed = await actions.importFiles(files);
+    // engine が取り込み時に生成したサムネイル/解像度/実測尺を取り込む。これを
+    // 反映しないと MediaBrowser のサムネイルが常に絵文字のままになる
+    // (mergeEngineMetadata の docstring 参照)。
+    const engineItems = actions.getApp()?.media.getItems() ?? [];
     for (const file of filterImportedFiles(files, failed)) {
       const type: MediaItem['type'] =
         file.type.startsWith('video') ? 'video' :
         file.type.startsWith('audio') ? 'audio' : 'image';
       const url = URL.createObjectURL(file);
-      const duration = type === 'image' ? 5 : await probeFileDuration(file, url);
+      const engineMeta = findEngineMetadata(engineItems, file);
+      // engine が実測尺を持っていれば再プローブ不要 (<video> の二重生成を回避)。
+      const duration =
+        type === 'image' ? 5
+        : engineMeta?.duration && engineMeta.duration > 0 ? engineMeta.duration
+        : await probeFileDuration(file, url);
       const mediaId = `media_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-      const item: MediaItem = {
+      const item: MediaItem = mergeEngineMetadata({
         id: mediaId, name: file.name, type, size: file.size, url,
         duration, proxyStatus: 'none',
-      };
+      }, engineMeta);
       setMediaItems((prev) => {
         if (prev.some((m) => m.name === file.name && m.size === file.size)) {
           // Duplicate: the item is discarded, so revoke its freshly-created

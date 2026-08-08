@@ -524,7 +524,6 @@ describe('ProxyEncoder — REGRESSION: crossOrigin is set before src', () => {
       const el = realCreateElement(tag) as HTMLVideoElement;
       if (tag !== 'video') return el;
 
-      let onErrorHandler: (() => void) | null = null;
       Object.defineProperty(el, 'crossOrigin', {
         set: () => { order.push('crossOrigin'); },
         get: () => 'anonymous',
@@ -532,15 +531,14 @@ describe('ProxyEncoder — REGRESSION: crossOrigin is set before src', () => {
       Object.defineProperty(el, 'src', {
         set: () => {
           order.push('src');
-          // Reject the metadata-load promise on the next microtask (by which
-          // point the Promise executor below has already assigned onerror).
-          queueMicrotask(() => onErrorHandler?.());
+          // Fail the metadata-load wait on the next microtask (by which point
+          // the listener is registered). A real `error` event is dispatched
+          // rather than poking an `onerror` property: the element is now built
+          // by media/frame-source.ts, which listens via addEventListener so it
+          // does not clobber any handler the caller may have set.
+          queueMicrotask(() => el.dispatchEvent(new Event('error')));
         },
         get: () => '',
-      });
-      Object.defineProperty(el, 'onerror', {
-        set: (fn: (() => void) | null) => { onErrorHandler = fn; },
-        get: () => onErrorHandler,
       });
       return el;
     }) as typeof document.createElement);

@@ -15,7 +15,7 @@
  * @version 3.0.0
  */
 import { createLogger } from '../app/logger';
-import { setHighQualityScaling } from '../app/utils';
+import { openFrameSource } from './frame-source';
 
 const log = createLogger('ProxyWorkflow');
 
@@ -232,44 +232,26 @@ class ProxyEncoder {
 
     encoder.configure(config);
 
-    // Decode source -> resize -> encode
-    const video = document.createElement('video');
-    // REGRESSION fix: crossOrigin must be set BEFORE src -- it configures the
-    // CORS mode for the load `src` triggers, so setting it afterward has no
-    // effect on the in-flight request. A cross-origin source would then taint
-    // the canvas drawImage() below draws into, making `new VideoFrame(canvas, …)`
-    // throw SecurityError instead of encoding.
-    video.crossOrigin = 'anonymous';
-    video.src = sourceUrl;
-    video.muted = true;
-    await new Promise<void>((res, rej) => {
-      const METADATA_TIMEOUT_MS = 30_000;
-      const timer = setTimeout(() => {
-        video.onloadedmetadata = null;
-        video.onerror = null;
-        rej(new Error(`Proxy encode: metadata load timeout after ${METADATA_TIMEOUT_MS}ms`));
-      }, METADATA_TIMEOUT_MS);
-      const settle = (fn: () => void) => () => {
-        clearTimeout(timer);
-        video.onloadedmetadata = null;
-        video.onerror = null;
-        fn();
-      };
-      video.onloadedmetadata = settle(res);
-      video.onerror = settle(() => rej(new Error('Video load failed')));
+    // Decode source -> resize -> encode.
+    // The seek/draw/VideoFrame machinery lives in media/frame-source.ts so the
+    // preview and scope paths can share it; this loop keeps only the parts that
+    // are specific to proxy transcoding (progress, cancellation, keyframes).
+    // That extraction also hardened the seek wait: the previous inline
+    // `video.onseeked = () => res()` had neither a timeout nor an error path, so
+    // a stalled seek left this promise pending forever and the job hung
+    // silently in `active`, blocking the queue.
+    const frameInterval = 1 / (preset.fps || 30);
+    const source = await openFrameSource(sourceUrl, {
+      width: targetW,
+      height: targetH,
+      frameDurationUs: frameInterval * 1_000_000,
+      highQualityScaling: true, // proxies downscale the source — use a good kernel
     });
 
-    const duration = video.duration;
-    const frameInterval = 1 / (preset.fps || 30);
+    const duration = source.duration;
     let currentTime = 0;
     let frameCount = 0;
     const totalFrames = Math.ceil(duration / frameInterval);
-
-    // Offscreen canvas for resize
-    const canvas = new OffscreenCanvas(targetW, targetH);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Failed to get 2D context');
-    setHighQualityScaling(ctx); // proxies downscale the source — use a good kernel
 
     try {
       while (currentTime < duration) {
@@ -278,17 +260,8 @@ class ProxyEncoder {
         // in the background regardless, still burning CPU/GPU and letting
         // processQueue() start a new job on top of it (exceeding maxConcurrent).
         if (signal?.aborted) break;
-        video.currentTime = currentTime;
-        await new Promise<void>((res) => {
-          video.onseeked = () => res();
-        });
 
-        ctx.drawImage(video, 0, 0, targetW, targetH);
-        const frame = new VideoFrame(canvas, {
-          timestamp: currentTime * 1_000_000,
-          duration: frameInterval * 1_000_000
-        });
-
+        const { frame } = await source.getFrameAt(currentTime);
         try {
           encoder.encode(frame, { keyFrame: frameCount % 60 === 0 });
         } finally {
@@ -304,10 +277,7 @@ class ProxyEncoder {
     } finally {
       encoder.close();
       // Release the network connection and allow the element to be GC'd immediately.
-      video.src = '';
-      video.onloadedmetadata = null;
-      video.onerror = null;
-      video.onseeked = null;
+      source.close();
     }
 
     return new Blob(chunks as BlobPart[], { type: 'video/mp4' });

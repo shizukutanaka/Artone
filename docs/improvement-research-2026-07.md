@@ -25,7 +25,12 @@
 ### P1 [L] デマルチプレクサ導入 — 「実ファイルを開けない」最重要ギャップの解消
 
 - **現状**: `core/codec-router.ts` は「FFmpeg WASM でトランスコードすべきか」を判定するが、FFmpeg WASM もその他のデマルチプレクサも存在せず判定結果は no-op (`app/main.ts` はログを出して通常インポートに進む)。実 MP4/MOV/MKV から H.264/AAC のエレメンタリストリームを取り出せないため、WebCodecs デコードパイプライン (`VideoPipeline`) 全体が未配線のまま。
-- **提案**: **Mediabunny を第一候補**として評価 (Remotion が自社実装を畳んでまで統一先に選んだ、WebCodecs ネイティブな demux/mux ライブラリ)。ffmpeg.wasm はバンドルサイズと速度 (上記 5倍差) で不利。**注**: バンドルサイズ/ライセンス/保守状況の一次確認は本調査で未完 (担当エージェントの調査が部分完了で終了) — 採用前に npm/GitHub で要確認。
+- **提案**: **Mediabunny に確定** (WebCodecs ネイティブな demux/mux ライブラリ)。ffmpeg.wasm はバンドルサイズと速度で不利。
+- **一次確認の結果 (2026-08 実施、旧「要確認」項目をクローズ)**:
+  - **ライセンス: MPL-2.0** (npm レジストリ実測、v1.52.3)。**本リポジトリ自身のライセンスゲートを通過する** — `security/sbom.ts` の `LicenseAnalyzer.compatible()` は **strong-copyleft (GPL/AGPL) のみ**を MIT プロジェクトと非互換と判定し、MPL-2.0 は `weak-copyleft` 分類で `compatible: true` を返す (`security/sbom.ts:75,157-163`)。MPL-2.0 はファイル単位の弱いコピーレフトで、ライブラリとして利用する限り自プロジェクトは MIT のまま維持できる。
+  - **実行時依存ゼロ** (npm 実測: 依存は `@types/dom-webcodecs` / `@types/dom-mediacapture-transform` の型定義のみ)。純 TypeScript 実装で、`WHY` の「Web標準のみ依存」原則と整合。
+  - **性能** (2025-06 公開ベンチ): 全映像パケット走査で **Mediabunny 10,800 pkt/s** に対し web-demuxer 2,390 pkt/s、**mp4box.js 43.5 ops/s**。mp4box.js は MP4 のみ対応という制約もある。
+  - 対抗馬 [web-demuxer](https://www.npmjs.com/package/web-demuxer) は WASM 実装で mov/mp4/mkv/webm/flv/avi 等と対応範囲が広い。**Mediabunny の対応コンテナで不足が出た場合の次点**とする。
 - **対象**: `core/` (codec-router の実体化)、`media/` (インポート経路)
 - **依存**: なし (最初に着手すべき)。P2/P5/P9 のブロッカー。
 - **出典**: 上記 Remotion/Mediabunny、JSConf India 講演「WebCodecs は生チャンクを返すだけでコンテナ処理は別途必要」 https://gitnation.com/contents/pushing-the-limits-of-video-encoding-in-browsers-with-webcodecs (2023年、より新しい同種講演は 2025-2026 に見つからず)

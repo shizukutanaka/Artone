@@ -14,13 +14,17 @@ import {
 } from '../export/export-engine';
 import { muxMP4 } from '../export/mp4-muxer';
 import { muxWebM, type VideoChunkRef, type AudioChunkRef } from '../export/webm-muxer';
+import type * as Mp4MuxerNS from '../export/mp4-muxer';
+import type * as WebmMuxerNS from '../export/webm-muxer';
+type Mp4MuxerModule = typeof Mp4MuxerNS;
+type WebmMuxerModule = typeof WebmMuxerNS;
 
 vi.mock('../export/mp4-muxer', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../export/mp4-muxer')>();
+  const actual = await importOriginal<Mp4MuxerModule>();
   return { ...actual, muxMP4: vi.fn(actual.muxMP4) };
 });
 vi.mock('../export/webm-muxer', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../export/webm-muxer')>();
+  const actual = await importOriginal<WebmMuxerModule>();
   return { ...actual, muxWebM: vi.fn(actual.muxWebM) };
 });
 

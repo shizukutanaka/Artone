@@ -22,6 +22,10 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    allow:
+      - dependency-type: "direct"
+    automerge:
+      - dependency-type: "direct"
     schedule:
       interval: "weekly"
     labels:

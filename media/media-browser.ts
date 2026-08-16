@@ -36,6 +36,8 @@ export interface MediaItem {
   width?: number;
   height?: number;
   fps?: number;
+  /** 時計回りの回転角 (度)。コンテナのメタデータ由来。0/90/180/270。 */
+  rotation?: number;
   
   // Audio
   sampleRate?: number;
@@ -179,20 +181,25 @@ export class MediaBrowser {
       let fps: number | undefined;
       let sampleRate: number | undefined;
       let channels: number | undefined;
+      let rotation: number | undefined;
+      let codec: string | undefined;
       let thumbnail = '';
 
       onProgress?.(0.2);
 
       // Extract metadata based on type
       switch (type) {
-        case 'video':
-          const videoMeta = await this.extractVideoMetadata(url);
+        case 'video': {
+          const videoMeta = await this.extractVideoMetadataPreferContainer(file, url);
           width = videoMeta.width;
           height = videoMeta.height;
           duration = videoMeta.duration;
           fps = videoMeta.fps;
+          rotation = videoMeta.rotation;
+          codec = videoMeta.codec;
           thumbnail = await this.generateVideoThumbnail(url, videoMeta.width, videoMeta.height);
           break;
+        }
 
         case 'audio':
           const audioMeta = await this.extractAudioMetadata(url);
@@ -222,6 +229,8 @@ export class MediaBrowser {
         width,
         height,
         fps,
+        rotation,
+        codec,
         sampleRate,
         channels,
         duration,
@@ -249,6 +258,48 @@ export class MediaBrowser {
   // ============================================================
   // Metadata Extraction
   // ============================================================
+
+  /**
+   * 映像メタデータを取得する。まずコンテナを直接解析し (Mediabunny)、正確な
+   * **回転**・**実コーデック**・フレームレートまで得る。解析できない場合
+   * (対応外コンテナ・破損等) は従来の `<video>` 経路へフォールバックする
+   * (取り込み自体は失敗させない)。
+   *
+   * 回転付きの縦動画では、`<video>` フォールバックの `videoWidth/Height` は既に
+   * 回転適用後の値を返すため、フォールバック時の rotation は 0 として扱う
+   * (寸法が二重に入れ替わるのを防ぐ)。
+   */
+  private async extractVideoMetadataPreferContainer(
+    file: File,
+    url: string
+  ): Promise<{
+    width: number;
+    height: number;
+    duration: number;
+    fps: number;
+    rotation: number;
+    codec: string;
+  }> {
+    // Mediabunny は全コンテナデマクサを含み重いため、動的 import で別チャンクに
+    // 分離し、実際に映像を取り込む時にだけロードする (アプリ起動バンドルを
+    // 肥大化させない)。
+    const { extractVideoMetadataViaMediabunny } = await import('./media-metadata');
+    const meta = await extractVideoMetadataViaMediabunny(file);
+    if (meta) {
+      return {
+        width: meta.width,
+        height: meta.height,
+        duration: meta.duration,
+        // コンテナから fps を取れないコーデック等では 0 が返るため既定 30 で補う。
+        fps: meta.fps > 0 ? meta.fps : 30,
+        rotation: meta.rotation,
+        codec: meta.codecString || meta.codec,
+      };
+    }
+    // フォールバック: <video> は回転適用後の寸法を返す。
+    const fallback = await this.extractVideoMetadata(url);
+    return { ...fallback, rotation: 0, codec: '' };
+  }
 
   private async extractVideoMetadata(url: string): Promise<{
     width: number;

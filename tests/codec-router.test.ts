@@ -12,6 +12,8 @@ import {
   classifyContainer,
   planFileProcessing,
   NATIVE_CONTAINERS,
+  guessCodecFromExtension,
+  resolveRoutingCodec,
 } from '../core/codec-router';
 
 describe('classifyContainer', () => {
@@ -152,5 +154,42 @@ describe('container routing stays in sync with the demuxer', () => {
     // 宣言する (今回まさにその乖離を修正した) ため、テストで固定する。
     const { DEMUXABLE_EXTENSIONS } = await import('../media/media-metadata');
     expect([...NATIVE_CONTAINERS].sort()).toEqual([...DEMUXABLE_EXTENSIONS].sort());
+  });
+});
+
+// ============================================================
+// 経路判定に使うコーデックの決定 (実コーデック優先)
+// ============================================================
+
+describe('resolveRoutingCodec', () => {
+  it('REGRESSION: iPhone H.264 .mov routes natively when the REAL codec is known', async () => {
+    // 拡張子推測では .mov → 'prores' となり classifyCodec が 'transcode' を返すため、
+    // コンテナ判定を native に直しても、コーデック側の誤りだけで実体のない
+    // FFmpeg 経路へ振られていた。デマクサが読んだ実コーデックを使えば解消する。
+    expect(guessCodecFromExtension('IMG_1234.mov')).toBe('prores');
+    const guessedPlan = await planFileProcessing('IMG_1234.mov', guessCodecFromExtension('IMG_1234.mov'));
+    expect(guessedPlan.route).toBe('ffmpeg-transcode'); // 誤った旧挙動
+
+    const codec = resolveRoutingCodec('avc1.640028', 'IMG_1234.mov');
+    expect(codec).toBe('avc1.640028');
+    const realPlan = await planFileProcessing('IMG_1234.mov', codec);
+    expect(realPlan.containerRoute).toBe('native');
+    expect(realPlan.route).not.toBe('ffmpeg-transcode');
+  });
+
+  it('prefers the real codec over the extension guess', () => {
+    expect(resolveRoutingCodec('hvc1.1.6.L93.B0', 'clip.mp4')).toBe('hvc1.1.6.L93.B0');
+  });
+
+  it('falls back to the extension guess when the real codec is unavailable', () => {
+    for (const missing of [null, undefined, '', '   ']) {
+      expect(resolveRoutingCodec(missing, 'master.mxf')).toBe('dnxhr');
+    }
+  });
+
+  it('still routes a genuine ProRes .mov to transcode when the real codec says so', async () => {
+    const codec = resolveRoutingCodec('prores', 'studio.mov');
+    const plan = await planFileProcessing('studio.mov', codec);
+    expect(plan.route).toBe('ffmpeg-transcode');
   });
 });

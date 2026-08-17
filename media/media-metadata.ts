@@ -46,13 +46,26 @@ export interface ExtractedVideoMetadata {
   width: number;
   /** 回転適用後の表示高さ (px)。 */
   height: number;
-  /** 回転前の符号化解像度の幅 (px)。 */
+  /**
+   * 回転前の符号化解像度の幅 (px)。
+   *
+   * **デコーダ設定にはこちらを使うこと。** WebCodecs の
+   * `VideoDecoder.configure({ codedWidth, codedHeight })` はビットストリームの
+   * 実解像度を要求するため、回転適用後の `width`/`height` を渡すと 90°/270° 回転
+   * 素材で縦横が入れ替わった設定になり、デコードが破綻する。
+   * (現時点でデコード配線は未実装のため読み手はいないが、配線時にこの取り違えを
+   * 起こしやすいので明示しておく。UI/サムネイルは `width`/`height` が正しい。)
+   */
   codedWidth: number;
-  /** 回転前の符号化解像度の高さ (px)。 */
+  /** 回転前の符号化解像度の高さ (px)。用途は {@link ExtractedVideoMetadata.codedWidth} 参照。 */
   codedHeight: number;
   /** 尺 (秒)。 */
   duration: number;
-  /** 平均フレームレート (Hz)。取得不能なら 0。 */
+  /**
+   * フレームレート (Hz)。取得不能なら 0。
+   * フレーム落ちに強い `computeFrameRateMetrics()` 由来で、29.97 等も分数に
+   * フィットした値を返す (詳細は `computeFps()` のコメント参照)。
+   */
   fps: number;
   /** 時計回りの回転角 (度)。0/90/180/270。 */
   rotation: number;

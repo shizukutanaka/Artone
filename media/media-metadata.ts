@@ -31,6 +31,15 @@ const log = createLogger('MediaMetadata');
  */
 const SUPPORTED_FORMATS = [MP4, QTFF, MATROSKA, WEBM];
 
+/**
+ * 上記 `SUPPORTED_FORMATS` に対応するファイル拡張子。
+ *
+ * `core/codec-router.ts` の `NATIVE_CONTAINERS` (= FFmpeg 無しで demux 可能な
+ * コンテナ) と一致していなければならない。両者がずれるとルータが実体と異なる
+ * 処理経路を宣言するため、`tests/codec-router.test.ts` で同期を固定している。
+ */
+export const DEMUXABLE_EXTENSIONS = ['mp4', 'm4v', 'mov', 'mkv', 'webm'] as const;
+
 /** コンテナから抽出した映像メタデータ。 */
 export interface ExtractedVideoMetadata {
   /** 回転適用後の表示幅 (px)。UI/サムネイルはこちらを使う。 */

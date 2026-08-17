@@ -14,6 +14,7 @@ import {
   NATIVE_CONTAINERS,
   guessCodecFromExtension,
   resolveRoutingCodec,
+  normalizeCodecString,
 } from '../core/codec-router';
 
 describe('classifyContainer', () => {
@@ -191,5 +192,59 @@ describe('resolveRoutingCodec', () => {
     const codec = resolveRoutingCodec('prores', 'studio.mov');
     const plan = await planFileProcessing('studio.mov', codec);
     expect(plan.route).toBe('ffmpeg-transcode');
+  });
+});
+
+// ============================================================
+// コーデックファミリ名の正規化
+// ============================================================
+
+describe('normalizeCodecString / bare codec families', () => {
+  // デマルチプレクサ (Mediabunny) の track.codec は 'avc' 等のファミリ名を返すが、
+  // WebCodecs の codec string はプロファイルまで含む必要があり、ファミリ名のままだと
+  // classifyCodec が「未分類」と判定し、実ブラウザでも isConfigSupported が必ず
+  // 失敗して不要な FFmpeg フォールバックへ落ちる。
+  it('REGRESSION: bare families map to valid WebCodecs codec strings', () => {
+    expect(normalizeCodecString('avc')).toBe('avc1.640028');
+    expect(normalizeCodecString('hevc')).toBe('hvc1.1.6.L93.B0');
+    expect(normalizeCodecString('vp9')).toBe('vp09.00.10.08');
+    expect(normalizeCodecString('av1')).toBe('av01.0.04M.08');
+    // vp8 は WebCodecs でもドット無しが正式な codec string。
+    expect(normalizeCodecString('vp8')).toBe('vp8');
+  });
+
+  it('REGRESSION: a bare family is no longer classified as "未分類"', async () => {
+    // 分類の差を見るため、ランタイム検出は「非対応」に固定する
+    // (対応と答えると classifyCodec に到達する前に webcodecs 経路で返るため)。
+    const prev = global.VideoDecoder;
+    global.VideoDecoder = {
+      isConfigSupported: vi.fn().mockResolvedValue({ supported: false }),
+    } as unknown as typeof VideoDecoder;
+    try {
+      // 正規化前: ファミリ名はプレフィックス表に載らず「未分類」扱い。
+      const unnormalized = await planFileProcessing('clip.mp4', 'avc');
+      expect(unnormalized.reason).toContain('未分類');
+
+      // 正規化後: H.264 として認識され「未分類」ではなくなる。
+      const normalized = await planFileProcessing('clip.mp4', resolveRoutingCodec('avc', 'clip.mp4'));
+      expect(normalized.reason).not.toContain('未分類');
+    } finally {
+      global.VideoDecoder = prev;
+    }
+  });
+
+  it('leaves an already-full codec string untouched', () => {
+    expect(normalizeCodecString('avc1.640028')).toBe('avc1.640028');
+    expect(normalizeCodecString('hvc1.1.6.L93.B0')).toBe('hvc1.1.6.L93.B0');
+  });
+
+  it('keeps prores as-is so it still routes to transcode', async () => {
+    expect(normalizeCodecString('prores')).toBe('prores');
+    const plan = await planFileProcessing('studio.mov', resolveRoutingCodec('prores', 'studio.mov'));
+    expect(plan.route).toBe('ffmpeg-transcode');
+  });
+
+  it('is case-insensitive and trims whitespace', () => {
+    expect(normalizeCodecString('  AVC  ')).toBe('avc1.640028');
   });
 });

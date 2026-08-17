@@ -172,6 +172,36 @@ export function guessCodecFromExtension(filename: string): string {
 }
 
 /**
+ * コーデック**ファミリ名**から、経路判定に使える代表的な WebCodecs codec string へ写す。
+ *
+ * WebCodecs の codec string は `avc1.640028` のようにプロファイル/レベルまで含む必要が
+ * あり、`VideoDecoder.isConfigSupported({ codec })` にファミリ名 (`'avc'`) を渡すと必ず
+ * 失敗する。一方デマルチプレクサ (Mediabunny) の `track.codec` は
+ * `'avc' | 'hevc' | 'vp9' | 'vp8' | 'av1' | 'prores'` というファミリ名を返す。
+ *
+ * ここで割り当てるプロファイル/レベルは**経路判定 (どのデコーダ系統か / 対応可否の
+ * 事前検出) のための代表値**であり、実際のデコーダ設定には使わない。デコード配線時は
+ * デマクサが返す本物の `decoderConfig` を使うこと。
+ *
+ * `vp8` は WebCodecs でもドット無しの `'vp8'` が正式な codec string なのでそのまま。
+ */
+const CODEC_FAMILY_TO_STRING: Readonly<Record<string, string>> = {
+  avc: 'avc1.640028',        // H.264 High@4.0
+  hevc: 'hvc1.1.6.L93.B0',   // HEVC Main
+  vp9: 'vp09.00.10.08',
+  vp8: 'vp8',
+  av1: 'av01.0.04M.08',
+};
+
+/**
+ * 経路判定に使える形へコーデック文字列を正規化する。
+ * ファミリ名なら代表的な codec string へ、それ以外はそのまま返す。
+ */
+export function normalizeCodecString(codec: string): string {
+  return CODEC_FAMILY_TO_STRING[codec.trim().toLowerCase()] ?? codec.trim();
+}
+
+/**
  * 経路判定に使うコーデック文字列を決める。
  *
  * デマルチプレクサ (`media/media-metadata.ts`) がコンテナから読んだ**実コーデック**を
@@ -190,7 +220,10 @@ export function resolveRoutingCodec(
   filename: string
 ): string {
   const trimmed = realCodec?.trim();
-  return trimmed ? trimmed : guessCodecFromExtension(filename);
+  // ファミリ名 ('avc' 等) は WebCodecs の codec string として不正なため正規化する。
+  // 正規化しないと classifyCodec が「未分類」と判定し、実ブラウザでも
+  // isConfigSupported が必ず失敗して不要な FFmpeg フォールバックへ落ちる。
+  return trimmed ? normalizeCodecString(trimmed) : guessCodecFromExtension(filename);
 }
 
 /**

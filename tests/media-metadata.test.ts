@@ -31,8 +31,11 @@ async function extractFromMp4(opts: {
   rotation?: 0 | 90 | 180 | 270;
   frames?: number;
   fps?: number;
+  /** 明示的な提示時刻 (秒)。指定時は frames/fps より優先。 */
+  timestamps?: number[];
 }) {
-  const { codedWidth, codedHeight, rotation = 0, frames = 1, fps = 30 } = opts;
+  const { codedWidth, codedHeight, rotation = 0, fps = 30, timestamps } = opts;
+  const frames = timestamps ? timestamps.length : (opts.frames ?? 1);
   const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
   const source = new EncodedVideoPacketSource('vp9');
   output.addVideoTrack(source, { rotation });
@@ -40,7 +43,7 @@ async function extractFromMp4(opts: {
   const data = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]);
   for (let i = 0; i < frames; i++) {
     await source.add(
-      new EncodedPacket(data, 'key', i / fps, 1 / fps),
+      new EncodedPacket(data, 'key', timestamps ? timestamps[i] : i / fps, 1 / fps),
       i === 0
         ? { decoderConfig: { codec: 'vp09.00.10.08', codedWidth, codedHeight } }
         : undefined
@@ -102,5 +105,33 @@ describe('extractVideoMetadataViaMediabunny', () => {
   it('returns null for an empty blob', async () => {
     const meta = await extractFromBytes(new Uint8Array([]));
     expect(meta).toBeNull();
+  });
+});
+
+// ============================================================
+// フレームレート抽出の精度
+// ============================================================
+
+describe('frame rate extraction', () => {
+  it('REGRESSION: reports the true rate for 30fps footage WITH DROPPED FRAMES', async () => {
+    // 単純な平均パケットレートだと、落ちたフレーム分だけレートが下がって
+    // 20fps と報告される (実測)。fps はタイムラインのフレーム計算に流れるため
+    // (timeline/CLAUDE.md「フレーム計算は整数のみ」)、誤値は全フレームの位置を
+    // ずらす。専用の computeFrameRateMetrics() は落ちがあっても格子を検出する。
+    const dropped = [0, 1, 2, 3, 5, 6, 8, 9, 10, 11, 14, 15, 16, 19, 20, 21, 22, 25, 26, 29]
+      .map((i) => i / 30);
+    const meta = await extractFromMp4({ codedWidth: 320, codedHeight: 240, timestamps: dropped });
+    expect(meta!.fps).toBe(30); // 平均パケットレートなら 20 になる
+  });
+
+  it('recovers the exact 29.97 (30000/1001) rate rather than a truncated average', async () => {
+    const ts = Array.from({ length: 30 }, (_, i) => (i * 1001) / 30000);
+    const meta = await extractFromMp4({ codedWidth: 320, codedHeight: 240, timestamps: ts });
+    expect(meta!.fps).toBeCloseTo(30000 / 1001, 6);
+  });
+
+  it('reports a clean integer rate for uniform 30fps footage', async () => {
+    const meta = await extractFromMp4({ codedWidth: 320, codedHeight: 240, frames: 20, fps: 30 });
+    expect(meta!.fps).toBe(30);
   });
 });

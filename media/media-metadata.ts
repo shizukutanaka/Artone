@@ -128,8 +128,31 @@ export async function extractMetadataFromInput(
 
 /** 平均フレームレートを推定する。取得不能なら 0 を返す (呼び出し側が既定値を使う)。 */
 async function computeFps(track: {
+  computeFrameRateMetrics?: () => Promise<{ bestGuessFrameRate: number }>;
   computePacketStats: (n?: number) => Promise<{ averagePacketRate: number }>;
 }): Promise<number> {
+  // `computeFrameRateMetrics()` はフレーム間隔の分布から外れ値を除いて分数に
+  // フィットさせる専用ヒューリスティックで、**フレーム落ちがあっても安定**し、
+  // 一般的なフレームレートへスナップする。単純な平均パケットレートより大幅に
+  // 正確なので優先する。
+  //
+  // 実測 (jsdom, 合成 MP4):
+  //   30fps 一様            : averagePacketRate 30.0000 / bestGuess 30
+  //   30fps + フレーム落ち  : averagePacketRate 20.0000 / bestGuess 30  ← 33%の誤差
+  //   29.97 (30000/1001)    : averagePacketRate 29.9709 / bestGuess 29.97002997…
+  //
+  // fps はタイムラインのフレーム計算に流れるため (timeline/CLAUDE.md
+  // 「フレーム計算は整数のみ」)、誤った値は全フレームの位置をずらす。
+  try {
+    if (typeof track.computeFrameRateMetrics === 'function') {
+      const metrics = await track.computeFrameRateMetrics();
+      const best = metrics.bestGuessFrameRate;
+      if (Number.isFinite(best) && best > 0) return best;
+    }
+  } catch {
+    // 専用 API が使えない場合は下のパケットレートへフォールバックする。
+  }
+
   try {
     const stats = await track.computePacketStats(120);
     const rate = stats.averagePacketRate;

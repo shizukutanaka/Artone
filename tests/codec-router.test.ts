@@ -11,6 +11,7 @@ import {
   needsFFmpegWasm,
   classifyContainer,
   planFileProcessing,
+  NATIVE_CONTAINERS,
 } from '../core/codec-router';
 
 describe('classifyContainer', () => {
@@ -24,12 +25,14 @@ describe('classifyContainer', () => {
     expect(classifyContainer('webm')).toBe('native');
   });
 
-  it('mov requires ffmpeg', () => {
-    expect(classifyContainer('mov')).toBe('ffmpeg');
+  it('mov is demuxable in-browser (Mediabunny QTFF)', () => {
+    // 2026-08: デマルチプレクサ導入前は 'ffmpeg' だった。FFmpeg WASM は本
+    // リポジトリに存在せず、iPhone 標準の .mov が実体のない経路へ振られていた。
+    expect(classifyContainer('mov')).toBe('native');
   });
 
-  it('mkv requires ffmpeg', () => {
-    expect(classifyContainer('mkv')).toBe('ffmpeg');
+  it('mkv is demuxable in-browser (Mediabunny Matroska)', () => {
+    expect(classifyContainer('mkv')).toBe('native');
   });
 
   it('mxf requires ffmpeg', () => {
@@ -115,15 +118,39 @@ describe('planFileProcessing — コンテナ + コーデック統合', () => {
     expect(plan.containerRoute).toBe('native');
   });
 
-  it('mov + H.264 forces ffmpeg (container demux)', async () => {
+  it('mov + H.264 no longer forces ffmpeg now that the container is demuxable', async () => {
+    // iPhone が標準で生成する H.264 .mov。demux は Mediabunny、デコードは
+    // WebCodecs で賄えるため FFmpeg 必須ではない。
     const plan = await planFileProcessing('clip.mov', 'avc1.640028');
+    expect(plan.containerRoute).toBe('native');
+  });
+
+  it('REGRESSION: mov + ProRes still routes to transcode (demuxable != decodable)', async () => {
+    // コンテナが demux 可能になっても、ProRes は WebCodecs でデコードできない。
+    // コンテナ判定とコーデック判定が独立していることを固定する。
+    const plan = await planFileProcessing('clip.mov', 'prores');
+    expect(plan.containerRoute).toBe('native');
     expect(plan.route).toBe('ffmpeg-transcode');
-    expect(plan.containerRoute).toBe('ffmpeg');
   });
 
   it('mxf + DNxHR uses ffmpeg for both', async () => {
     const plan = await planFileProcessing('master.mxf', 'dnxhr');
     expect(plan.route).toBe('ffmpeg-transcode');
     expect(plan.containerRoute).toBe('ffmpeg');
+  });
+});
+
+// ============================================================
+// ルータとデマルチプレクサの同期 (ドリフト防止)
+// ============================================================
+
+describe('container routing stays in sync with the demuxer', () => {
+  it('NATIVE_CONTAINERS matches the extensions media-metadata actually enables', async () => {
+    // codec-router が「FFmpeg 無しで demux 可能」と宣言する集合は、
+    // media/media-metadata.ts が実際に有効化しているコンテナ集合と一致して
+    // いなければならない。片方だけ変更すると、ルータが実体と異なる処理経路を
+    // 宣言する (今回まさにその乖離を修正した) ため、テストで固定する。
+    const { DEMUXABLE_EXTENSIONS } = await import('../media/media-metadata');
+    expect([...NATIVE_CONTAINERS].sort()).toEqual([...DEMUXABLE_EXTENSIONS].sort());
   });
 });

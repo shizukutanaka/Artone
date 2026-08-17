@@ -13,7 +13,14 @@
 ## 新規モジュール (2026-05, arXiv/業界知見ベース)
 - `codec-router.ts` — WebCodecs/FFmpeg WASM ルーティング。コーデック分類 (native/transcode/unknown) + コンテナ分類でファイル処理経路を決定。
   - ProRes/DNxHR/Cineform → FFmpeg WASM transcode (H.264中間)
-  - MOV/MKV/MXF コンテナ → FFmpeg demux 必須
+  - MXF/AVI/FLV/TS/M2TS コンテナ → FFmpeg demux 必須
+  - **MP4/M4V/MOV/MKV/WebM はブラウザ内で demux 可能** (2026-08 更新)。
+    デマルチプレクサ `media/media-metadata.ts` (Mediabunny) 導入により、
+    従来「FFmpeg demux 必須」としていた MOV(QTFF)/MKV(Matroska) が native へ移行。
+    `NATIVE_CONTAINERS` は `DEMUXABLE_EXTENSIONS` と一致必須
+    (`tests/codec-router.test.ts` が同期を固定)。
+  - コンテナ判定 (demux 可否) とコーデック判定 (デコード可否) は**独立**。
+    例: ProRes 入り .mov は demux 可能だがデコード不可 → transcode 経路。
   - needsFFmpegWasm() で FFmpeg WASM (大) の遅延ロード判定
 
 ## 設計根拠

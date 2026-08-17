@@ -124,11 +124,25 @@ export function needsFFmpegWasm(codecs: string[]): boolean {
 }
 
 /**
- * コンテナ形式から FFmpeg WASM が必要かを判定。
- * MP4/WebM は WebCodecs で demux 可能だが、MOV/MKV/MXF 等は FFmpeg が必要。
+ * コンテナ形式から FFmpeg WASM が必要かを判定する。
+ *
+ * ここでの `native` は「**FFmpeg WASM 無しで demux できる**」という意味であり、
+ * デコード可否 (コーデック側の判定) とは独立している。ProRes 入りの .mov のように
+ * 「demux はできるがデコードは不可」なケースは `planCodecRoute()` が別途
+ * transcode 経路へ振り分ける。
+ *
+ * **2026-08 更新**: デマルチプレクサ (Mediabunny) 導入により MOV(QTFF) と
+ * MKV(Matroska) はブラウザ内で demux 可能になったため `native` へ移した。
+ * 従来は「MOV/MKV は FFmpeg demux 必須」としていたが、FFmpeg WASM は本リポジトリに
+ * 存在せず、iPhone が標準で生成する H.264/HEVC の .mov が実体のない経路へ
+ * 振られていた。ここは `media/media-metadata.ts` が実際に有効化している
+ * コンテナ集合と一致していなければならない (`tests/codec-router.test.ts` が
+ * 両者の同期をテストで固定している)。
+ *
+ * MXF/AVI/FLV/TS/M2TS は Mediabunny の有効化対象外なので `ffmpeg` のまま。
  */
-const NATIVE_CONTAINERS = ['mp4', 'webm', 'm4v'];
-const FFMPEG_CONTAINERS = ['mov', 'mkv', 'mxf', 'avi', 'flv', 'ts', 'm2ts'];
+export const NATIVE_CONTAINERS = ['mp4', 'webm', 'm4v', 'mov', 'mkv'];
+export const FFMPEG_CONTAINERS = ['mxf', 'avi', 'flv', 'ts', 'm2ts'];
 
 export function classifyContainer(extension: string): 'native' | 'ffmpeg' | 'unknown' {
   const ext = extension.toLowerCase().replace(/^\./, '');

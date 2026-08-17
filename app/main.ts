@@ -22,7 +22,7 @@ import { ColorGradingEngine } from '../color/grading-engine';
 import { AudioEngine } from '../audio/audio-engine';
 import { RenderBackend } from '../render/render-backend';
 import { VideoPipeline } from '../core/webcodecs-pipeline';
-import { planFileProcessing } from '../core/codec-router';
+import { planFileProcessing, resolveRoutingCodec } from '../core/codec-router';
 import { ExportEngine } from '../export/export-engine';
 import { AIEffectsEngine } from '../ai/ai-effects-engine';
 import { PluginManager } from '../plugins/plugin-manager';
@@ -640,32 +640,26 @@ export class ArtoneApp {
       throw new Error(`Media import not available — MediaBrowser.importFiles is undefined`);
     }
 
-    // コーデック処理経路を判定 (WebCodecs ネイティブ or FFmpeg WASM transcode)
-    const probableCodec = this.guessCodecFromFile(file);
-    const plan = await planFileProcessing(file.name, probableCodec);
-    if (plan.route === 'ffmpeg-transcode') {
-      log.info(`Import: ${file.name} → FFmpeg WASM transcode`, { reason: plan.reason });
-    }
-
     // importFiles は未対応/失敗ファイルを握りつぶして空配列を返すため、
     // 1件も取り込めなければ呼び出し側にエラーを伝播する (silent failure 防止)。
     const imported = await this.media.importFiles([file]);
     if (imported.length === 0) {
       throw new Error(`Import failed — "${file.name}" is unsupported or could not be processed`);
     }
-  }
 
-  /** ファイル名/MIME からコーデックを推定 (codec-router 入力用) */
-  private guessCodecFromFile(file: File): string {
-    const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-    const byExt: Record<string, string> = {
-      mov: 'prores',   // MOV は ProRes の可能性が高い
-      mxf: 'dnxhr',    // MXF は DNxHR/放送系
-      mp4: 'avc1.640028',
-      webm: 'vp09.00.10.08',
-      mkv: 'avc1.640028',
-    };
-    return byExt[ext] ?? 'avc1.640028';
+    // コーデック処理経路を判定 (WebCodecs ネイティブ or FFmpeg WASM transcode)。
+    //
+    // 取り込み時にデマルチプレクサがコンテナから読んだ**実コーデック**を使う。
+    // 以前は拡張子推測 (`.mov → prores`) を使っており、iPhone が標準で出力する
+    // H.264 の .mov が実体のない FFmpeg 経路へ振られていた。
+    // 判定を取り込み後に行うのは、既に抽出済みのメタデータを再利用してコンテナの
+    // 二重パースを避けるため (この判定結果は現状ログ専用で、取り込み処理を
+    // 分岐させていないため順序を入れ替えても挙動は変わらない)。
+    const routingCodec = resolveRoutingCodec(imported[0]?.codec, file.name);
+    const plan = await planFileProcessing(file.name, routingCodec);
+    if (plan.route === 'ffmpeg-transcode') {
+      log.info(`Import: ${file.name} → FFmpeg WASM transcode`, { reason: plan.reason });
+    }
   }
 
   async exportProject(preset?: string): Promise<void> {

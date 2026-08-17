@@ -152,6 +152,48 @@ export function classifyContainer(extension: string): 'native' | 'ffmpeg' | 'unk
 }
 
 /**
+ * 拡張子からコーデックを**推測**する (最終手段)。
+ *
+ * 拡張子はコンテナしか表さずコーデックを決定しないため、これは本質的に当て推量
+ * である (例: .mov は ProRes とは限らず、iPhone は H.264/HEVC の .mov を出力する)。
+ * コンテナを実際に読める場合は必ず `resolveRoutingCodec()` 経由で実コーデックを
+ * 優先すること。
+ */
+export function guessCodecFromExtension(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  const byExt: Record<string, string> = {
+    mov: 'prores',   // 業務用 MOV は ProRes が多い (あくまで推測)
+    mxf: 'dnxhr',    // MXF は DNxHR/放送系
+    mp4: 'avc1.640028',
+    webm: 'vp09.00.10.08',
+    mkv: 'avc1.640028',
+  };
+  return byExt[ext] ?? 'avc1.640028';
+}
+
+/**
+ * 経路判定に使うコーデック文字列を決める。
+ *
+ * デマルチプレクサ (`media/media-metadata.ts`) がコンテナから読んだ**実コーデック**を
+ * 常に優先し、取得できなかった場合のみ拡張子推測へフォールバックする。
+ *
+ * これが無いと、iPhone が標準で出力する H.264 の `.mov` が拡張子推測で
+ * `prores` と誤判定され、`classifyCodec('prores') === 'transcode'` により
+ * **実体のない FFmpeg 経路へ振られる** (コンテナ判定を native に直しても、
+ * コーデック側の誤りだけで同じ結末になる)。
+ *
+ * @param realCodec デマクサが読んだコーデック文字列。未取得なら null/undefined/''。
+ * @param filename  フォールバック用のファイル名。
+ */
+export function resolveRoutingCodec(
+  realCodec: string | null | undefined,
+  filename: string
+): string {
+  const trimmed = realCodec?.trim();
+  return trimmed ? trimmed : guessCodecFromExtension(filename);
+}
+
+/**
  * ファイル全体の処理計画。コーデック + コンテナを統合判断。
  */
 export async function planFileProcessing(

@@ -383,7 +383,9 @@
     "title": "Texte"
   },
   "preview": {
-    "webgpu": "Aperçu (WebGPU)"
+    "webgpu": "Aperçu (WebGPU)",
+    "loading": "Chargement…",
+    "empty": "Sélectionnez un clip pour l’aperçu"
   },
   "palette": {
     "placeholder": "Rechercher commandes, effets, paramètres...",

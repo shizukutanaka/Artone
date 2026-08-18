@@ -383,7 +383,9 @@
     "title": "Texto"
   },
   "preview": {
-    "webgpu": "Pré-visualização (WebGPU)"
+    "webgpu": "Pré-visualização (WebGPU)",
+    "loading": "Carregando…",
+    "empty": "Selecione um clipe para pré-visualizar"
   },
   "palette": {
     "placeholder": "Pesquisar comandos, efeitos, configurações...",

@@ -369,7 +369,14 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
 
   const handleClipSelect = useCallback((clipId: string, multi: boolean) => {
     // 選択もエンジンが保持する (undo/redo や範囲編集がここを見るため)。
-    withTimeline((tl) => tl.selectClip(clipId, multi));
+    withTimeline((tl) => {
+      tl.selectClip(clipId, multi);
+      // タイムラインで選んだクリップをプレビューに出す。これが無いと、編集対象と
+      // プレビューが食い違ったまま (プレビューはメディアライブラリの選択に追従)
+      // になり、クリップをクリックしても表示が変わらない。
+      const mediaId = tl.getState().clips.get(clipId)?.mediaId;
+      if (mediaId) setSelectedMediaId(mediaId);
+    });
     const clip = timelineClips.find((c) => c.id === clipId);
     if (!clip) return;
     setSelection({

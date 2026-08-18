@@ -383,7 +383,9 @@
     "title": "文本"
   },
   "preview": {
-    "webgpu": "预览 (WebGPU)"
+    "webgpu": "预览 (WebGPU)",
+    "loading": "加载中…",
+    "empty": "选择片段以预览"
   },
   "palette": {
     "placeholder": "搜索命令、效果、设置...",

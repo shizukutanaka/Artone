@@ -358,7 +358,9 @@
     "engine": "エンジン初期化中..."
   },
   "preview": {
-    "webgpu": "プレビュー (WebGPU)"
+    "webgpu": "プレビュー (WebGPU)",
+    "loading": "読み込み中…",
+    "empty": "クリップを選択するとプレビューできます"
   },
   "firstRun": {
     "levelHint": "あなたの経験レベルに合わせて UI を調整します",

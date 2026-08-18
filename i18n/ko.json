@@ -383,7 +383,9 @@
     "title": "텍스트"
   },
   "preview": {
-    "webgpu": "미리보기 (WebGPU)"
+    "webgpu": "미리보기 (WebGPU)",
+    "loading": "불러오는 중…",
+    "empty": "미리 볼 클립을 선택하세요"
   },
   "palette": {
     "placeholder": "명령어, 효과, 설정 검색...",

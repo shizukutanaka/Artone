@@ -383,7 +383,9 @@
     "title": "Text"
   },
   "preview": {
-    "webgpu": "Vorschau (WebGPU)"
+    "webgpu": "Vorschau (WebGPU)",
+    "loading": "Wird geladen…",
+    "empty": "Clip auswählen, um ihn anzusehen"
   },
   "palette": {
     "placeholder": "Befehle, Effekte, Einstellungen suchen...",

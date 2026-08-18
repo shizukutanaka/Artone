@@ -396,7 +396,9 @@
     "engine": "Initializing engine..."
   },
   "preview": {
-    "webgpu": "Preview (WebGPU)"
+    "webgpu": "Preview (WebGPU)",
+    "loading": "Loading…",
+    "empty": "Select a clip to preview"
   },
   "firstRun": {
     "levelHint": "We'll adjust the UI to match your experience",

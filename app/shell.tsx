@@ -26,6 +26,7 @@ import { EXPORT_PRESETS } from '../export/export-engine';
 import { MediaBrowser, type MediaItem } from './MediaBrowser';
 import { TimelineView, type TimelineTrack, type TimelineClip } from './TimelineView';
 import type { AppConfig } from './main';
+import { PreviewPane } from './PreviewPane';
 
 // ============================================================
 // Helpers
@@ -671,13 +672,14 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
             flex: '0 0 40%', maxHeight: '45%', background: color.surface0,
             display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
           }}>
-            <div style={{
-              width: '90%', maxWidth: 800, aspectRatio: '16/9', background: color.surface0,
-              borderRadius: radius.md, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: color.textTertiary, ...ds.text('body'),
-            }}>
-              {engine.isReady ? t('preview.webgpu') : '...'}
-            </div>
+            {/*
+              コアループ「見る」段。従来はテキストラベルのみで、取り込んだ映像を
+              一度も表示できていなかった。選択中メディアを実際に描画する。
+            */}
+            <PreviewPane
+              item={mediaItems.find((m) => m.id === selectedMediaId)}
+              isReady={engine.isReady}
+            />
             {!sidebarOpen && (
               <button onClick={() => setSidebarOpen(true)} aria-label={t('media.sidebarOpen')}
                 style={{ ...ds.button('ghost'), position: 'absolute', left: space[2], top: space[2] }}>▷</button>

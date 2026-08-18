@@ -383,7 +383,9 @@
     "title": "نص"
   },
   "preview": {
-    "webgpu": "معاينة (WebGPU)"
+    "webgpu": "معاينة (WebGPU)",
+    "loading": "جارٍ التحميل…",
+    "empty": "اختر مقطعًا للمعاينة"
   },
   "palette": {
     "placeholder": "ابحث عن الأوامر والتأثيرات والإعدادات...",

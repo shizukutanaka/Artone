@@ -27,6 +27,10 @@ import { MediaBrowser, type MediaItem } from './MediaBrowser';
 import { TimelineView, type TimelineTrack, type TimelineClip } from './TimelineView';
 import type { AppConfig } from './main';
 import { PreviewPane } from './PreviewPane';
+import {
+  toTimelineClips, toTimelineTracks, buildEngineClip, pickTrackIdForType, nextStartOnTrack,
+} from './timeline-bridge';
+import type { TimelineState as EngineTimelineState } from '../timeline/magnetic-timeline';
 
 // ============================================================
 // Helpers
@@ -68,24 +72,6 @@ export function buildKeydownHandler(
       actions.save();
     }
   };
-}
-
-/**
- * Apply an Inspector clip-selection edit back onto the timeline clip it
- * describes. Only the fields with a real backing property on TimelineClip
- * (name/start/duration) are propagated — Inspector's other ClipSelection
- * fields (speed/opacity/position/scale/rotation) are presentational only
- * for now (TimelineClip has no transform properties to write them back to).
- * Returns the same array reference when there's nothing to apply, so callers
- * can pass this straight to a setState updater without an extra no-op render.
- */
-export function applyClipSelectionEdit(clips: TimelineClip[], next: Selection): TimelineClip[] {
-  if (next.type !== 'clip') return clips;
-  return clips.map((c) =>
-    c.id === next.id
-      ? { ...c, name: next.name, start: next.startTime, duration: next.duration }
-      : c
-  );
 }
 
 /**
@@ -342,58 +328,74 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
   const [enabledScopes, setEnabledScopes] = useState<ScopeType[]>(['waveform', 'histogram']);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [selectedMediaId, setSelectedMediaId] = useState<string | undefined>();
-  const [timelineTracks] = useState<TimelineTrack[]>([
-    { id: 'v1', name: 'V1', type: 'video', height: 48, muted: false, locked: false },
-    { id: 'v2', name: 'V2', type: 'video', height: 48, muted: false, locked: false },
-    { id: 'a1', name: 'A1', type: 'audio', height: 40, muted: false, locked: false },
-    { id: 'a2', name: 'A2', type: 'audio', height: 40, muted: false, locked: false },
-  ]);
-  const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);  // start = seconds from track start
+  // タイムラインは**エンジンが唯一の真実**。従来ここに独自の配列を持っていたため、
+  // エンジンの MagneticTimeline は常に空で、ショートカット・undo/redo・スナップ・
+  // クラッシュ復旧が画面上のクリップに一切効かなかった (監査で「最も高くついている
+  // 重複」と指摘された箇所)。エンジンの状態を購読して描画する。
+  const [timelineView, setTimelineView] = useState<{ tracks: TimelineTrack[]; clips: TimelineClip[] }>(
+    { tracks: [], clips: [] }
+  );
+  useEffect(() => {
+    const timeline = actions.getApp()?.timeline;
+    if (!timeline) return;
+    const sync = (state: EngineTimelineState) => {
+      setTimelineView({ tracks: toTimelineTracks(state), clips: toTimelineClips(state) });
+    };
+    sync(timeline.getState());
+    return timeline.subscribe(sync);
+  }, [actions, engine.isReady]);
+  const timelineTracks = timelineView.tracks;
+  const timelineClips = timelineView.clips;
+
+  /** エンジンのタイムラインに対する操作をまとめる (未初期化なら何もしない)。 */
+  const withTimeline = useCallback((fn: (tl: NonNullable<ReturnType<EngineActions['getApp']>>['timeline']) => void) => {
+    const timeline = actions.getApp()?.timeline;
+    if (timeline) fn(timeline);
+  }, [actions]);
   const [pxPerSecond, setPxPerSecond] = useState(100);
 
   const handleClipMove = useCallback((clipId: string, newStart: number, newTrackId?: string) => {
-    setTimelineClips((prev) => prev.map((c) =>
-      c.id === clipId
-        ? { ...c, start: newStart, ...(newTrackId ? { trackId: newTrackId } : {}) }
-        : c
-    ));
-  }, []);
+    // エンジン経由にすることでスナップ/マグネティック挙動がそのまま効く。
+    withTimeline((tl) => tl.moveClip(clipId, newStart, newTrackId));
+  }, [withTimeline]);
 
   const handleClipResize = useCallback((clipId: string, newStart: number, newDuration: number) => {
-    setTimelineClips((prev) => prev.map((c) =>
-      c.id === clipId ? { ...c, start: newStart, duration: newDuration } : c
-    ));
-  }, []);
-
-  const handleClipSelect = useCallback((clipId: string, _multi: boolean) => {
-    setTimelineClips((prev) => {
-      const clip = prev.find((c) => c.id === clipId);
-      if (clip) {
-        setSelection({
-          type: 'clip',
-          id: clip.id,
-          name: clip.name,
-          duration: clip.duration,
-          startTime: clip.start,
-          speed: 1,
-          opacity: 1,
-          position: { x: 0, y: 0 },
-          scale: 1,
-          rotation: 0,
-        });
-      }
-      return prev;
+    // 端のドラッグはエンジンのトリムに対応する。先頭を動かしてから終端を合わせる。
+    withTimeline((tl) => {
+      tl.trimClipStart(clipId, newStart);
+      tl.trimClipEnd(clipId, newStart + newDuration);
     });
-  }, []);
+  }, [withTimeline]);
 
-  // Inspector edits used to mutate only the local `selection` object — never
-  // the actual clip, so name/start/duration changes silently had no effect
-  // on the timeline. applyClipSelectionEdit propagates the fields that have
-  // a real backing property on TimelineClip.
+  const handleClipSelect = useCallback((clipId: string, multi: boolean) => {
+    // 選択もエンジンが保持する (undo/redo や範囲編集がここを見るため)。
+    withTimeline((tl) => tl.selectClip(clipId, multi));
+    const clip = timelineClips.find((c) => c.id === clipId);
+    if (!clip) return;
+    setSelection({
+      type: 'clip',
+      id: clip.id,
+      name: clip.name,
+      duration: clip.duration,
+      startTime: clip.start,
+      speed: 1,
+      opacity: 1,
+      position: { x: 0, y: 0 },
+      scale: 1,
+      rotation: 0,
+    });
+  }, [withTimeline, timelineClips]);
+
+  // Inspector の編集をエンジンのクリップへ反映する。従来はローカル配列だけを
+  // 書き換えていたため、エンジン側 (undo/クラッシュ復旧) には残らなかった。
   const handleSelectionChange = useCallback((next: Selection) => {
     setSelection(next);
-    setTimelineClips((prev) => applyClipSelectionEdit(prev, next));
-  }, []);
+    if (next.type !== 'clip') return;
+    withTimeline((tl) => {
+      tl.moveClip(next.id, next.startTime);
+      tl.trimClipEnd(next.id, next.startTime + next.duration);
+    });
+  }, [withTimeline]);
 
   /** Probe a video/audio File for its duration via a temporary media element. */
   const probeFileDuration = useCallback((file: File, objectUrl: string): Promise<number> => {
@@ -449,19 +451,23 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
         }
         return [...prev, item];
       });
-      // Auto-add clip to the first matching track after existing clips
-      const trackId = type === 'audio' ? 'a1' : 'v1';
-      setTimelineClips((prev) => {
-        const trackClips = prev.filter((c) => c.trackId === trackId);
-        const startTime = trackClips.reduce((max, c) => Math.max(max, c.start + c.duration), 0);
-        return [...prev, {
-          id: `clip_${mediaId}`, trackId, name: file.name,
-          start: startTime, duration,
-          color: type === 'audio' ? color.interactive : type === 'video' ? color.positive : color.info,
-        }];
+      // 取り込んだクリップを**エンジンのタイムライン**へ追加する。トラック ID は
+      // エンジン側が UUID で持つため決め打ちせず種別で引く。これによりクラッシュ
+      // 復旧が実データを保存するようになる (従来は空のタイムラインを保存していた)。
+      withTimeline((tl) => {
+        const trackId = pickTrackIdForType(tl.getState(), type);
+        if (!trackId) return;
+        tl.addClip(buildEngineClip({
+          trackId,
+          mediaId,
+          name: file.name,
+          startTime: nextStartOnTrack(tl.getState(), trackId),
+          duration,
+          type,
+        }));
       });
     }
-  }, [actions, probeFileDuration]);
+  }, [actions, probeFileDuration, withTimeline]);
 
   // Stable MediaBrowser callbacks so the (memoized) browser does not re-render on
   // every engine tick (e.g. the playhead advancing during playback). Functional

@@ -24,6 +24,7 @@ import { RenderBackend } from '../render/render-backend';
 import { VideoPipeline } from '../core/webcodecs-pipeline';
 import { planFileProcessing, resolveRoutingCodec } from '../core/codec-router';
 import { ExportEngine } from '../export/export-engine';
+import { containerForPreset } from '../export/export-container';
 import { AIEffectsEngine } from '../ai/ai-effects-engine';
 import { PluginManager } from '../plugins/plugin-manager';
 import { ProjectManager } from '../project/project-manager';
@@ -669,12 +670,47 @@ export class ArtoneApp {
     if (!exportPreset) {
       throw new Error(`Export failed — unknown preset "${presetId}"`);
     }
-    // タイムラインをフレーム列にレンダリングするパイプラインは未接続。
-    // ここで空フレーム (quickExport([])) を渡すと無音・無映像の空ファイルが
-    // 静かに生成されてしまうため、明示的に失敗させる (silent data loss 防止)。
-    throw new Error(
-      'Export is not yet wired to the render pipeline — timeline frame rendering is required before quickExport can run.'
-    );
+    // 複数クリップを合成した「タイムライン書き出し」はレンダリング配線待ち。
+    // ただし**取り込んだメディアをそのまま書き出す**ことはデコード不要の
+    // コンテナ変換 (パケット階層) で今できるため、そちらを提供する。
+    // 合成が要るケースだけ明示的に失敗させ、無音・無映像の空ファイルを黙って
+    // 出すことは決してしない (silent data loss 防止)。
+    const container = containerForPreset(exportPreset.config.format);
+    if (!container) {
+      throw new Error(
+        `Export failed — "${exportPreset.config.format}" output is not supported by the media exporter yet (mp4/webm only).`
+      );
+    }
+
+    const source = this.exportSourceMedia();
+    if (!source?.file) {
+      throw new Error(
+        'Export failed — no source media to export. Import a clip first. ' +
+        '(Compositing multiple timeline clips is not wired yet; a single imported clip can be exported.)'
+      );
+    }
+
+    const { exportMediaFile } = await import('../export/media-export');
+    const result = await exportMediaFile(source.file, {
+      format: container,
+      onProgress: (p) => this.emit?.('exportProgress', { progress: p }),
+    });
+
+    const base = source.name.replace(/\.[^.]+$/, '') || 'export';
+    this.export.download(result.blob, `${base}.${container}`);
+    if (result.discardedTracks.length > 0) {
+      log.warn('Export completed with discarded tracks', { discardedTracks: result.discardedTracks });
+    }
+  }
+
+  /**
+   * 書き出し元のメディアを選ぶ。現状は取り込み済みの先頭 (単一クリップ書き出し)。
+   * タイムライン合成が配線されたらここをタイムライン参照へ差し替える。
+   */
+  private exportSourceMedia(): { file: File | null; name: string } | undefined {
+    const items = this.media.getItems?.() ?? [];
+    const first = items.find((m) => m.type === 'video') ?? items[0];
+    return first ? { file: first.file, name: first.name } : undefined;
   }
 
   // ============================================================

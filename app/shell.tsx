@@ -679,6 +679,8 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
             <PreviewPane
               item={mediaItems.find((m) => m.id === selectedMediaId)}
               isReady={engine.isReady}
+              currentTime={engine.currentTime}
+              isPlaying={engine.isPlaying}
             />
             {!sidebarOpen && (
               <button onClick={() => setSidebarOpen(true)} aria-label={t('media.sidebarOpen')}

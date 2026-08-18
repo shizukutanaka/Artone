@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { PreviewPane, selectPreviewKind } from '../app/PreviewPane';
+import { PreviewPane, selectPreviewKind, shouldSyncSeek, SEEK_SYNC_THRESHOLD_SEC } from '../app/PreviewPane';
 import type { MediaItem } from '../app/MediaBrowser';
 import { setupI18n } from '../i18n/i18n-manager';
 import en from '../i18n/en.json';
@@ -57,6 +57,16 @@ afterEach(() => {
 function render(item: MediaItem | undefined, isReady = true) {
   act(() => {
     root.render(h(PreviewPane, { item, isReady }));
+  });
+}
+
+/** 再生状態つきで描画する (タイムライン追従の検証用)。 */
+function renderWithPlayback(
+  item: MediaItem | undefined,
+  opts: { currentTime?: number; isPlaying?: boolean }
+) {
+  act(() => {
+    root.render(h(PreviewPane, { item, isReady: true, ...opts }));
   });
 }
 
@@ -141,5 +151,54 @@ describe('PreviewPane rendering', () => {
     render(makeItem());
     const style = container.querySelector('video')!.getAttribute('style') ?? '';
     expect(style).not.toContain('rotate');
+  });
+});
+
+// ============================================================
+// タイムライン追従
+// ============================================================
+
+describe('shouldSyncSeek', () => {
+  it('does not seek for small drift (would stutter playback)', () => {
+    // 毎フレーム currentTime を代入するとブラウザが再生を途切れさせるため、
+    // 通常の再生ドリフト程度では追従シークしない。
+    expect(shouldSyncSeek(1.0, 1.0)).toBe(false);
+    expect(shouldSyncSeek(1.0, 1.0 + SEEK_SYNC_THRESHOLD_SEC / 2)).toBe(false);
+  });
+
+  it('seeks once the drift exceeds the threshold (user scrubbed)', () => {
+    expect(shouldSyncSeek(1.0, 1.0 + SEEK_SYNC_THRESHOLD_SEC * 2)).toBe(true);
+    expect(shouldSyncSeek(5.0, 0.5)).toBe(true);
+  });
+
+  it('ignores non-finite values instead of assigning NaN to currentTime', () => {
+    expect(shouldSyncSeek(NaN, 1)).toBe(false);
+    expect(shouldSyncSeek(1, Infinity)).toBe(false);
+  });
+});
+
+describe('PreviewPane playback sync', () => {
+  it('seeks the video when the timeline playhead jumps', () => {
+    renderWithPlayback(makeItem(), { currentTime: 0 });
+    const video = container.querySelector('video') as HTMLVideoElement;
+    video.currentTime = 0;
+    renderWithPlayback(makeItem(), { currentTime: 8 });
+    expect(video.currentTime).toBe(8);
+  });
+
+  it('does not fight the video for sub-threshold drift', () => {
+    renderWithPlayback(makeItem(), { currentTime: 0 });
+    const video = container.querySelector('video') as HTMLVideoElement;
+    video.currentTime = 2;
+    renderWithPlayback(makeItem(), { currentTime: 2 + SEEK_SYNC_THRESHOLD_SEC / 2 });
+    expect(video.currentTime).toBe(2); // 据え置き
+  });
+
+  it('does not touch the video at all when playback props are omitted', () => {
+    render(makeItem());
+    const video = container.querySelector('video') as HTMLVideoElement;
+    video.currentTime = 3;
+    render(makeItem());
+    expect(video.currentTime).toBe(3);
   });
 });

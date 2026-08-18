@@ -25,6 +25,7 @@ import { VideoPipeline } from '../core/webcodecs-pipeline';
 import { planFileProcessing, resolveRoutingCodec } from '../core/codec-router';
 import { ExportEngine } from '../export/export-engine';
 import { containerForPreset } from '../export/export-container';
+import { decideExportSource, explainExportSourceFailure } from '../export/export-source';
 import { AIEffectsEngine } from '../ai/ai-effects-engine';
 import { PluginManager } from '../plugins/plugin-manager';
 import { ProjectManager } from '../project/project-manager';
@@ -682,12 +683,10 @@ export class ArtoneApp {
       );
     }
 
+    // 失敗理由 (空タイムライン / 合成が必要) は exportSourceMedia が投げる。
     const source = this.exportSourceMedia();
     if (!source?.file) {
-      throw new Error(
-        'Export failed — no source media to export. Import a clip first. ' +
-        '(Compositing multiple timeline clips is not wired yet; a single imported clip can be exported.)'
-      );
+      throw new Error('Export failed — the timeline clip has no backing file to export.');
     }
 
     const { exportMediaFile } = await import('../export/media-export');
@@ -708,9 +707,21 @@ export class ArtoneApp {
    * タイムライン合成が配線されたらここをタイムライン参照へ差し替える。
    */
   private exportSourceMedia(): { file: File | null; name: string } | undefined {
-    const items = this.media.getItems?.() ?? [];
-    const first = items.find((m) => m.type === 'video') ?? items[0];
-    return first ? { file: first.file, name: first.name } : undefined;
+    // 書き出しは**タイムラインの内容**を反映しなければならない。以前はメディア
+    // ライブラリの先頭を無条件に選んでおり、素材 A を取り込んだ後 B だけを
+    // タイムラインに置いても A が書き出される誤出力になっていた。
+    const clips = [...this.timeline.getState().clips.values()];
+    const decision = decideExportSource(clips);
+    if (decision.kind !== 'ok') {
+      throw new Error(explainExportSourceFailure(decision));
+    }
+    const item = this.media.getItems?.().find((m) => m.id === decision.mediaId);
+    if (!item) {
+      throw new Error(
+        `Export failed — the timeline references media "${decision.mediaId}" that is no longer in the library.`
+      );
+    }
+    return { file: item.file, name: item.name };
   }
 
   // ============================================================

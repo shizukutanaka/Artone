@@ -28,6 +28,31 @@ export interface PreviewPaneProps {
   item: MediaItem | undefined;
   /** エンジン初期化済みか (未初期化ならローディング表示)。 */
   isReady: boolean;
+  /** タイムラインの再生位置 (秒)。省略時は追従しない。 */
+  currentTime?: number;
+  /** 再生中か。省略時は追従しない。 */
+  isPlaying?: boolean;
+}
+
+/**
+ * 再生位置をどれだけずれたら追従シークするかの閾値 (秒)。
+ *
+ * 毎フレーム `currentTime` を代入するとブラウザが再生を途切れさせるため、
+ * **ずれが目に見える大きさになった時だけ**シークする。0.25s は 30fps で約7.5
+ * フレーム相当で、通常の再生ドリフトでは発火せず、ユーザーがタイムラインを
+ * 掴んで動かした時には確実に発火する値。
+ */
+export const SEEK_SYNC_THRESHOLD_SEC = 0.25;
+
+/**
+ * 再生位置を `<video>` へ反映すべきか判定する純関数。
+ *
+ * @param videoTime 現在の `<video>.currentTime`
+ * @param timelineTime タイムラインの再生位置
+ */
+export function shouldSyncSeek(videoTime: number, timelineTime: number): boolean {
+  if (!Number.isFinite(videoTime) || !Number.isFinite(timelineTime)) return false;
+  return Math.abs(videoTime - timelineTime) > SEEK_SYNC_THRESHOLD_SEC;
 }
 
 /** プレビュー面に表示すべき内容の種別。 */
@@ -72,8 +97,30 @@ const MEDIA_STYLE: React.CSSProperties = {
  * 選択中メディアを表示する。映像は `<video>` をそのまま使うため、デコードは
  * ブラウザに任せられる (WebCodecs のデコード配線を待たずに「見る」段が成立する)。
  */
-export const PreviewPane = React.memo(function PreviewPane({ item, isReady }: PreviewPaneProps) {
+export const PreviewPane = React.memo(function PreviewPane({
+  item, isReady, currentTime, isPlaying,
+}: PreviewPaneProps) {
   const kind = selectPreviewKind(item, isReady);
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+
+  // タイムラインの再生位置へ追従する。閾値を超えた時だけシークするのは、
+  // 毎フレーム currentTime を代入するとブラウザが再生を途切れさせるため。
+  React.useEffect(() => {
+    const el = videoRef.current;
+    if (!el || currentTime === undefined) return;
+    if (shouldSyncSeek(el.currentTime, currentTime)) {
+      el.currentTime = currentTime;
+    }
+  }, [currentTime]);
+
+  // 再生/停止をタイムラインに合わせる。play() は Promise を返し、
+  // 自動再生ポリシー等で拒否されうるので握り潰す (UI を壊さない)。
+  React.useEffect(() => {
+    const el = videoRef.current;
+    if (!el || isPlaying === undefined) return;
+    if (isPlaying && el.paused) void el.play?.()?.catch?.(() => undefined);
+    else if (!isPlaying && !el.paused) el.pause?.();
+  }, [isPlaying]);
 
   if (kind === 'loading') {
     return <div style={FRAME_STYLE} data-preview="loading">{t('preview.loading')}</div>;
@@ -103,7 +150,7 @@ export const PreviewPane = React.memo(function PreviewPane({ item, isReady }: Pr
         ユーザーは音を確認したいのが普通で、自動再生もしないため
         ブラウザの自動再生ポリシーには抵触しない。
       */}
-      <video src={item!.url} controls playsInline style={MEDIA_STYLE} data-testid="preview-video" />
+      <video ref={videoRef} src={item!.url} controls playsInline style={MEDIA_STYLE} data-testid="preview-video" />
     </div>
   );
 });

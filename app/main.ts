@@ -25,7 +25,10 @@ import { VideoPipeline } from '../core/webcodecs-pipeline';
 import { planFileProcessing, resolveRoutingCodec } from '../core/codec-router';
 import { ExportEngine } from '../export/export-engine';
 import { containerForPreset } from '../export/export-container';
+import type { ExportContainer } from '../export/export-container';
 import { decideExportSource, explainExportSourceFailure } from '../export/export-source';
+import type { ExportSourceDecision } from '../export/export-source';
+import type { ExportConfig } from '../export/export-engine';
 import { AIEffectsEngine } from '../ai/ai-effects-engine';
 import { PluginManager } from '../plugins/plugin-manager';
 import { ProjectManager } from '../project/project-manager';
@@ -736,7 +739,13 @@ export class ArtoneApp {
       );
     }
 
-    // 失敗理由 (空タイムライン / 合成が必要) は exportSourceMedia が投げる。
+    // 単一クリップならコンテナ変換 (速く、区間指定もフレーム正確)。
+    // 連結・前方の空白・変形が要るならフレームを組み立て直す。
+    const decision = this.exportDecision();
+    if (decision.kind === 'needs-rendering') {
+      return this.exportRenderedTimeline(exportPreset.config, container);
+    }
+
     const source = this.exportSourceMedia();
     if (!source?.file) {
       throw new Error('Export failed — the timeline clip has no backing file to export.');
@@ -761,18 +770,62 @@ export class ArtoneApp {
    * 書き出し元のメディアを選ぶ。現状は取り込み済みの先頭 (単一クリップ書き出し)。
    * タイムライン合成が配線されたらここをタイムライン参照へ差し替える。
    */
+  /** タイムラインから書き出し方針を決める (素材の尺はライブラリから引く)。 */
+  private exportDecision(): ExportSourceDecision {
+    const clips = [...this.timeline.getState().clips.values()];
+    const items = this.media.getItems?.() ?? [];
+    return decideExportSource(clips, (mediaId) => items.find((m) => m.id === mediaId)?.duration);
+  }
+
+  /**
+   * 連結・前方の空白・変形を含むタイムラインを、フレームを組み立て直して書き出す。
+   *
+   * 素材を素通しできないケースは以前**明示的に失敗**させていた (編集と違うファイルを
+   * 黙って出すより良い、という判断)。組み立て経路ができたので、失敗させる代わりに
+   * 実際に編集どおりのファイルを出す。組み立てでも表現できないもの (クリップの
+   * 重なり = 合成、音声付き素材) は renderTimeline が明示的に失敗させる。
+   */
+  private async exportRenderedTimeline(config: ExportConfig, container: ExportContainer): Promise<void> {
+    const items = this.media.getItems?.() ?? [];
+    const clips = [...this.timeline.getState().clips.values()];
+    const renderClips = clips.map((clip) => {
+      const item = items.find((m) => m.id === clip.mediaId);
+      if (!item?.file) {
+        throw new Error(
+          `Export failed — the timeline references media "${clip.mediaId}" that is no longer in the library.`
+        );
+      }
+      return {
+        source: item.file,
+        startTime: clip.startTime,
+        duration: clip.duration,
+        mediaIn: clip.mediaIn,
+        transform: clip.transform,
+      };
+    });
+
+    const { renderTimeline } = await import('../export/timeline-render');
+    const result = await renderTimeline(renderClips, {
+      width: config.width,
+      height: config.height,
+      fps: config.fps,
+      format: container,
+      bitrate: config.bitrate,
+      onProgress: (p) => this.emit?.('exportProgress', { progress: p }),
+    });
+    this.export.download(result.blob, `timeline.${container}`);
+    log.info('Rendered timeline export complete', {
+      frames: result.frames, blankFrames: result.blankFrames,
+    });
+  }
+
   private exportSourceMedia(): { file: File | null; name: string; trim?: { start: number; end: number } } | undefined {
     // 書き出しは**タイムラインの内容**を反映しなければならない。以前はメディア
     // ライブラリの先頭を無条件に選んでおり、素材 A を取り込んだ後 B だけを
     // タイムラインに置いても A が書き出される誤出力になっていた。
-    const clips = [...this.timeline.getState().clips.values()];
     // 素材の尺も渡す — 末尾のトリムはクリップ単体からは判別できず (mediaOut は
     // 常に mediaIn + duration)、素材の尺と突き合わせて初めて検出できる。
-    const items = this.media.getItems?.() ?? [];
-    const decision = decideExportSource(
-      clips,
-      (mediaId) => items.find((m) => m.id === mediaId)?.duration,
-    );
+    const decision = this.exportDecision();
     if (decision.kind !== 'ok') {
       throw new Error(explainExportSourceFailure(decision));
     }

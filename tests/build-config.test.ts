@@ -114,7 +114,13 @@ describe('directory structure', () => {
   });
 
   it('all module directories have CLAUDE.md', () => {
-    const skipDirs = new Set(['tests', 'scripts', 'future', 'docs', 'public', '.git', 'node_modules', 'dist', 'coverage']);
+    // ツールの生成物は対象外 (`test-results` / `playwright-report` は Playwright が
+    // 走った後に残る。.gitignore 済みだが、ローカルで E2E を回した直後に
+    // このテストが落ちるのを防ぐ)。
+    const skipDirs = new Set([
+      'tests', 'scripts', 'future', 'docs', 'public', '.git', 'node_modules', 'dist', 'coverage',
+      'test-results', 'playwright-report',
+    ]);
     const missing: string[] = [];
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;

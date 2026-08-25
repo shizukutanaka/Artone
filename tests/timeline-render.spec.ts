@@ -7,7 +7,8 @@
  *
  * ここでは2本のクリップを連結し、出力を**デコードし直して画素をサンプリング**して
  * 「1本目の区間には1本目の色、2本目の区間には2本目の色」が出ていることを確認する。
- * フレーム数が合っていても順序が入れ替わっていれば落ちる。
+ * フレーム数が合っていても順序が入れ替わっていれば落ちる。音声も同様に、復号して
+ * **区間ごとの実効値 (RMS)** を測り、編集どおりの位置に音があることを確かめる。
  *
  * 実行: `npx playwright test tests/timeline-render.spec.ts --project=chromium`
  *
@@ -205,17 +206,18 @@ test.describe('timeline rendering (real WebCodecs)', () => {
     expect(result.clip[1]).toBeGreaterThan(150); // 緑
   });
 
-  test('refuses to render a source that has audio instead of silently dropping it', async ({ page }) => {
+  test('carries audio through, placing it at the clip\'s timeline position', async ({ page }) => {
     const supported = await page.evaluate(async () => typeof VideoEncoder !== 'undefined');
     test.skip(!supported, 'WebCodecs unavailable in this browser');
 
-    const message = await page.evaluate(async () => {
+    const result = await page.evaluate(async () => {
       const { mb: M, renderTimeline } = window as never as Harness;
-      const W = 160, H = 120, FPS = 10;
+      const W = 160, H = 120, FPS = 10, RATE = 48000;
 
+      // --- 1 秒の映像 + 440Hz のトーンを持つ素材を作る ---
       const out = new M.Output({ format: new M.WebMOutputFormat(), target: new M.BufferTarget() });
       const vsrc = new M.VideoSampleSource({ codec: 'vp9', bitrate: 500_000, keyFrameInterval: 1 });
-      const asrc = new M.AudioSampleSource({ codec: 'opus', bitrate: 64_000 });
+      const asrc = new M.AudioSampleSource({ codec: 'opus', bitrate: 96_000 });
       out.addVideoTrack(vsrc);
       out.addAudioTrack(asrc);
       await out.start();
@@ -226,28 +228,82 @@ test.describe('timeline rendering (real WebCodecs)', () => {
       for (let i = 0; i < FPS; i++) {
         await vsrc.add(new M.VideoSample(canvas, { timestamp: i / FPS, duration: 1 / FPS }));
       }
-      const SAMPLE_RATE = 48000;
-      const pcm = new Float32Array(SAMPLE_RATE);
-      for (let i = 0; i < pcm.length; i++) pcm[i] = Math.sin((i / SAMPLE_RATE) * 440 * 2 * Math.PI) * 0.2;
+      const pcm = new Float32Array(RATE);
+      for (let i = 0; i < pcm.length; i++) pcm[i] = Math.sin((i / RATE) * 440 * 2 * Math.PI) * 0.5;
       await asrc.add(new M.AudioSample({
-        data: pcm, format: 'f32', numberOfChannels: 1, sampleRate: SAMPLE_RATE, timestamp: 0,
+        data: pcm, format: 'f32', numberOfChannels: 1, sampleRate: RATE, timestamp: 0,
       }));
       await out.finalize();
       const withAudio = new Blob([out.target.buffer!], { type: 'video/webm' });
 
-      try {
-        await renderTimeline(
-          [{ source: withAudio, startTime: 0, duration: 1, mediaIn: 0 }],
-          { width: W, height: H, fps: FPS, format: 'webm', codec: 'vp9' },
-        );
-        return 'NO ERROR';
-      } catch (e) {
-        return String((e as Error).message);
+      // --- 1 秒地点に置く: 前半は無音、後半に音が来るはず ---
+      const rendered = await renderTimeline(
+        [{ source: withAudio, startTime: 1, duration: 1, mediaIn: 0 }],
+        { width: W, height: H, fps: FPS, format: 'webm', codec: 'vp9' },
+      );
+
+      // --- 出力を復号して、区間ごとの実効値 (RMS) を測る ---
+      const audioCtx = new OfflineAudioContext(1, RATE * 2, RATE);
+      const decodedOut = await audioCtx.decodeAudioData(await rendered.blob.arrayBuffer());
+      const data = decodedOut.getChannelData(0);
+      const rate = decodedOut.sampleRate;
+      function rms(fromSec: number, toSec: number): number {
+        const from = Math.floor(fromSec * rate);
+        const to = Math.min(data.length, Math.floor(toSec * rate));
+        let sum = 0;
+        for (let i = from; i < to; i++) sum += data[i] * data[i];
+        return to > from ? Math.sqrt(sum / (to - from)) : 0;
       }
+      return {
+        hasAudio: rendered.hasAudio,
+        frames: rendered.frames,
+        durationSec: decodedOut.duration,
+        silentPart: rms(0.1, 0.9),  // 前方の空白
+        soundPart: rms(1.1, 1.9),   // クリップの区間
+      };
     });
 
-    // 音を黙って捨てるくらいなら失敗する。
-    expect(message).toMatch(/audio/i);
-    expect(message).toMatch(/silently drop/i);
+    expect(result.hasAudio).toBe(true);
+    expect(result.frames).toBe(20);
+    // 音が編集どおりの位置に置かれている: 前半はほぼ無音、後半に信号がある。
+    expect(result.soundPart).toBeGreaterThan(0.1);
+    expect(result.silentPart).toBeLessThan(0.01);
+    expect(result.durationSec).toBeGreaterThan(1.8);
+  });
+
+  test('omits the audio track entirely when no source has audio', async ({ page }) => {
+    const supported = await page.evaluate(async () => typeof VideoEncoder !== 'undefined');
+    test.skip(!supported, 'WebCodecs unavailable in this browser');
+
+    const result = await page.evaluate(async () => {
+      const { mb: M, renderTimeline } = window as never as Harness;
+      const W = 160, H = 120, FPS = 10;
+      const out = new M.Output({ format: new M.WebMOutputFormat(), target: new M.BufferTarget() });
+      const src = new M.VideoSampleSource({ codec: 'vp9', bitrate: 500_000, keyFrameInterval: 1 });
+      out.addVideoTrack(src);
+      await out.start();
+      const canvas = new OffscreenCanvas(W, H);
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = 'rgb(0,0,200)';
+      ctx.fillRect(0, 0, W, H);
+      for (let i = 0; i < FPS; i++) {
+        await src.add(new M.VideoSample(canvas, { timestamp: i / FPS, duration: 1 / FPS }));
+      }
+      await out.finalize();
+      const silent = new Blob([out.target.buffer!], { type: 'video/webm' });
+
+      const rendered = await renderTimeline(
+        [{ source: silent, startTime: 0, duration: 1, mediaIn: 0 }],
+        { width: W, height: H, fps: FPS, format: 'webm', codec: 'vp9' },
+      );
+      const back = new M.Input({
+        source: new M.BufferSource(await rendered.blob.arrayBuffer()), formats: M.ALL_FORMATS,
+      });
+      return { hasAudio: rendered.hasAudio, audioTracks: (await back.getAudioTracks()).length };
+    });
+
+    // 無音トラックを足さない (容器が無駄に大きくなり再生側の挙動も変わるため)。
+    expect(result.hasAudio).toBe(false);
+    expect(result.audioTracks).toBe(0);
   });
 });

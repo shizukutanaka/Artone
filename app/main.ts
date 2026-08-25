@@ -811,6 +811,7 @@ export class ArtoneApp {
       fps: config.fps,
       format: container,
       bitrate: config.bitrate,
+      audioBitrate: config.audioBitrate,
       onProgress: (p) => this.emit?.('exportProgress', { progress: p }),
     });
     this.export.download(result.blob, `timeline.${container}`);

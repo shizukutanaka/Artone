@@ -352,20 +352,33 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     const timeline = actions.getApp()?.timeline;
     if (timeline) fn(timeline);
   }, [actions]);
+
+  /**
+   * 構造編集を Command として履歴に積んで実行する。
+   *
+   * timeline/CLAUDE.md「クリップ操作は全て Command Pattern (undo/history-manager.ts
+   * 経由)」の履行。直接ミューテータ (`tl.moveClip` 等) を呼ぶと編集はされるが
+   * **履歴に残らず Cmd+Z で戻せない** — 実際にタイムライン統合直後の実装が
+   * その状態だった。null (対象なし/ロック/不正値) は静かに無視する
+   * (main.ts の `if (c) history.execute(c)` と同じ流儀)。
+   */
+  const runCommand = useCallback((make: (tl: NonNullable<ReturnType<EngineActions['getApp']>>['timeline']) => ReturnType<NonNullable<ReturnType<EngineActions['getApp']>>['timeline']['moveClipCommand']>) => {
+    const app = actions.getApp();
+    if (!app) return;
+    const cmd = make(app.timeline);
+    if (cmd) app.history.execute(cmd);
+  }, [actions]);
   const [pxPerSecond, setPxPerSecond] = useState(100);
 
   const handleClipMove = useCallback((clipId: string, newStart: number, newTrackId?: string) => {
-    // エンジン経由にすることでスナップ/マグネティック挙動がそのまま効く。
-    withTimeline((tl) => tl.moveClip(clipId, newStart, newTrackId));
-  }, [withTimeline]);
+    // Command 経由: スナップ/マグネティック挙動が効き、Cmd+Z で戻せる。
+    runCommand((tl) => tl.moveClipCommand(clipId, newStart, newTrackId));
+  }, [runCommand]);
 
   const handleClipResize = useCallback((clipId: string, newStart: number, newDuration: number) => {
-    // 端のドラッグはエンジンのトリムに対応する。先頭を動かしてから終端を合わせる。
-    withTimeline((tl) => {
-      tl.trimClipStart(clipId, newStart);
-      tl.trimClipEnd(clipId, newStart + newDuration);
-    });
-  }, [withTimeline]);
+    // 端のドラッグ = 1ジェスチャ。原子コマンドで1回の undo で戻る。
+    runCommand((tl) => tl.resizeClipCommand(clipId, newStart, newDuration));
+  }, [runCommand]);
 
   const handleClipSelect = useCallback((clipId: string, multi: boolean) => {
     // 選択もエンジンが保持する (undo/redo や範囲編集がここを見るため)。
@@ -398,11 +411,8 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
   const handleSelectionChange = useCallback((next: Selection) => {
     setSelection(next);
     if (next.type !== 'clip') return;
-    withTimeline((tl) => {
-      tl.moveClip(next.id, next.startTime);
-      tl.trimClipEnd(next.id, next.startTime + next.duration);
-    });
-  }, [withTimeline]);
+    runCommand((tl) => tl.moveResizeClipCommand(next.id, next.startTime, next.duration));
+  }, [runCommand]);
 
   /** Probe a video/audio File for its duration via a temporary media element. */
   const probeFileDuration = useCallback((file: File, objectUrl: string): Promise<number> => {
@@ -461,10 +471,11 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
       // 取り込んだクリップを**エンジンのタイムライン**へ追加する。トラック ID は
       // エンジン側が UUID で持つため決め打ちせず種別で引く。これによりクラッシュ
       // 復旧が実データを保存するようになる (従来は空のタイムラインを保存していた)。
-      withTimeline((tl) => {
+      runCommand((tl) => {
         const trackId = pickTrackIdForType(tl.getState(), type);
-        if (!trackId) return;
-        tl.addClip(buildEngineClip({
+        if (!trackId) return null;
+        // Command 経由なので取り込み自体も Cmd+Z で戻せる。
+        return tl.addClipCommand(buildEngineClip({
           trackId,
           mediaId,
           name: file.name,
@@ -474,7 +485,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
         }));
       });
     }
-  }, [actions, probeFileDuration, withTimeline]);
+  }, [actions, probeFileDuration, runCommand]);
 
   // Stable MediaBrowser callbacks so the (memoized) browser does not re-render on
   // every engine tick (e.g. the playhead advancing during playback). Functional

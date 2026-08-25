@@ -678,6 +678,55 @@ export class MagneticTimeline {
   }
 
   /**
+   * Build an **undoable** command that resizes `clipId` to the range
+   * [`newStart`, `newStart + newDuration`] — the two edge trims of a single
+   * user gesture (edge drag) as ONE history entry.
+   *
+   * これを trimClipStartCommand + trimClipEndCommand の2コマンドで表現すると
+   * (1) 1回のドラッグを戻すのに undo が2回要る、(2) 後段のコマンドを**前もって**
+   * 構築すると検証が変更前の状態に対して走り、正当な操作を誤って null にする
+   * (構築時検証の罠)。1つの mutate に直列化することで両方を回避する。
+   * beginBatch/endBatch により購読者への通知も1回に畳む (原子コマンド契約)。
+   *
+   * Returns null if the clip doesn't exist, is locked, or `newDuration` ≤ 0.
+   */
+  resizeClipCommand(clipId: string, newStart: number, newDuration: number): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+    if (!(newDuration > 0)) return null;
+    return this.structuralCommand('clip.resize', 'Resize clip', () => {
+      this.beginBatch();
+      this.trimClipStart(clipId, newStart);
+      this.trimClipEnd(clipId, newStart + newDuration);
+      this.endBatch();
+    });
+  }
+
+  /**
+   * Build an **undoable** command that moves `clipId` to `newStart` and sets
+   * its duration to `newDuration` (Inspector's start/duration edit) as ONE
+   * history entry.
+   *
+   * resizeClipCommand と異なり移動 (mediaIn/Out を保つ) + 末尾トリムの組。
+   * trimClipEnd は move 実行**後**の位置に対して走るため、大きく左へ移動する
+   * 編集 (例: start 10 → 0) でも正しく成立する — 2コマンドを前もって構築する
+   * 方式では trimClipEndCommand が旧位置で検証して null になるケース。
+   *
+   * Returns null if the clip doesn't exist, is locked, or `newDuration` ≤ 0.
+   */
+  moveResizeClipCommand(clipId: string, newStart: number, newDuration: number): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+    if (!(newDuration > 0)) return null;
+    return this.structuralCommand('clip.moveResize', 'Edit clip', () => {
+      this.beginBatch();
+      this.moveClip(clipId, newStart);
+      this.trimClipEnd(clipId, newStart + newDuration);
+      this.endBatch();
+    });
+  }
+
+  /**
    * Roll the edit point between `clipAId` (left) and `clipBId` (right) by
    * `delta` seconds — A's out-point and B's in-point move by the same
    * amount, no other clip is affected. No-op if either clip doesn't exist,

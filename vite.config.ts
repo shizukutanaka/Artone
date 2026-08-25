@@ -167,9 +167,9 @@ export default defineConfig({
       'lodash-es',
       'uuid'
     ],
-    exclude: [
-      '@xenova/transformers' // AI モデルは動的ロード
-    ]
+    // 除外指定は現状不要 (動的ロードする重量級依存を持たない)。
+    // AI 推論を実際に配線する際は、その依存をここへ加える。
+    exclude: []
   },
 
   // ----- Worker設定 -----

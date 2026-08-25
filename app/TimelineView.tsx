@@ -257,6 +257,7 @@ const ClipView: React.FC<ClipViewProps> = React.memo(({
 
   return (
     <div
+      data-testid="timeline-clip"
       style={{
         position: 'absolute',
         left,
@@ -456,6 +457,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     >
       {/* Ruler */}
       <div
+        data-testid="timeline-ruler"
         style={{ position: 'sticky', top: 0, zIndex: 10, marginLeft: HEADER_W }}
         onClick={handleRulerClick}
       >
@@ -509,6 +511,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
 
         {/* Playhead */}
         <div
+          data-testid="playhead"
           style={{
             position: 'absolute',
             left: playhead * pxPerSecond,

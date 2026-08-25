@@ -681,7 +681,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
               <span style={ds.text('title')}>{t('media.title')}</span>
               <button onClick={() => setSidebarOpen(false)} aria-label={t('media.sidebarClose')} style={ds.button('ghost')}>◁</button>
             </div>
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <div data-testid="media-browser" style={{ flex: 1, overflow: 'hidden' }}>
               <MediaBrowser
                 items={mediaItems}
                 selectedId={selectedMediaId}
@@ -697,7 +697,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
         <DropZone onFilesDropped={(files) => { handleImport(files).catch(() => undefined); }}>
           <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* プレビュー */}
-          <div style={{
+          <div data-testid="preview" style={{
             flex: '0 0 40%', maxHeight: '45%', background: color.surface0,
             display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
           }}>
@@ -718,7 +718,7 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
           </div>
 
           {/* タイムライン */}
-          <div style={{
+          <div data-testid="timeline" style={{
             flex: 1, background: color.surface2,
             borderTop: `1px solid ${color.border}`, position: 'relative', overflow: 'hidden',
           }}>

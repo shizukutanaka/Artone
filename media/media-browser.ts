@@ -24,6 +24,29 @@ const METADATA_TIMEOUT_MS = 30_000;
 // Types
 // ============================================================
 
+/**
+ * 復元に必要な最小情報 (`project/project-manager.ts` の `StoredMedia` と構造的に
+ * 一致する)。media/ が project/ へ依存しないよう、構造型として受ける。
+ */
+export interface RestorableMedia {
+  id: string;
+  name: string;
+  type: MediaType;
+  blob: Blob;
+  meta?: {
+    duration?: number;
+    width?: number;
+    height?: number;
+    fps?: number;
+    rotation?: number;
+    codec?: string;
+    sampleRate?: number;
+    channels?: number;
+    thumbnail?: string;
+  };
+  savedAt?: number;
+}
+
 export interface MediaItem {
   id: string;
   name: string;
@@ -253,6 +276,66 @@ export class MediaBrowser {
       URL.revokeObjectURL(url);
       throw e;
     }
+  }
+
+  // ============================================================
+  // Restore (persisted media)
+  // ============================================================
+
+  /**
+   * 保存済み素材から**取り込み時の ID を保ったまま**ライブラリを復元する。
+   *
+   * `importFiles()` を使い回さないのは、あれが ID を新規採番しメタデータを
+   * 再抽出するため。ID が変わるとクラッシュ復旧で戻したタイムラインのクリップが
+   * 指す `mediaId` と一致せず、**復元したのに素材が見つからない**という結果になる。
+   * 抽出済みメタデータとサムネイルも保存されたものをそのまま使う (再抽出は高価で、
+   * かつ結果が変われば同じ素材が別物として扱われてしまう)。
+   *
+   * 既にライブラリにある ID は上書きしない (取り込み済みの実体を優先する)。
+   *
+   * @param records 保存済み素材 (project の media ストア由来)。
+   * @returns 実際に復元した件数。
+   */
+  restoreItems(records: ReadonlyArray<RestorableMedia>): number {
+    let restored = 0;
+    for (const record of records) {
+      if (!record?.id || !record.blob) continue;
+      if (this.items.has(record.id)) continue;
+
+      // 保存されているのは Blob なので、File として扱えるよう名前を復元する。
+      const file = record.blob instanceof File
+        ? record.blob
+        : new File([record.blob], record.name, { type: record.blob.type });
+      const meta = record.meta ?? {};
+      const item: MediaItem = {
+        id: record.id,
+        name: record.name,
+        type: record.type,
+        file,
+        url: URL.createObjectURL(file),
+        thumbnail: meta.thumbnail ?? '',
+        width: meta.width,
+        height: meta.height,
+        fps: meta.fps,
+        rotation: meta.rotation,
+        codec: meta.codec,
+        sampleRate: meta.sampleRate,
+        channels: meta.channels,
+        duration: meta.duration ?? 0,
+        size: file.size,
+        created: file.lastModified,
+        imported: record.savedAt ?? Date.now(),
+        tags: [],
+        rating: 0,
+        favorite: false,
+        usageCount: 0,
+      };
+      this.items.set(item.id, item);
+      if (item.thumbnail) this.thumbnailCache.set(item.id, item.thumbnail);
+      restored++;
+    }
+    if (restored > 0) this.notify();
+    return restored;
   }
 
   // ============================================================

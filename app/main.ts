@@ -29,7 +29,7 @@ import { decideExportSource, explainExportSourceFailure } from '../export/export
 import { AIEffectsEngine } from '../ai/ai-effects-engine';
 import { PluginManager } from '../plugins/plugin-manager';
 import { ProjectManager } from '../project/project-manager';
-import { MediaBrowser } from '../media/media-browser';
+import { MediaBrowser, type MediaItem } from '../media/media-browser';
 import { CollaborationEngine } from '../collab/collaboration-engine';
 // Session 56: 30%改善モジュール
 import { HistoryManager } from '../undo/history-manager';
@@ -221,6 +221,9 @@ export class ArtoneApp {
 
     // Initialize engines (部分失敗でも続行 — エディタは開ける)
     try { await this.project.init(); } catch (e) { errors.push({ module: 'project', error: e }); }
+    // 素材の復元はプロジェクト DB を開いた後。復旧したタイムラインが参照する
+    // 素材をライブラリへ戻す (失敗しても編集は開始できる)。
+    try { await this.restorePersistedMedia(); } catch (e) { errors.push({ module: 'media-restore', error: e }); }
     try { await this.audio.init(); } catch (e) { errors.push({ module: 'audio', error: e }); }
 
     // Initialize GPU profiling (オプショナル — WebGPU バックエンド時のみ)
@@ -657,11 +660,61 @@ export class ArtoneApp {
     // 判定を取り込み後に行うのは、既に抽出済みのメタデータを再利用してコンテナの
     // 二重パースを避けるため (この判定結果は現状ログ専用で、取り込み処理を
     // 分岐させていないため順序を入れ替えても挙動は変わらない)。
+    // 素材の実体を IndexedDB へ残す。これが無いとリロードで blob URL が無効になり、
+    // クラッシュ復旧でタイムラインが戻っても全クリップが「存在しない素材」を指す。
+    // 保存に失敗しても取り込み自体は成立させる (編集は続けられる)。
+    await this.persistImportedMedia(imported[0], file);
+
     const routingCodec = resolveRoutingCodec(imported[0]?.codec, file.name);
     const plan = await planFileProcessing(file.name, routingCodec);
     if (plan.route === 'ffmpeg-transcode') {
       log.info(`Import: ${file.name} → FFmpeg WASM transcode`, { reason: plan.reason });
     }
+  }
+
+  /**
+   * 取り込んだ素材の実体を保存する (best-effort)。
+   *
+   * 保存できなくても取り込みは成功扱いにする — ストレージ枯渇や権限で保存に
+   * 失敗しただけで編集を始められないのは過剰。失敗は警告として残す。
+   */
+  private async persistImportedMedia(item: MediaItem | undefined, file: File): Promise<void> {
+    if (!item) return;
+    try {
+      await this.project.saveMediaBlob({
+        id: item.id,
+        name: item.name,
+        type: item.type as 'video' | 'audio' | 'image',
+        blob: file,
+        meta: {
+          duration: item.duration,
+          width: item.width,
+          height: item.height,
+          fps: item.fps,
+          rotation: item.rotation,
+          codec: item.codec,
+          sampleRate: item.sampleRate,
+          channels: item.channels,
+          thumbnail: item.thumbnail,
+        },
+      });
+    } catch (e) {
+      log.warn('Import: failed to persist media blob (editing continues)', e);
+    }
+  }
+
+  /**
+   * 保存済み素材をライブラリへ戻す (起動時)。
+   *
+   * **取り込み時の ID を保ったまま**復元することが要点で、ID が変わると
+   * 復旧したタイムラインのクリップが指す `mediaId` と一致せず、素材があるのに
+   * 「見つからない」状態になる。
+   */
+  private async restorePersistedMedia(): Promise<void> {
+    const records = await this.project.listMediaBlobs();
+    if (records.length === 0) return;
+    const restored = this.media.restoreItems?.(records) ?? 0;
+    if (restored > 0) log.info(`Restored ${restored} media item(s) from storage`);
   }
 
   async exportProject(preset?: string): Promise<void> {

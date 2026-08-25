@@ -52,6 +52,24 @@ export interface ClipTransform {
   opacity: number;
 }
 
+/**
+ * Merge `patch` onto `current`, ignoring absent and **non-finite** values and
+ * clamping `opacity` to its定義域 [0, 1].
+ *
+ * NaN / Infinity を弾くのは、Inspector の数値入力が編集途中に NaN を出しうる
+ * ためで、そのまま格納するとレンダリングと保存の双方が壊れる。純関数として
+ * 切り出してあるのは、ミューテータとコマンド生成の**両方が同じ正規化を通る**
+ * ことを保証するため (片方だけ通すと「変化なし」判定が実際の結果とずれる)。
+ */
+export function mergeTransform(current: ClipTransform, patch: Partial<ClipTransform>): ClipTransform {
+  const next = { ...current };
+  for (const [key, value] of Object.entries(patch) as [keyof ClipTransform, number | undefined][]) {
+    if (value === undefined || !Number.isFinite(value)) continue;
+    next[key] = key === 'opacity' ? Math.min(1, Math.max(0, value)) : value;
+  }
+  return next;
+}
+
 export interface Track {
   id: string;
   name: string;
@@ -724,6 +742,43 @@ export class MagneticTimeline {
       this.trimClipEnd(clipId, newStart + newDuration);
       this.endBatch();
     });
+  }
+
+  /**
+   * Set part or all of `clipId`'s transform (position / scale / rotation /
+   * opacity). Values not present in `patch` are left untouched.
+   *
+   * 非有限値 (NaN / Infinity) は**無視**する — Inspector の数値入力は途中状態で
+   * NaN を出しうるため、そのまま格納するとレンダリング側が壊れる。opacity は
+   * 定義域 [0, 1] へクランプする。
+   *
+   * No-ops when the clip doesn't exist or is locked.
+   */
+  setClipTransform(clipId: string, patch: Partial<ClipTransform>): void {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return;
+    clip.transform = mergeTransform(clip.transform, patch);
+    this.notify();
+  }
+
+  /**
+   * Build an **undoable** command that applies `patch` to `clipId`'s transform
+   * (the Inspector's position / scale / rotation / opacity edits).
+   *
+   * これが無かった間、Inspector の変形・不透明度編集は**エンジンへ一切書かれず**、
+   * クリップを選び直すと初期値へ戻っていた (履歴にもプロジェクト保存にも残らない)。
+   *
+   * Returns null if the clip doesn't exist, is locked, or the patch changes
+   * nothing (avoids pushing empty entries onto the history stack).
+   */
+  setClipTransformCommand(clipId: string, patch: Partial<ClipTransform>): Command | null {
+    const clip = this.state.clips.get(clipId);
+    if (!clip || clip.locked) return null;
+    const next = mergeTransform(clip.transform, patch);
+    const keys = Object.keys(next) as (keyof ClipTransform)[];
+    if (keys.every((key) => next[key] === clip.transform[key])) return null;
+    return this.structuralCommand('clip.transform', 'Adjust clip transform',
+      () => this.setClipTransform(clipId, patch));
   }
 
   /**

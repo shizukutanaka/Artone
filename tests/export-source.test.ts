@@ -162,7 +162,7 @@ describe('explainExportSourceFailure', () => {
     expect(msg).toMatch(/import/i); // 次の行動が分かる
   });
 
-  it('names each blocker and says why exporting anyway would be wrong', () => {
+  it('names each blocker and says why copying the source through would be wrong', () => {
     const msg = explainExportSourceFailure({
       kind: 'needs-rendering', blockers: ['transformed', 'multiple-clips'], mediaIds: ['a'],
     });
@@ -171,10 +171,14 @@ describe('explainExportSourceFailure', () => {
     expect(msg).toMatch(/does not match your edit/i);
   });
 
-  it('explains the multi-source case in terms of compositing', () => {
+  it('describes needs-rendering as a route, not a failure', () => {
+    // 連結も合成も実装済みなので「未配線だから出せない」とは言わない
+    // (app/main.ts はこの結果を失敗にせず描画経路へ回す)。
     const msg = explainExportSourceFailure({
       kind: 'needs-rendering', blockers: ['multiple-sources'], mediaIds: ['a', 'b', 'c'],
     });
-    expect(msg).toMatch(/compositing/i);
+    expect(msg).toMatch(/needs rendering/i);
+    expect(msg).not.toMatch(/not wired/i);
+    expect(msg).not.toMatch(/Export failed/i);
   });
 });

@@ -25,7 +25,7 @@
  *
  * # AI generated (reviewed)
  *
- * @version 3.3.0
+ * @version 3.4.0
  */
 
 /** 変形 (エンジンの `ClipTransform` と同形。依存を持たないためここで再宣言)。 */
@@ -147,17 +147,21 @@ export function decideExportSource(
   return { kind: 'ok', mediaId: mediaIds[0], trim: { start: clip.mediaIn, end: clip.mediaOut } };
 }
 
-/** 要因ごとの説明文 (何が起きていて、なぜ今は出せないのか)。 */
+/** 要因ごとの説明文 (素通しでは何が表現できないのか)。 */
 const BLOCKER_TEXT: Record<PassthroughBlocker, string> = {
-  'multiple-sources': 'the timeline mixes several media files (compositing is not wired yet)',
-  'multiple-clips': 'the timeline holds more than one clip (joining clips is not wired yet)',
+  'multiple-sources': 'the timeline mixes several media files',
+  'multiple-clips': 'the timeline holds more than one clip',
   transformed: 'the clip has a non-default transform (position / scale / rotation / opacity)',
   offset: 'the clip does not start at the beginning of the timeline',
 };
 
 /**
- * 決定結果を、ユーザーに出す説明文へ変換する (失敗時のみ)。
- * 何が起きていて次に何をすればよいかが分かる文言にする。
+ * 決定結果を説明文へ変換する。
+ *
+ * `empty` だけが**失敗**で、それ以外は「素通しでは足りないので組み立てが要る」
+ * という**経路の説明**である (`app/main.ts` は後者を失敗にせず
+ * `export/timeline-render.ts` へ回す)。組み立て経路を持たない呼び出し側が
+ * 理由を伝えるためにここに残している。
  */
 export function explainExportSourceFailure(
   decision: Exclude<ExportSourceDecision, { kind: 'ok' }>
@@ -167,8 +171,7 @@ export function explainExportSourceFailure(
   }
   const reasons = decision.blockers.map((b) => BLOCKER_TEXT[b]).join('; ');
   return (
-    `Export failed — this edit cannot be exported without rendering: ${reasons}. ` +
-    'Exporting anyway would produce a file that does not match your edit. ' +
-    'Export a timeline with a single clip, or wait for rendered export.'
+    `This edit needs rendering rather than a plain container conversion: ${reasons}. `
+    + 'Copying the source through would produce a file that does not match your edit.'
   );
 }

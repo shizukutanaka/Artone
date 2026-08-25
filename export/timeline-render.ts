@@ -19,11 +19,14 @@
  * **出力の各フレームは要求時刻ちょうどのソースフレーム**であり、`<video>` の
  * seek に頼る方式のような取りこぼしは原理的に起きない。
  *
- * ## 音声を持つ素材は受け付けない
- * 本モジュールは映像のみを組み立てる。音声付き素材を黙って映像だけで書き出すと
- * **ユーザーの音が消えたファイルが出る** — `export/CLAUDE.md`「データ損失は
- * 致命的」に反するため、音声トラックを持つ素材は明示的に失敗させる。
- * 音声の連結・ミックスは別途配線する。
+ * ## 音声
+ * 音声も同じタイムライン構造で組み立てる。素材の復号と**サンプリングレート・
+ * チャンネル数の変換**は `OfflineAudioContext` に任せる — 自前のリサンプラを
+ * 書くより正確で、素材ごとにレートが違っても揃う。各クリップを開始位置へ
+ * スケジュールして一度にレンダリングするため、空白は**無音**として自然に埋まる。
+ *
+ * 音声を持たない素材だけのタイムラインには音声トラックを作らない (無音トラックを
+ * 足すと容器が無駄に大きくなり、再生側の挙動も変わるため)。
  *
  * ## 検証
  * WebCodecs を要するため jsdom では検証できない。実ブラウザで検証している
@@ -38,6 +41,7 @@ import {
   Input, Output, BufferSource, BufferTarget,
   Mp4OutputFormat, WebMOutputFormat,
   VideoSampleSource, VideoSample, VideoSampleSink,
+  AudioSampleSource, AudioSample,
   MP4, QTFF, MATROSKA, WEBM,
 } from 'mediabunny';
 import type { ExportContainer } from './export-container';
@@ -81,6 +85,12 @@ export interface TimelineRenderOptions {
   bitrate?: number;
   /** 何秒ごとにキーフレームを置くか。既定 2 秒。 */
   keyFrameIntervalSec?: number;
+  /** 出力音声のサンプリングレート。既定 48000。 */
+  audioSampleRate?: number;
+  /** 出力音声のチャンネル数。既定 2。 */
+  audioChannels?: number;
+  /** 出力音声のビットレート。既定 128kbps。 */
+  audioBitrate?: number;
   onProgress?: (progress: number) => void;
 }
 
@@ -91,6 +101,8 @@ export interface TimelineRenderResult {
   frames: number;
   /** 素材が無く黒で埋めたフレーム数 (前方・クリップ間の空白)。 */
   blankFrames: number;
+  /** 音声トラックを書き出したか (素材に音声が1つも無ければ false)。 */
+  hasAudio: boolean;
 }
 
 /** 無変形 (等倍・不透明・無回転・無移動)。 */
@@ -174,11 +186,94 @@ function drawSample(
 }
 
 /**
+ * タイムラインの音声を1本の `AudioBuffer` へまとめる。
+ *
+ * 各クリップを `OfflineAudioContext` 上の開始位置へスケジュールして一度に
+ * レンダリングする。これにより
+ *
+ * - 素材ごとに異なるサンプリングレート/チャンネル数が出力設定へ**変換**される
+ *   (自前のリサンプラより正確で、実装も持たなくて済む)
+ * - クリップ間や前方の**空白は無音**として自然に埋まる
+ * - `mediaIn` からの再生開始と尺の切り出しがそのまま表現できる
+ *
+ * 復号できない素材 (音声トラックが無い、対応外コーデック) は**無音として飛ばす**。
+ * ここで throw すると、映像は問題なく書き出せる編集まで落としてしまうため。
+ *
+ * @returns 音声を1つも含まなければ null。
+ */
+async function mixTimelineAudio(
+  ordered: ReadonlyArray<RenderClip>,
+  totalDuration: number,
+  sampleRate: number,
+  channels: number,
+): Promise<AudioBuffer | null> {
+  if (typeof OfflineAudioContext === 'undefined') return null;
+
+  const decoded: Array<{ clip: RenderClip; buffer: AudioBuffer }> = [];
+  // 復号は共有のコンテキストで行う (decodeAudioData 自身が出力レートへ変換する)。
+  const decodeCtx = new OfflineAudioContext(channels, Math.max(1, Math.ceil(sampleRate * 0.1)), sampleRate);
+  for (const clip of ordered) {
+    try {
+      const buffer = await decodeCtx.decodeAudioData(await clip.source.arrayBuffer());
+      if (buffer.length > 0) decoded.push({ clip, buffer });
+    } catch {
+      // 音声を持たない/復号できない素材。無音として扱う。
+    }
+  }
+  if (decoded.length === 0) return null;
+
+  const frames = Math.max(1, Math.ceil(totalDuration * sampleRate));
+  const ctx = new OfflineAudioContext(channels, frames, sampleRate);
+  for (const { clip, buffer } of decoded) {
+    const node = ctx.createBufferSource();
+    node.buffer = buffer;
+    node.connect(ctx.destination);
+    // 素材より長いクリップは素材の終端で自然に途切れる (start の duration が
+    // 素材長を越えても無音が続くだけで、余分な音は出ない)。
+    node.start(clip.startTime, clip.mediaIn, clip.duration);
+  }
+  return ctx.startRendering();
+}
+
+/**
+ * `AudioBuffer` を出力トラックへ書き込む。
+ *
+ * エンコーダの背圧を尊重するため一定長のチャンクに切って渡す。インターリーブ
+ * 形式 (`f32`) にするのは `AudioSample` が平面形式の複数プレーンを受け取らない
+ * ため。
+ */
+async function writeAudio(
+  source: AudioSampleSource,
+  buffer: AudioBuffer,
+  chunkFrames: number,
+): Promise<void> {
+  const { numberOfChannels, sampleRate, length } = buffer;
+  const planes: Float32Array[] = [];
+  for (let c = 0; c < numberOfChannels; c++) planes.push(buffer.getChannelData(c));
+
+  for (let offset = 0; offset < length; offset += chunkFrames) {
+    const count = Math.min(chunkFrames, length - offset);
+    const interleaved = new Float32Array(count * numberOfChannels);
+    for (let c = 0; c < numberOfChannels; c++) {
+      const plane = planes[c];
+      for (let i = 0; i < count; i++) interleaved[i * numberOfChannels + c] = plane[offset + i];
+    }
+    await source.add(new AudioSample({
+      data: interleaved,
+      format: 'f32',
+      numberOfChannels,
+      sampleRate,
+      timestamp: offset / sampleRate,
+    }));
+  }
+}
+
+/**
  * タイムラインを1本の動画ファイルへ書き出す。
  *
  * @param clips 書き出すクリップ (順序は問わない。開始位置で並べ替える)。
  * @param options 出力設定。
- * @throws クリップが空 / 重なりがある / 素材に音声がある / 映像トラックが無い場合。
+ * @throws クリップが空 / 重なりがある / 映像トラックが無い場合。
  */
 export async function renderTimeline(
   clips: ReadonlyArray<RenderClip>,
@@ -203,14 +298,6 @@ export async function renderTimeline(
       source: new BufferSource(await clip.source.arrayBuffer()),
       formats: SUPPORTED_INPUT_FORMATS,
     });
-    const audioTracks = await input.getAudioTracks();
-    if (audioTracks.length > 0) {
-      // 黙って音を捨てない。
-      throw new Error(
-        'Export failed — rendering a multi-clip timeline does not carry audio yet, and exporting '
-        + 'video-only would silently drop the sound. Export a single clip, or wait for audio rendering.'
-      );
-    }
     const track = await input.getPrimaryVideoTrack();
     if (!track) {
       throw new Error('Export failed — a clip on the timeline has no video track to render.');
@@ -229,7 +316,25 @@ export async function renderTimeline(
     keyFrameInterval: options.keyFrameIntervalSec ?? 2,
   });
   output.addVideoTrack(source);
+
+  // 音声は先にまとめてから書き込む (トラックの追加は start() 前でなければならない)。
+  const sampleRate = options.audioSampleRate ?? 48_000;
+  const channels = options.audioChannels ?? 2;
+  const mixed = await mixTimelineAudio(ordered, timelineDuration(ordered), sampleRate, channels);
+  let audioSource: AudioSampleSource | null = null;
+  if (mixed) {
+    audioSource = new AudioSampleSource({
+      codec: options.format === 'webm' ? 'opus' : 'aac',
+      bitrate: options.audioBitrate ?? 128_000,
+    });
+    output.addAudioTrack(audioSource);
+  }
+
   await output.start();
+  if (audioSource && mixed) {
+    // 0.1 秒ずつ。細かすぎるとオーバーヘッド、大きすぎると背圧が効かない。
+    await writeAudio(audioSource, mixed, Math.round(sampleRate * 0.1));
+  }
 
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d');
@@ -296,5 +401,8 @@ export async function renderTimeline(
   if (!buffer) throw new Error('Export failed — the muxer produced no output buffer');
 
   const mimeType = mimeTypeFor(options.format);
-  return { blob: new Blob([buffer], { type: mimeType }), mimeType, frames: written, blankFrames };
+  return {
+    blob: new Blob([buffer], { type: mimeType }),
+    mimeType, frames: written, blankFrames, hasAudio: mixed !== null,
+  };
 }

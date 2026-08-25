@@ -88,6 +88,7 @@ const ItemView: React.FC<{
 
   return (
     <div
+      data-testid="media-item"
       onClick={onSelect}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -285,6 +286,7 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = React.memo(({
       {/* Toolbar */}
       <div style={{ marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button
+          data-testid="import-button"
           onClick={() => fileInputRef.current?.click()}
           style={{
             padding: '6px 12px',
@@ -301,6 +303,7 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = React.memo(({
         </button>
         <input
           ref={fileInputRef}
+          data-testid="file-input"
           type="file"
           multiple
           accept="video/*,audio/*,image/*"

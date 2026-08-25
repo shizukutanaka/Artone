@@ -9,22 +9,23 @@
  * だけを置いた場合でも **A が書き出される** — ユーザーの編集内容と異なるファイルが
  * 無言で出る、という誤出力だった。
  *
- * ## 素通し (passthrough) が成立する条件
- * 現在の書き出しはデコードを伴わない**コンテナ変換**であり、入力ファイルの中身を
- * そのまま書き出す。したがって書き出し結果がユーザーの編集と一致するのは、
- * タイムラインが素材を**丸ごと1回だけ、無加工で**置いている場合に限る。
+ * ## 何を出せて、何を出せないか
+ * 書き出しは1本の入力ファイルを変換して1本の出力を作る。**区間の切り出し
+ * (トリム) は表現できる** — `Conversion` が必要に応じてデコードと再エンコードを
+ * 行い、キーフレーム以外から始まる区間でもフレーム正確に切り出せる (実ブラウザで
+ * 検証済み: `tests/export-trim.spec.ts`)。
  *
- * トリム・変形・複数配置・開始位置のオフセットはいずれもコンテナ変換では
- * 表現できない。それらを無視して素通しすると、**ユーザーが指示した編集とは違う
- * ファイルが無言で出る** — 空ファイルを出すのと同じ「silent data loss」であり、
- * `export/CLAUDE.md`「データ損失は致命的」に反する。よって素通しできない編集は
+ * 一方、**複数クリップの連結・複数素材の合成・変形・前方の空白**はこの経路では
+ * 表現できない。それらを無視して素材を素通しすると、**ユーザーが指示した編集とは
+ * 違うファイルが無言で出る** — 空ファイルを出すのと同じ「silent data loss」であり、
+ * `export/CLAUDE.md`「データ損失は致命的」に反する。よって表現できない編集は
  * **何が妨げているかを名指しして明示的に失敗**させる。
  *
  * 依存ゼロの純関数のみ。
  *
  * # AI generated (reviewed)
  *
- * @version 3.2.0
+ * @version 3.3.0
  */
 
 /** 変形 (エンジンの `ClipTransform` と同形。依存を持たないためここで再宣言)。 */
@@ -51,23 +52,27 @@ export interface ExportClip {
   transform?: Readonly<ExportClipTransform>;
 }
 
-/** 素通しを妨げている要因。 */
+/** 書き出しを妨げている要因。 */
 export type PassthroughBlocker =
   /** 異なる素材が複数ある — 合成が必要。 */
   | 'multiple-sources'
   /** 同じ素材でもクリップが複数ある — 連結が必要。 */
   | 'multiple-clips'
-  /** 素材の一部だけを使っている — 区間の切り出しが必要。 */
-  | 'trimmed'
   /** 位置・拡大・回転・不透明度が既定値でない — 再レンダリングが必要。 */
   | 'transformed'
   /** タイムライン先頭から始まっていない — 前方の空白を作る必要がある。 */
   | 'offset';
 
+/** 書き出す区間 (素材内の秒数)。 */
+export interface ExportTrim {
+  start: number;
+  end: number;
+}
+
 /** 書き出し元の決定結果。 */
 export type ExportSourceDecision =
-  /** 素材を丸ごと素通しできる。 */
-  | { kind: 'ok'; mediaId: string }
+  /** 書き出せる。`trim` があればその区間だけを出す (無ければ素材まるごと)。 */
+  | { kind: 'ok'; mediaId: string; trim?: ExportTrim }
   /** タイムラインが空 — 書き出すものが無い。 */
   | { kind: 'empty' }
   /** 素通しでは編集を再現できない — 何が妨げているかを列挙する。 */
@@ -90,16 +95,17 @@ function isIdentityTransform(t: Readonly<ExportClipTransform> | undefined): bool
 }
 
 /**
- * タイムライン上のクリップから書き出し元を決める。
+ * タイムライン上のクリップから書き出し元と区間を決める。
  *
- * 素通しできるのは「単一素材・単一クリップ・無トリム・無変形・先頭から」の場合のみ。
- * それ以外は妨げている要因を全て列挙して失敗させる (1つ直せば通る、という誤解を
- * 与えないよう部分的には報告しない)。
+ * 書き出せるのは「単一素材・単一クリップ・無変形・先頭から」の場合で、トリムされて
+ * いれば `trim` に区間を返す。それ以外は妨げている要因を全て列挙して失敗させる
+ * (1つ直せば通る、という誤解を与えないよう部分的には報告しない)。
  *
  * @param clips タイムライン上のクリップ。
  * @param sourceDuration 素材 ID から素材の尺 (秒) を引く関数。末尾のトリムは
  *   クリップ単体からは判別できない (`mediaOut` は常に `mediaIn + duration`) ため、
- *   素材の尺と突き合わせて初めて検出できる。省略時は末尾トリムを検出しない。
+ *   素材の尺と突き合わせて初めて「区間の切り出しが要る」と分かる。省略時は
+ *   先頭のトリムだけを見る。
  */
 export function decideExportSource(
   clips: ReadonlyArray<ExportClip>,
@@ -117,27 +123,28 @@ export function decideExportSource(
   if (placed.length > 1) blockers.push('multiple-clips');
 
   for (const clip of placed) {
-    if (clip.mediaIn > EPSILON_SEC && !blockers.includes('trimmed')) blockers.push('trimmed');
     if (Math.abs(clip.startTime) > EPSILON_SEC && !blockers.includes('offset')) blockers.push('offset');
     if (!isIdentityTransform(clip.transform) && !blockers.includes('transformed')) {
       blockers.push('transformed');
     }
-    const full = sourceDuration?.(clip.mediaId);
-    if (full !== undefined && Number.isFinite(full)
-      && full - clip.duration > EPSILON_SEC && !blockers.includes('trimmed')) {
-      blockers.push('trimmed');
-    }
   }
 
   if (blockers.length > 0) return { kind: 'needs-rendering', blockers, mediaIds };
-  return { kind: 'ok', mediaId: mediaIds[0] };
+
+  const clip = placed[0];
+  const full = sourceDuration?.(clip.mediaId);
+  const tailTrimmed = full !== undefined && Number.isFinite(full) && full - clip.mediaOut > EPSILON_SEC;
+  const headTrimmed = clip.mediaIn > EPSILON_SEC;
+  // 素材を使い切っているなら区間指定を付けない — 不要にデコード経路へ入れると
+  // 遅くなるうえ、対応外コーデックで失敗しうる (単なる容器変換なら通る)。
+  if (!headTrimmed && !tailTrimmed) return { kind: 'ok', mediaId: mediaIds[0] };
+  return { kind: 'ok', mediaId: mediaIds[0], trim: { start: clip.mediaIn, end: clip.mediaOut } };
 }
 
 /** 要因ごとの説明文 (何が起きていて、なぜ今は出せないのか)。 */
 const BLOCKER_TEXT: Record<PassthroughBlocker, string> = {
   'multiple-sources': 'the timeline mixes several media files (compositing is not wired yet)',
   'multiple-clips': 'the timeline holds more than one clip (joining clips is not wired yet)',
-  trimmed: 'the clip is trimmed — exporting the whole source would include footage you cut',
   transformed: 'the clip has a non-default transform (position / scale / rotation / opacity)',
   offset: 'the clip does not start at the beginning of the timeline',
 };
@@ -156,6 +163,6 @@ export function explainExportSourceFailure(
   return (
     `Export failed — this edit cannot be exported without rendering: ${reasons}. ` +
     'Exporting anyway would produce a file that does not match your edit. ' +
-    'Export a timeline with a single untrimmed clip, or wait for rendered export.'
+    'Export a timeline with a single clip, or wait for rendered export.'
   );
 }

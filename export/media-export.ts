@@ -15,12 +15,15 @@
  * で変換する。デコード→再エンコードを伴わない transmux ならフレームは一切
  * 再構成されないため、**原理的にフレーム正確**である。
  *
- * ## 区間書き出し (trim) を今は持たない理由
- * Mediabunny の `trim` はキーフレーム以外から始まる区間で**デコードを伴う**ため、
- * WebCodecs 非対応環境では `isValid === false` (`undecodable_source_codec`) になる。
- * 本リポジトリのテストは jsdom (WebCodecs 無し) で走るため**検証できない**。
- * 検証できないコードは出さない方針に従い、まずは全体書き出しに絞る。
- * 区間書き出しは実ブラウザでの検証手段が用意できた段階で追加する。
+ * ## 区間書き出し (trim) について
+ * `trim` を渡すと素材の一部だけを書き出す。キーフレーム以外から始まる区間では
+ * Mediabunny が**デコードと再エンコード**を行うため、そこは transmux と違って
+ * WebCodecs が必要になる (非対応環境では `isValid === false` になり、下の検査が
+ * 明示的なエラーへ変換する)。
+ *
+ * jsdom には WebCodecs が無いため単体テストでは検証できないが、**実ブラウザでは
+ * 検証済み**である (`tests/export-trim.spec.ts`: GOP の途中から始まる区間を
+ * 切り出し、フレーム数と先頭タイムスタンプが厳密に一致することを確認)。
  *
  * ## 失敗は必ず表に出す
  * `Conversion` は設定が不正なら `isValid === false` となり、`execute()` は throw
@@ -29,7 +32,7 @@
  *
  * # AI generated (reviewed)
  *
- * @version 3.1.0
+ * @version 3.2.0
  */
 import {
   Input, Output, Conversion, BlobSource, BufferTarget,
@@ -49,6 +52,11 @@ export type { ExportContainer };
 export interface MediaExportOptions {
   /** 出力コンテナ。 */
   format: ExportContainer;
+  /**
+   * 書き出す区間 (素材内の秒数)。省略すると素材全体。
+   * `start < end` でなければ無視する (不正な区間で空ファイルを出さないため)。
+   */
+  trim?: { start: number; end: number };
   /** 進捗コールバック (0..1)。 */
   onProgress?: (progress: number) => void;
 }
@@ -64,6 +72,21 @@ export interface MediaExportResult {
    * 呼び出し側はユーザーへ知らせることが望ましい。
    */
   discardedTracks: Array<{ reason: string }>;
+}
+
+/**
+ * 区間指定を `Conversion.init` のオプションへ変換する。
+ *
+ * 非有限値や `start >= end` は**無視**して素材全体を書き出す — 不正な区間を
+ * そのまま渡すと Mediabunny が throw するか空に近いファイルを出すため、
+ * 「壊れた指定なら全体」という予測可能な振る舞いに倒す。
+ */
+function trimOption(trim: { start: number; end: number } | undefined) {
+  if (!trim) return {};
+  const { start, end } = trim;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return {};
+  if (!(end > start)) return {};
+  return { trim: { start: Math.max(0, start), end } };
 }
 
 /** コンテナ指定から Mediabunny の出力フォーマットを作る。 */
@@ -94,7 +117,7 @@ export async function exportMediaFile(
   const input = new Input({ source: new BlobSource(source), formats: SUPPORTED_INPUT_FORMATS });
   const output = new Output({ format: makeOutputFormat(options.format), target: new BufferTarget() });
 
-  const conversion = await Conversion.init({ input, output });
+  const conversion = await Conversion.init({ input, output, ...trimOption(options.trim) });
 
   if (options.onProgress) {
     const report = options.onProgress;
@@ -109,8 +132,11 @@ export async function exportMediaFile(
   // ここで先に検査して、破棄トラックの理由を添えた実用的なエラーにする。
   if (!conversion.isValid) {
     const reasons = discardedTracks.map((d) => d.reason).join(', ') || 'unknown';
+    // 区間指定はデコードを伴うため、WebCodecs 非対応環境ではここで落ちる。
+    // 何が原因かユーザーに分かるよう、区間指定の有無を添える。
+    const scope = options.trim ? ' (trimmed range requires decoding)' : '';
     throw new Error(
-      `Export failed — the requested output (${options.format}) is not valid for this source. Discarded: ${reasons}`
+      `Export failed — the requested output (${options.format}) is not valid for this source${scope}. Discarded: ${reasons}`
     );
   }
 

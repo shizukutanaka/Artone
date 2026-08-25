@@ -7,6 +7,9 @@ Artone v3 の全変更を記録。
 
 ## [Unreleased]
 
+### Fixed
+- **UI からの編集が履歴に積まれておらず Cmd+Z が一切効かなかったバグを修正 — undo/redo の実体化** (app/timeline)。タイムラインをエンジンへ統合した PR で「Command Pattern の undo/redo が画面上のクリップに効くようになった」と記載したが、**実際には効いていなかった**。`app/shell.tsx` の各ハンドラはエンジンの**直接ミューテータ** (`tl.moveClip` / `tl.trimClipStart` / `tl.trimClipEnd` / `tl.addClip`) を呼んでおり、`*Command()` を作って `history.execute()` に渡す経路を通っていなかったため、**クリップのドラッグ移動・端のリサイズ・Inspector からの編集・素材の取り込みのいずれも履歴に残らず、Cmd+Z で戻せなかった**。`timeline/CLAUDE.md`「クリップ操作は全て Command Pattern (undo/history-manager.ts 経由)」への違反でもある (`app/main.ts` には `const c = tl.xxxCommand(); if (c) this.history.execute(c);` という正しい前例が既にあった)。shell に `runCommand()` ヘルパを追加し、上記4経路を全て Command + `history.execute()` 経由へ変更 — **取り込み自体も undo で取り消せる**ようになった。クリップ選択は構造編集ではないため従来どおり履歴に積まない。**1回のユーザー操作 = 1回の undo** を守るため、2つのトリムから成るリサイズ等を単一の原子コマンドとして `timeline/magnetic-timeline.ts` に追加した (`resizeClipCommand` = 端ドラッグ、`moveResizeClipCommand` = Inspector の開始位置/尺編集)。`beginBatch`/`endBatch` で購読者への通知も1回に畳む。**2つの `*Command()` を前もって構築して繋ぐ方式は採らなかった** — 後段のコマンドが**変更前の状態**に対して検証を行うため、例えば開始位置 10 秒 → 0 秒へ大きく左へ動かす編集で `trimClipEndCommand` が `newEnd=2 <= 10` を不正と見なして null を返し、**正当な操作が無言で無視される** (この罠が実在することもテストで固定)。テスト9件追加 — 実物の `MagneticTimeline` + `HistoryManager` の組み合わせで、直接ミューテータでは `canUndo()` が false のままであること (回帰の核心)、move/取り込みの undo→redo 往復、リサイズが1回の undo で両端とも復元されること、通知が正確に1回であること (原子コマンド契約) を検証。テスト総数 4,776 → 4,785。
+
 ### Added
 - **タイムラインでクリップを選ぶとプレビューがその素材に切り替わるようにした** (app)。プレビューはメディアライブラリの選択にのみ追従しており、**タイムラインのクリップをクリックしても表示が変わらなかった** — 編集対象とプレビューが食い違ったままになる。クリップ選択時にエンジンからそのクリップの `mediaId` を引いてプレビュー対象へ反映する。
 

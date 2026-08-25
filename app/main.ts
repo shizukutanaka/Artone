@@ -745,6 +745,8 @@ export class ArtoneApp {
     const { exportMediaFile } = await import('../export/media-export');
     const result = await exportMediaFile(source.file, {
       format: container,
+      // トリムされたクリップは、その区間だけを書き出す (素材まるごとではなく)。
+      trim: source.trim,
       onProgress: (p) => this.emit?.('exportProgress', { progress: p }),
     });
 
@@ -759,7 +761,7 @@ export class ArtoneApp {
    * 書き出し元のメディアを選ぶ。現状は取り込み済みの先頭 (単一クリップ書き出し)。
    * タイムライン合成が配線されたらここをタイムライン参照へ差し替える。
    */
-  private exportSourceMedia(): { file: File | null; name: string } | undefined {
+  private exportSourceMedia(): { file: File | null; name: string; trim?: { start: number; end: number } } | undefined {
     // 書き出しは**タイムラインの内容**を反映しなければならない。以前はメディア
     // ライブラリの先頭を無条件に選んでおり、素材 A を取り込んだ後 B だけを
     // タイムラインに置いても A が書き出される誤出力になっていた。
@@ -780,7 +782,7 @@ export class ArtoneApp {
         `Export failed — the timeline references media "${decision.mediaId}" that is no longer in the library.`
       );
     }
-    return { file: item.file, name: item.name };
+    return { file: item.file, name: item.name, trim: decision.trim };
   }
 
   // ============================================================

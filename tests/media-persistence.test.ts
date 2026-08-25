@@ -23,8 +23,20 @@ import { ProjectManager } from '../project/project-manager';
 import { MediaBrowser } from '../media/media-browser';
 import type { RestorableMedia } from '../media/media-browser';
 
-/** 保存対象の素材レコードを作る。 */
-function record(id: string, name = 'clip.mp4'): Omit<RestorableMedia, 'savedAt'> & { blob: Blob } {
+/**
+ * 保存対象の素材レコードを作る。
+ *
+ * 戻り型は `saveMediaBlob` が要求する形 (`meta.duration` 必須) に合わせる。
+ * `RestorableMedia` は復元側の受け口として meta を任意にしているため、そちらを
+ * そのまま戻り型にすると保存側の引数として渡せない。
+ */
+function record(id: string, name = 'clip.mp4'): {
+  id: string;
+  name: string;
+  type: 'video';
+  blob: Blob;
+  meta: { duration: number; width: number; height: number; fps: number; rotation: number; codec: string; thumbnail: string };
+} {
   return {
     id,
     name,

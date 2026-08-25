@@ -1,9 +1,9 @@
 /**
  * Tests for export/export-source.ts
  *
- * 「何を書き出すか」の決定。書き出しはデコードを伴わない**コンテナ変換**であり、
- * 入力ファイルの中身をそのまま出す。したがって素通しが編集と一致するのは、
- * 素材を丸ごと1回だけ無加工で置いた場合に限る。
+ * 「何を、どの区間で書き出すか」の決定。区間の切り出し (トリム) は
+ * `Conversion` が表現できるが、複数クリップの連結・合成・変形・前方の空白は
+ * できない — それらを無視して素材を素通しすると、編集と違うファイルが黙って出る。
  *
  * ## このテストが固定する2つの誤出力
  * 1. タイムラインがエンジンへ統合される前は「最初に取り込んだ映像」を無条件に
@@ -58,23 +58,32 @@ describe('decideExportSource', () => {
 // ============================================================
 
 describe('decideExportSource — refuses to misrepresent the edit', () => {
-  it('REGRESSION: a head-trimmed clip no longer exports the whole source', () => {
-    // 先頭 3 秒を切った状態。素通しすると**切ったはずの 3 秒が入ったファイル**が出る。
+  it('REGRESSION: a head-trimmed clip exports the trimmed range, not the whole source', () => {
+    // 先頭 3 秒を切った状態。素材を素通しすると**切ったはずの 3 秒が入ったファイル**が出る。
     const trimmed: ExportClip = { mediaId: 'a', startTime: 0, duration: 7, mediaIn: 3, mediaOut: 10 };
-    const decision = decideExportSource([trimmed]);
-    expect(decision.kind).toBe('needs-rendering');
-    if (decision.kind === 'needs-rendering') expect(decision.blockers).toContain('trimmed');
+    expect(decideExportSource([trimmed])).toEqual({
+      kind: 'ok', mediaId: 'a', trim: { start: 3, end: 10 },
+    });
   });
 
   it('REGRESSION: a tail-trimmed clip is caught by comparing against the source duration', () => {
     // 末尾トリムはクリップ単体からは判別できない (mediaOut は常に mediaIn + duration)。
     const tailTrimmed = wholeClip('a', 7); // 素材は 10 秒、使っているのは 7 秒
-    expect(decideExportSource([tailTrimmed], () => 10).kind).toBe('needs-rendering');
-    // 使い切っているなら素通しできる。
+    expect(decideExportSource([tailTrimmed], () => 10)).toEqual({
+      kind: 'ok', mediaId: 'a', trim: { start: 0, end: 7 },
+    });
+    // 使い切っているなら区間指定を付けない (不要なデコード経路を避ける)。
     expect(decideExportSource([tailTrimmed], () => 7)).toEqual({ kind: 'ok', mediaId: 'a' });
-    // 素材の尺を渡さないと検出できない — 既知の限界であり、呼び出し側
+    // 素材の尺を渡さないと末尾トリムは検出できない — 既知の限界であり、呼び出し側
     // (app/main.ts) が必ずライブラリの尺を渡すことで成立している。
     expect(decideExportSource([tailTrimmed])).toEqual({ kind: 'ok', mediaId: 'a' });
+  });
+
+  it('carries both edges of a range trim', () => {
+    const both: ExportClip = { mediaId: 'a', startTime: 0, duration: 4, mediaIn: 2, mediaOut: 6 };
+    expect(decideExportSource([both], () => 10)).toEqual({
+      kind: 'ok', mediaId: 'a', trim: { start: 2, end: 6 },
+    });
   });
 
   it('REGRESSION: the same source placed twice is no longer treated as a single passthrough', () => {
@@ -126,7 +135,8 @@ describe('decideExportSource — refuses to misrepresent the edit', () => {
     );
     expect(decision.kind).toBe('needs-rendering');
     if (decision.kind === 'needs-rendering') {
-      expect(new Set(decision.blockers)).toEqual(new Set(['trimmed', 'offset', 'transformed']));
+      // トリムは表現できるので妨げにならない。残りの2つだけが妨げ。
+      expect(new Set(decision.blockers)).toEqual(new Set(['offset', 'transformed']));
     }
   });
 
@@ -154,9 +164,9 @@ describe('explainExportSourceFailure', () => {
 
   it('names each blocker and says why exporting anyway would be wrong', () => {
     const msg = explainExportSourceFailure({
-      kind: 'needs-rendering', blockers: ['trimmed', 'multiple-clips'], mediaIds: ['a'],
+      kind: 'needs-rendering', blockers: ['transformed', 'multiple-clips'], mediaIds: ['a'],
     });
-    expect(msg).toMatch(/trimmed/i);
+    expect(msg).toMatch(/transform/i);
     expect(msg).toMatch(/more than one clip/i);
     expect(msg).toMatch(/does not match your edit/i);
   });

@@ -13,6 +13,7 @@
  * ## 方式
  * 出力フレームの時刻を先に決め、その時刻ごとに「どのクリップの、素材内の
  * どの時刻か」を引いてデコードし、キャンバスへ描いて再エンコードする。
+ * 同時刻に複数のクリップがあれば `layer` の奥から手前へ**重ねて描く** (合成)。
  * デコードは `samplesAtTimestamps()` を使う — 要求時刻が単調増加なら各パケットを
  * 高々1回しかデコードしないため、フレーム単位に seek するより桁違いに速い。
  *
@@ -35,7 +36,7 @@
  *
  * # AI generated (reviewed)
  *
- * @version 3.3.0
+ * @version 3.4.0
  */
 import {
   Input, Output, BufferSource, BufferTarget,
@@ -73,6 +74,13 @@ export interface RenderClip {
   mediaIn: number;
   /** 省略時は無変形。 */
   transform?: Readonly<RenderTransform>;
+  /**
+   * 重ね順。大きいほど手前。省略時は 0。
+   *
+   * 同時刻に複数のクリップがある (重なっている) 場合の描画順を決める。
+   * 呼び出し側はトラックの並びをそのまま渡せばよい。
+   */
+  layer?: number;
 }
 
 export interface TimelineRenderOptions {
@@ -119,41 +127,36 @@ function defaultCodecFor(format: ExportContainer): 'vp9' | 'avc' {
 }
 
 /**
- * クリップを開始位置で並べ、重なりが無いことを確かめる。
+ * クリップを**描画順**に並べる — `layer` 昇順、同レイヤーなら開始位置順。
  *
- * 重なりは**合成** (どちらを上に、どう混ぜるか) の話であり、本モジュールが
- * 扱う「順に並べる」操作では表現できない。黙って片方を捨てるのではなく失敗させる。
- *
- * @throws 重なりがある場合。
+ * 重なったクリップは奥から手前へこの順で重ねて描く。並びが安定していないと、
+ * 同じ編集が実行のたびに違う見た目で書き出されうる (Map の反復順に依存する等)
+ * ため、比較は全項目で決定的にする。
  */
 export function orderClips(clips: ReadonlyArray<RenderClip>): RenderClip[] {
-  const sorted = [...clips].sort((a, b) => a.startTime - b.startTime);
-  for (let i = 1; i < sorted.length; i++) {
-    const prevEnd = sorted[i - 1].startTime + sorted[i - 1].duration;
-    if (sorted[i].startTime < prevEnd - 1e-6) {
-      throw new Error(
-        'Export failed — clips overlap on the timeline and compositing is not wired yet. '
-        + 'Move the clips apart so they play one after another.'
-      );
-    }
-  }
-  return sorted;
+  return [...clips].sort((a, b) => {
+    const layerDiff = (a.layer ?? 0) - (b.layer ?? 0);
+    if (layerDiff !== 0) return layerDiff;
+    return a.startTime - b.startTime;
+  });
 }
 
 /**
- * 出力フレーム番号 `frame` を担当するクリップを返す (無ければ null = 黒フレーム)。
+ * 出力フレーム番号 `frame` に**映るクリップを奥から手前の順**で返す
+ * (空なら黒フレーム)。
  *
  * 境界は [startTime, startTime + duration) の半開区間。終端を含めると次のクリップの
  * 先頭フレームと重複して1フレーム余る。
+ *
+ * @param ordered `orderClips()` で描画順に並べたクリップ。
  */
-export function clipAtFrame(
+export function clipsAtFrame(
   ordered: ReadonlyArray<RenderClip>, frame: number, fps: number,
-): RenderClip | null {
+): RenderClip[] {
   const t = frame / fps;
-  for (const clip of ordered) {
-    if (t >= clip.startTime - 1e-9 && t < clip.startTime + clip.duration - 1e-9) return clip;
-  }
-  return null;
+  return ordered.filter(
+    (clip) => t >= clip.startTime - 1e-9 && t < clip.startTime + clip.duration - 1e-9,
+  );
 }
 
 /** タイムライン全体の尺 (秒)。 */
@@ -273,7 +276,7 @@ async function writeAudio(
  *
  * @param clips 書き出すクリップ (順序は問わない。開始位置で並べ替える)。
  * @param options 出力設定。
- * @throws クリップが空 / 重なりがある / 映像トラックが無い場合。
+ * @throws クリップが空 / 映像トラックが無い場合。
  */
 export async function renderTimeline(
   clips: ReadonlyArray<RenderClip>,
@@ -344,56 +347,52 @@ export async function renderTimeline(
   let written = 0;
   let blankFrames = 0;
 
-  // クリップごとに連続した出力フレーム区間を処理する。区間内では要求時刻が
-  // 単調増加するため、samplesAtTimestamps() が各パケットを高々1回だけデコードする。
-  let frame = 0;
-  while (frame < totalFrames) {
-    const clip = clipAtFrame(ordered, frame, fps);
-    if (!clip) {
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, width, height);
-      await source.add(new VideoSample(canvas, {
-        timestamp: frame * frameDuration, duration: frameDuration,
-      }));
-      written++;
-      blankFrames++;
-      frame++;
-      options.onProgress?.(written / totalFrames);
-      continue;
+  // クリップごとに「自分が映る出力フレーム」と、その時刻に対応する素材内時刻を
+  // 先に決め、**クリップ単位の反復子**を1本ずつ用意する。要求時刻が単調増加なので
+  // `samplesAtTimestamps()` は各パケットを高々1回しかデコードしない。
+  // 反復子を歩調を合わせて進めることで、重なった複数クリップを同じフレームへ
+  // 重ねて描いても、この性質が保たれる。
+  const iterators = new Map<RenderClip, AsyncIterator<VideoSample | null>>();
+  for (const clip of ordered) {
+    const timestamps: number[] = [];
+    for (let f = 0; f < totalFrames; f++) {
+      const t = f / fps;
+      if (t >= clip.startTime - 1e-9 && t < clip.startTime + clip.duration - 1e-9) {
+        timestamps.push(clip.mediaIn + (t - clip.startTime));
+      }
     }
-
-    // このクリップが担当する出力フレームを一続きに集める。
-    const frames: number[] = [];
-    let cursor = frame;
-    while (cursor < totalFrames && clipAtFrame(ordered, cursor, fps) === clip) {
-      frames.push(cursor);
-      cursor++;
-    }
-    const transform = clip.transform ?? IDENTITY;
-    const timestamps = frames.map((f) => clip.mediaIn + (f / fps - clip.startTime));
     const sink = sinks.get(clip);
     if (!sink) throw new Error('Export failed — internal: missing decoder for a clip.');
+    iterators.set(clip, sink.samplesAtTimestamps(timestamps)[Symbol.asyncIterator]());
+  }
 
-    let index = 0;
-    for await (const sample of sink.samplesAtTimestamps(timestamps)) {
-      const outFrame = frames[index++];
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, width, height);
-      if (sample) {
-        drawSample(ctx, sample, width, height, transform);
-        sample.close();
-      } else {
-        blankFrames++; // 素材側にフレームが無い時刻 (末尾を越えた等)
-      }
-      await source.add(new VideoSample(canvas, {
-        timestamp: outFrame * frameDuration, duration: frameDuration,
-      }));
-      written++;
-      options.onProgress?.(written / totalFrames);
+  for (let frame = 0; frame < totalFrames; frame++) {
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
+
+    const visible = clipsAtFrame(ordered, frame, fps);
+    if (visible.length === 0) blankFrames++;
+
+    // 奥から手前へ重ねる。透明度は変形の opacity がそのまま合成に効く。
+    let drewAnything = false;
+    for (const clip of visible) {
+      const iterator = iterators.get(clip);
+      if (!iterator) continue;
+      const next = await iterator.next();
+      const sample = next.done ? null : next.value;
+      if (!sample) continue; // 素材側にフレームが無い時刻 (末尾を越えた等)
+      drawSample(ctx, sample, width, height, clip.transform ?? IDENTITY);
+      sample.close();
+      drewAnything = true;
     }
-    frame = cursor;
+    if (visible.length > 0 && !drewAnything) blankFrames++;
+
+    await source.add(new VideoSample(canvas, {
+      timestamp: frame * frameDuration, duration: frameDuration,
+    }));
+    written++;
+    options.onProgress?.(written / totalFrames);
   }
 
   await output.finalize();

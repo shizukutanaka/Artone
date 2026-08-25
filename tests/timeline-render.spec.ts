@@ -271,6 +271,105 @@ test.describe('timeline rendering (real WebCodecs)', () => {
     expect(result.durationSec).toBeGreaterThan(1.8);
   });
 
+  test('composites an overlapping clip on top of the one below it', async ({ page }) => {
+    const supported = await page.evaluate(async () => typeof VideoEncoder !== 'undefined');
+    test.skip(!supported, 'WebCodecs unavailable in this browser');
+
+    const result = await page.evaluate(async () => {
+      const { mb: M, renderTimeline } = window as never as Harness;
+      const W = 160, H = 120, FPS = 30;
+
+      /** 単色 `seconds` 秒の WebM (音声なし)。 */
+      async function solid(rgb: [number, number, number], seconds: number): Promise<Blob> {
+        const out = new M.Output({ format: new M.WebMOutputFormat(), target: new M.BufferTarget() });
+        const src = new M.VideoSampleSource({ codec: 'vp9', bitrate: 1_000_000, keyFrameInterval: 1 });
+        out.addVideoTrack(src);
+        await out.start();
+        const canvas = new OffscreenCanvas(W, H);
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+        ctx.fillRect(0, 0, W, H);
+        for (let i = 0; i < Math.round(seconds * FPS); i++) {
+          await src.add(new M.VideoSample(canvas, { timestamp: i / FPS, duration: 1 / FPS }));
+        }
+        await out.finalize();
+        return new Blob([out.target.buffer!], { type: 'video/webm' });
+      }
+
+      const red = await solid([220, 20, 20], 2);
+      const blue = await solid([20, 20, 220], 1);
+
+      /** 出力を復号して中央画素を採る。 */
+      async function sample(blob: Blob, times: number[]) {
+        const back = new M.Input({
+          source: new M.BufferSource(await blob.arrayBuffer()), formats: M.ALL_FORMATS,
+        });
+        const sink = new M.VideoSampleSink((await back.getPrimaryVideoTrack())!);
+        const probe = new OffscreenCanvas(W, H);
+        const pctx = probe.getContext('2d')!;
+        const out: Array<[number, number, number]> = [];
+        for (const t of times) {
+          const frame = await sink.getSample(t);
+          if (!frame) throw new Error(`no frame at ${t}`);
+          pctx.clearRect(0, 0, W, H);
+          frame.draw(pctx, 0, 0, W, H);
+          frame.close();
+          const d = pctx.getImageData(W / 2, H / 2, 1, 1).data;
+          out.push([d[0], d[1], d[2]]);
+        }
+        return out;
+      }
+
+      // 下 (layer 0): 赤 0〜2秒。上 (layer 1): 青 1〜2秒 — 後半だけ重なる。
+      const opaque = await renderTimeline(
+        [
+          { source: blue, startTime: 1, duration: 1, mediaIn: 0, layer: 1 },
+          { source: red, startTime: 0, duration: 2, mediaIn: 0, layer: 0 },
+        ],
+        { width: W, height: H, fps: FPS, format: 'webm', codec: 'vp9', bitrate: 2_000_000 },
+      );
+
+      // 同じ編集で、上のクリップだけ半透明にする。
+      const blended = await renderTimeline(
+        [
+          {
+            source: blue, startTime: 1, duration: 1, mediaIn: 0, layer: 1,
+            transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, opacity: 0.5 },
+          },
+          { source: red, startTime: 0, duration: 2, mediaIn: 0, layer: 0 },
+        ],
+        { width: W, height: H, fps: FPS, format: 'webm', codec: 'vp9', bitrate: 2_000_000 },
+      );
+
+      const [opaqueEarly, opaqueLate] = await sample(opaque.blob, [0.5, 1.5]);
+      const [blendedLate] = await sample(blended.blob, [1.5]);
+      return {
+        frames: opaque.frames,
+        blankFrames: opaque.blankFrames,
+        opaqueEarly, opaqueLate, blendedLate,
+      };
+    });
+
+    // 重なっても尺は伸びない: 2秒 @30fps = 60 フレーム。
+    expect(result.frames).toBe(60);
+    expect(result.blankFrames).toBe(0);
+
+    // 重なっていない区間は下のクリップ (赤) がそのまま見える。
+    expect(result.opaqueEarly[0]).toBeGreaterThan(150);
+    expect(result.opaqueEarly[2]).toBeLessThan(100);
+
+    // 重なっている区間は上のクリップ (青) が勝つ — 描画順が逆なら赤が残って落ちる。
+    expect(result.opaqueLate[2]).toBeGreaterThan(150);
+    expect(result.opaqueLate[0]).toBeLessThan(100);
+
+    // 半透明なら混ざる: 赤でも青でもなく、両方が中程度。
+    const [r, , b] = result.blendedLate;
+    expect(r).toBeGreaterThan(60);
+    expect(r).toBeLessThan(190);
+    expect(b).toBeGreaterThan(60);
+    expect(b).toBeLessThan(190);
+  });
+
   test('omits the audio track entirely when no source has audio', async ({ page }) => {
     const supported = await page.evaluate(async () => typeof VideoEncoder !== 'undefined');
     test.skip(!supported, 'WebCodecs unavailable in this browser');

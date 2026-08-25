@@ -24,7 +24,9 @@ export interface ClipSelection {
   name: string;
   duration: number;
   startTime: number;
-  speed: number;
+  // NOTE: 再生速度はエンジンの Clip モデルに存在しない (mediaIn/mediaOut と
+  //       duration のみ)。書き込み先が無い UI を置くと編集が無言で消えるため、
+  //       速度はタイムリマップ (animation/time-remap) の配線と併せて再導入する。
   opacity: number;
   position: { x: number; y: number };
   scale: number;
@@ -262,14 +264,6 @@ const ClipInspector: React.FC<{ sel: ClipSelection; onChange: (s: ClipSelection)
           min={0}
           step={0.01}
           unit="s"
-        />
-      </Row>
-      <Row label={t('timeline.clip.speed')}>
-        <Slider
-          value={sel.speed}
-          onChange={(v) => onChange({ ...sel, speed: v })}
-          min={0.1}
-          max={4}
         />
       </Row>
     </Section>

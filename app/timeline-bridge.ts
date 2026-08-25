@@ -23,8 +23,11 @@
  *
  * @version 3.1.0
  */
-import type { TimelineState, Clip, Track } from '../timeline/magnetic-timeline';
+import type { TimelineState, Clip, Track, ClipTransform } from '../timeline/magnetic-timeline';
 import type { TimelineClip, TimelineTrack } from './TimelineView';
+// 型のみの import。`.tsx` を指すが TS が完全に消去するため、本モジュールの
+// 「React/DOM 非依存」という性質は保たれる (型を二重定義しないための選択)。
+import type { ClipSelection } from './Inspector';
 import { color } from './design-system';
 
 /**
@@ -167,4 +170,69 @@ export function nextStartOnTrack(state: TimelineState, trackId: string): number 
     end = Math.max(end, clip.startTime + clip.duration);
   }
   return end;
+}
+
+// ============================================================
+// Inspector ↔ エンジンのクリップ
+// ============================================================
+
+/**
+ * エンジンのクリップから Inspector の選択状態を組み立てる。
+ *
+ * ## なぜ必要か
+ * 従来 shell はクリップを**クリックした時点の値をコピー**して React state に持ち、
+ * 変形・不透明度は `opacity: 1` 等の**固定値を捏造**していた。そのため
+ * (1) タイムラインでクリップをドラッグしても Inspector の開始位置が古いまま、
+ * (2) その状態で別の項目を編集すると**古い開始位置が書き戻され、ドラッグが無言で
+ * 取り消される**、(3) undo 後も Inspector が編集後の値を表示し続ける、という
+ * 不整合が起きていた。エンジンから毎回導出することで構造的に解消する。
+ *
+ * `scale` は UI が単一値なのに対しエンジンは `scaleX`/`scaleY` を持つため、
+ * 表示には `scaleX` を使い、書き戻しでは両方へ同じ値を入れる (等倍前提)。
+ *
+ * @returns 該当クリップが無ければ null。
+ */
+export function toClipSelection(state: TimelineState, clipId: string): ClipSelection | null {
+  const clip = state.clips.get(clipId);
+  if (!clip) return null;
+  return {
+    type: 'clip',
+    id: clip.id,
+    name: clip.name,
+    startTime: clip.startTime,
+    duration: clip.duration,
+    position: { x: clip.transform.x, y: clip.transform.y },
+    scale: clip.transform.scaleX,
+    rotation: clip.transform.rotation,
+    opacity: clip.transform.opacity,
+  };
+}
+
+/** Inspector の選択状態をエンジンの変形パッチへ写す (`scale` は XY 双方へ)。 */
+export function toTransformPatch(sel: ClipSelection): Partial<ClipTransform> {
+  return {
+    x: sel.position.x,
+    y: sel.position.y,
+    scaleX: sel.scale,
+    scaleY: sel.scale,
+    rotation: sel.rotation,
+    opacity: sel.opacity,
+  };
+}
+
+/**
+ * Inspector の編集が**尺・位置**を変えたのか**変形**を変えたのかを判定する。
+ *
+ * 両者はエンジン側の別コマンドへ写るため、一度の編集で両方を実行すると
+ * 履歴が1操作あたり2エントリに増える。実際に変わった側だけを選ぶ。
+ *
+ * @param clip 現在のエンジン上のクリップ
+ * @param next Inspector が返してきた編集後の選択状態
+ */
+export function clipEditKind(clip: Clip, next: ClipSelection): 'timing' | 'transform' | 'none' {
+  if (next.startTime !== clip.startTime || next.duration !== clip.duration) return 'timing';
+  const patch = toTransformPatch(next);
+  const keys = Object.keys(patch) as (keyof ClipTransform)[];
+  if (keys.some((key) => patch[key] !== clip.transform[key])) return 'transform';
+  return 'none';
 }

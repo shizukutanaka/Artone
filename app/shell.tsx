@@ -29,6 +29,7 @@ import type { AppConfig } from './main';
 import { PreviewPane } from './PreviewPane';
 import {
   toTimelineClips, toTimelineTracks, buildEngineClip, pickTrackIdForType, nextStartOnTrack,
+  toClipSelection, toTransformPatch, clipEditKind,
 } from './timeline-bridge';
 import type { TimelineState as EngineTimelineState } from '../timeline/magnetic-timeline';
 
@@ -340,6 +341,12 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
     if (!timeline) return;
     const sync = (state: EngineTimelineState) => {
       setTimelineView({ tracks: toTimelineTracks(state), clips: toTimelineClips(state) });
+      // Inspector が表示する値も**エンジンから導出し直す**。クリック時のコピーを
+      // 保持していると、ドラッグ/undo/リップルでクリップが動いても Inspector が
+      // 古い値を表示し続け、次の編集でその古い値が書き戻されてしまう。
+      setSelection((prev) => (prev.type === 'clip'
+        ? (toClipSelection(state, prev.id) ?? { type: 'none' })
+        : prev));
     };
     sync(timeline.getState());
     return timeline.subscribe(sync);
@@ -389,29 +396,27 @@ const EditorUI: React.FC<EditorUIProps> = ({ activeTier, pendingFiles }) => {
       // になり、クリップをクリックしても表示が変わらない。
       const mediaId = tl.getState().clips.get(clipId)?.mediaId;
       if (mediaId) setSelectedMediaId(mediaId);
+      // Inspector の表示対象を切り替える。値はエンジンから導出する (捏造しない) —
+      // 以降の更新は購読側 (`sync`) が同じ関数で導出し直す。
+      setSelection(toClipSelection(tl.getState(), clipId) ?? { type: 'none' });
     });
-    const clip = timelineClips.find((c) => c.id === clipId);
-    if (!clip) return;
-    setSelection({
-      type: 'clip',
-      id: clip.id,
-      name: clip.name,
-      duration: clip.duration,
-      startTime: clip.start,
-      speed: 1,
-      opacity: 1,
-      position: { x: 0, y: 0 },
-      scale: 1,
-      rotation: 0,
-    });
-  }, [withTimeline, timelineClips]);
+  }, [withTimeline]);
 
   // Inspector の編集をエンジンのクリップへ反映する。従来はローカル配列だけを
   // 書き換えていたため、エンジン側 (undo/クラッシュ復旧) には残らなかった。
   const handleSelectionChange = useCallback((next: Selection) => {
-    setSelection(next);
+    setSelection(next); // 入力中の即時反映。確定値はエンジン通知で上書きされる。
     if (next.type !== 'clip') return;
-    runCommand((tl) => tl.moveResizeClipCommand(next.id, next.startTime, next.duration));
+    // 現在値は**エンジンから読む** (React state は入力中の途中値を持つため)。
+    // 尺・位置と変形は別コマンドなので、実際に変わった側だけを1エントリで積む。
+    runCommand((tl) => {
+      const clip = tl.getState().clips.get(next.id);
+      if (!clip) return null;
+      const kind = clipEditKind(clip, next);
+      if (kind === 'timing') return tl.moveResizeClipCommand(next.id, next.startTime, next.duration);
+      if (kind === 'transform') return tl.setClipTransformCommand(next.id, toTransformPatch(next));
+      return null;
+    });
   }, [runCommand]);
 
   /** Probe a video/audio File for its duration via a temporary media element. */

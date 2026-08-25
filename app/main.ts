@@ -25,6 +25,7 @@ import { VideoPipeline } from '../core/webcodecs-pipeline';
 import { planFileProcessing, resolveRoutingCodec } from '../core/codec-router';
 import { ExportEngine } from '../export/export-engine';
 import { containerForPreset } from '../export/export-container';
+import { toTimelineTracks } from './timeline-bridge';
 import type { ExportContainer } from '../export/export-container';
 import { decideExportSource, explainExportSourceFailure } from '../export/export-source';
 import type { ExportSourceDecision } from '../export/export-source';
@@ -787,8 +788,16 @@ export class ArtoneApp {
    */
   private async exportRenderedTimeline(config: ExportConfig, container: ExportContainer): Promise<void> {
     const items = this.media.getItems?.() ?? [];
-    const clips = [...this.timeline.getState().clips.values()];
-    const renderClips = clips.map((clip) => {
+    const state = this.timeline.getState();
+
+    // 重ね順はトラックの並びで決める。UI が表示している順 (toTimelineTracks —
+    // 映像が先、次に音声) をそのまま使い、**上に表示されているトラックほど手前**に
+    // なるよう反転する (編集ソフトの慣例)。並び規則を二重に持たないよう、UI と
+    // 同じ関数から引く。
+    const displayed = toTimelineTracks(state);
+    const layerOf = new Map(displayed.map((track, index) => [track.id, displayed.length - 1 - index]));
+
+    const renderClips = [...state.clips.values()].map((clip) => {
       const item = items.find((m) => m.id === clip.mediaId);
       if (!item?.file) {
         throw new Error(
@@ -801,6 +810,7 @@ export class ArtoneApp {
         duration: clip.duration,
         mediaIn: clip.mediaIn,
         transform: clip.transform,
+        layer: layerOf.get(clip.trackId) ?? 0,
       };
     });
 

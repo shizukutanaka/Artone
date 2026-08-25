@@ -711,7 +711,13 @@ export class ArtoneApp {
     // ライブラリの先頭を無条件に選んでおり、素材 A を取り込んだ後 B だけを
     // タイムラインに置いても A が書き出される誤出力になっていた。
     const clips = [...this.timeline.getState().clips.values()];
-    const decision = decideExportSource(clips);
+    // 素材の尺も渡す — 末尾のトリムはクリップ単体からは判別できず (mediaOut は
+    // 常に mediaIn + duration)、素材の尺と突き合わせて初めて検出できる。
+    const items = this.media.getItems?.() ?? [];
+    const decision = decideExportSource(
+      clips,
+      (mediaId) => items.find((m) => m.id === mediaId)?.duration,
+    );
     if (decision.kind !== 'ok') {
       throw new Error(explainExportSourceFailure(decision));
     }

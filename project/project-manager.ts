@@ -111,6 +111,42 @@ export interface MediaReference {
   hash: string;
 }
 
+/**
+ * 取り込んだ素材の**実体**を IndexedDB に保存するためのレコード。
+ *
+ * `MediaReference` がプロジェクト側のメタデータ参照 (`path` はブラウザでは
+ * 意味を持たない) なのに対し、こちらは**リロードを跨いで素材そのものを残す**。
+ * これが無いと、クラッシュ復旧でタイムラインが戻っても全クリップが
+ * 「もう存在しない素材」を指すだけになり、再生も書き出しもできない。
+ *
+ * `blob` を含むため IndexedDB へは構造化複製で保存される (JSON 化しない)。
+ */
+export interface StoredMedia {
+  /** 取り込み時に採番した素材 ID。クリップの `mediaId` と一致する。 */
+  id: string;
+  name: string;
+  type: 'video' | 'audio' | 'image';
+  /** 素材の実体。取り込んだ File をそのまま保持する。 */
+  blob: Blob;
+  /** 再取得せずに済むよう、抽出済みメタデータを添える。 */
+  meta: {
+    duration: number;
+    width?: number;
+    height?: number;
+    fps?: number;
+    rotation?: number;
+    codec?: string;
+    sampleRate?: number;
+    channels?: number;
+    /** data URL のサムネイル (再生成は高価なため保存する)。 */
+    thumbnail?: string;
+  };
+  /** 保存時刻 (ms)。 */
+  savedAt: number;
+  /** 紐づくプロジェクト ID (未保存プロジェクトなら undefined)。 */
+  projectId?: string;
+}
+
 export interface Marker {
   id: string;
   time: number;
@@ -388,6 +424,62 @@ class ProjectDB {
         const versions = request.result as ProjectVersion[];
         resolve([...versions].sort((a, b) => b.timestamp - a.timestamp));
       };
+    });
+  }
+
+  // ============================================================
+  // Media blobs — 取り込んだ素材の実体をリロード後も残す
+  // ============================================================
+
+  /** 素材の実体を保存する (同じ ID なら上書き)。 */
+  async putMedia(record: StoredMedia): Promise<void> {
+    if (!this.db) await this.open();
+
+    return new Promise((resolve, reject) => {
+      const tx = this.requireDB().transaction('media', 'readwrite');
+      tx.objectStore('media').put(record);
+      // 書き込みの受理 (onsuccess) ではなく確定 (oncomplete) を待つ。
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error ?? new Error('putMedia: transaction aborted'));
+    });
+  }
+
+  /** 素材の実体を取り出す (無ければ null)。 */
+  async getMedia(id: string): Promise<StoredMedia | null> {
+    if (!this.db) await this.open();
+
+    return new Promise((resolve, reject) => {
+      const tx = this.requireDB().transaction('media', 'readonly');
+      const request = tx.objectStore('media').get(id);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve((request.result as StoredMedia | undefined) ?? null);
+    });
+  }
+
+  /** 保存済み素材を取り込み順 (古い順) に列挙する。 */
+  async listMedia(): Promise<StoredMedia[]> {
+    if (!this.db) await this.open();
+
+    return new Promise((resolve, reject) => {
+      const tx = this.requireDB().transaction('media', 'readonly');
+      const request = tx.objectStore('media').getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const records = request.result as StoredMedia[];
+        resolve([...records].sort((a, b) => a.savedAt - b.savedAt));
+      };
+    });
+  }
+
+  /** 素材の実体を削除する。 */
+  async deleteMedia(id: string): Promise<void> {
+    if (!this.db) await this.open();
+
+    return new Promise((resolve, reject) => {
+      const tx = this.requireDB().transaction('media', 'readwrite');
+      tx.objectStore('media').delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error ?? new Error('deleteMedia: transaction aborted'));
     });
   }
 }
@@ -691,6 +783,44 @@ export class ProjectManager {
     );
     this.isDirty = true;
     this.notify();
+  }
+
+  // ============================================================
+  // Media Blobs — 素材の実体をリロード後も残す
+  // ============================================================
+
+  /**
+   * 取り込んだ素材の実体を保存する。
+   *
+   * `addMedia()` が保存するのはメタデータ参照だけで、実体 (File) はメモリ上の
+   * blob URL にしか存在しない。リロードするとその URL は無効になり、復元された
+   * タイムラインは**存在しない素材を指すクリップの集まり**になってしまう。
+   * 実体を IndexedDB に置くことで、編集の続きが翌日でも成立する。
+   *
+   * 保存に失敗しても取り込み自体は成立させたいため、呼び出し側が握り潰せるよう
+   * 例外はそのまま伝える (呼び出し側で warn するだけにできる)。
+   */
+  async saveMediaBlob(record: Omit<StoredMedia, 'savedAt' | 'projectId'>): Promise<void> {
+    await this.db.putMedia({
+      ...record,
+      savedAt: Date.now(),
+      projectId: this.currentProject?.id,
+    });
+  }
+
+  /** 保存済み素材を取り込み順に返す (起動時の復元用)。 */
+  async listMediaBlobs(): Promise<StoredMedia[]> {
+    return this.db.listMedia();
+  }
+
+  /** 保存済み素材を1件返す (無ければ null)。 */
+  async getMediaBlob(id: string): Promise<StoredMedia | null> {
+    return this.db.getMedia(id);
+  }
+
+  /** 保存済み素材の実体を削除する。 */
+  async deleteMediaBlob(id: string): Promise<void> {
+    await this.db.deleteMedia(id);
   }
 
   // ============================================================

@@ -1,3 +1,4 @@
+import { require2dContext, ensureSurface, type DrawSurface } from '../core/canvas-context';
 import { color } from '../app/design-system';
 /**
  * Artone v3 — Video Scopes
@@ -63,8 +64,7 @@ export class WaveformScope {
   private mode: WaveformMode = 'luma';
   // Cached temp canvas for VideoFrame→ImageData extraction. Reused across
   // frames; recreated only when frame dimensions change (avoids per-frame alloc).
-  private _tempCanvas: OffscreenCanvas | null = null;
-  private _tempCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _tempSurface: DrawSurface | null = null;
   // Pre-allocated density maps: flat [scopeX * 256 + brightness] = pixel count.
   // Replaces per-frame Map + dynamic array allocation (~thousands of GC objects
   // at 60fps).  Size = config.width × 256 (fixed at construction time).
@@ -93,7 +93,7 @@ export class WaveformScope {
     };
 
     this.canvas = new OffscreenCanvas(this.config.width, this.config.height);
-    this.ctx = this.canvas.getContext('2d')!;
+    this.ctx = require2dContext(this.canvas);
 
     const buckets = this.config.width * 256;
     this.waveR = new Uint32Array(buckets);
@@ -101,7 +101,7 @@ export class WaveformScope {
     this.waveB = new Uint32Array(buckets);
     this.waveY = new Uint32Array(buckets);
     this.dotCanvas = new OffscreenCanvas(this.config.width, this.config.height);
-    this.dotCtx = this.dotCanvas.getContext('2d')!;
+    this.dotCtx = require2dContext(this.dotCanvas);
     this.waveImageData = new ImageData(this.config.width, this.config.height);
   }
 
@@ -115,14 +115,11 @@ export class WaveformScope {
       const w = frame.displayWidth, h = frame.displayHeight;
       // Reuse temp canvas when dimensions are unchanged (typical at 60fps).
       // Recreate only on resolution change to avoid per-frame OffscreenCanvas alloc.
-      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
-        this._tempCanvas = new OffscreenCanvas(w, h);
-        // willReadFrequently: keeps canvas CPU-backed so getImageData() avoids
-        // GPU→CPU readback stall (Qiita: canvas パフォーマンス向上).
-        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      }
-      this._tempCtx!.drawImage(frame, 0, 0);
-      return this._tempCtx!.getImageData(0, 0, w, h);
+      // willReadFrequently: keeps canvas CPU-backed so getImageData() avoids
+      // GPU→CPU readback stall (Qiita: canvas パフォーマンス向上).
+      this._tempSurface = ensureSurface(this._tempSurface, w, h, { willReadFrequently: true });
+      this._tempSurface.ctx.drawImage(frame, 0, 0);
+      return this._tempSurface.ctx.getImageData(0, 0, w, h);
     }
     return frame;
   }
@@ -313,8 +310,7 @@ export class Vectorscope {
   private readonly dotCtx: OffscreenCanvasRenderingContext2D;
   private readonly dotImageData: ImageData;
   // Cached temp canvas for VideoFrame→ImageData extraction.
-  private _tempCanvas: OffscreenCanvas | null = null;
-  private _tempCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _tempSurface: DrawSurface | null = null;
 
   constructor(config: Partial<ScopeConfig> = {}) {
     this.config = {
@@ -329,7 +325,7 @@ export class Vectorscope {
     };
 
     this.canvas = new OffscreenCanvas(this.config.width, this.config.height);
-    this.ctx = this.canvas.getContext('2d')!;
+    this.ctx = require2dContext(this.canvas);
 
     const pixels = this.config.width * this.config.height;
     this.scopeDensity = new Uint32Array(pixels);
@@ -338,7 +334,7 @@ export class Vectorscope {
     this.scopeBSum    = new Uint32Array(pixels);
     this.skinDensity  = new Uint32Array(pixels);
     this.dotCanvas    = new OffscreenCanvas(this.config.width, this.config.height);
-    this.dotCtx       = this.dotCanvas.getContext('2d')!;
+    this.dotCtx       = require2dContext(this.dotCanvas);
     this.dotImageData = new ImageData(this.config.width, this.config.height);
   }
 
@@ -366,13 +362,10 @@ export class Vectorscope {
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
       const w = frame.displayWidth, h = frame.displayHeight;
-      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
-        this._tempCanvas = new OffscreenCanvas(w, h);
-        // willReadFrequently keeps canvas CPU-backed; avoids GPU→CPU readback stall.
-        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      }
-      this._tempCtx!.drawImage(frame, 0, 0);
-      imageData = this._tempCtx!.getImageData(0, 0, w, h);
+      // willReadFrequently keeps canvas CPU-backed; avoids GPU→CPU readback stall.
+      this._tempSurface = ensureSurface(this._tempSurface, w, h, { willReadFrequently: true });
+      this._tempSurface.ctx.drawImage(frame, 0, 0);
+      imageData = this._tempSurface.ctx.getImageData(0, 0, w, h);
     } else {
       imageData = frame;
     }
@@ -698,8 +691,7 @@ export class HistogramScope {
   private readonly histB = new Uint32Array(256);
   private readonly histY = new Uint32Array(256);
   // Cached temp canvas shared by analyze() and getStats() for VideoFrame extraction.
-  private _tempCanvas: OffscreenCanvas | null = null;
-  private _tempCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _tempSurface: DrawSurface | null = null;
 
   constructor(config: Partial<ScopeConfig> = {}) {
     this.config = {
@@ -714,7 +706,7 @@ export class HistogramScope {
     };
     
     this.canvas = new OffscreenCanvas(this.config.width, this.config.height);
-    this.ctx = this.canvas.getContext('2d')!;
+    this.ctx = require2dContext(this.canvas);
   }
 
   setShowRGB(show: boolean): void {
@@ -732,13 +724,10 @@ export class HistogramScope {
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
       const w = frame.displayWidth, h = frame.displayHeight;
-      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
-        this._tempCanvas = new OffscreenCanvas(w, h);
-        // willReadFrequently keeps canvas CPU-backed; avoids GPU→CPU readback stall.
-        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      }
-      this._tempCtx!.drawImage(frame, 0, 0);
-      imageData = this._tempCtx!.getImageData(0, 0, w, h);
+      // willReadFrequently keeps canvas CPU-backed; avoids GPU→CPU readback stall.
+      this._tempSurface = ensureSurface(this._tempSurface, w, h, { willReadFrequently: true });
+      this._tempSurface.ctx.drawImage(frame, 0, 0);
+      imageData = this._tempSurface.ctx.getImageData(0, 0, w, h);
     } else {
       imageData = frame;
     }
@@ -886,12 +875,9 @@ export class HistogramScope {
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
       const w = frame.displayWidth, h = frame.displayHeight;
-      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
-        this._tempCanvas = new OffscreenCanvas(w, h);
-        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      }
-      this._tempCtx!.drawImage(frame, 0, 0);
-      imageData = this._tempCtx!.getImageData(0, 0, w, h);
+      this._tempSurface = ensureSurface(this._tempSurface, w, h, { willReadFrequently: true });
+      this._tempSurface.ctx.drawImage(frame, 0, 0);
+      imageData = this._tempSurface.ctx.getImageData(0, 0, w, h);
     } else {
       imageData = frame;
     }

@@ -195,6 +195,7 @@
     "itemsLabel": "項",
     "sidebarClose": "關閉媒體面板",
     "sidebarOpen": "開啟媒體面板",
+    "fileInputLabel": "選擇要匯入的媒體檔案",
     "status": {
       "pending": "待處理",
       "proxy": "代理",

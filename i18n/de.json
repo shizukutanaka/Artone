@@ -195,6 +195,7 @@
     "itemsLabel": "Elemente",
     "sidebarClose": "Medienbereich schließen",
     "sidebarOpen": "Medienbereich öffnen",
+    "fileInputLabel": "Mediendateien zum Importieren auswählen",
     "status": {
       "pending": "Ausstehend",
       "proxy": "Proxy",

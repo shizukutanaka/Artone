@@ -209,7 +209,6 @@ describe('Keyframe CRUD', () => {
 
   it('deleteKeyframe removes the keyframe', () => {
     const kf = anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     anim.deleteKeyframe(id, 'x', kf!.id);
     // After deletion: single value → returns that value or default
     expect(anim.getValue(id, 'x', 0.5)).toBe(0); // returns default

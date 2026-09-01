@@ -89,6 +89,11 @@ describe('ProjectDB.open() — concurrent first calls', () => {
     const db = (pm as unknown as { db: { open(): Promise<void> } }).db;
     await db.open();
     const openSpy = vi.spyOn(indexedDB, 'open');
+    // 直前のテストも同じ global を spy しており、その呼び出し履歴が
+    // 引き継がれることがある (vitest 4 で表面化)。このテストが見たいのは
+    // 「**この時点以降に**再オープンしないこと」なので、明示的に履歴を空にして
+    // 実行順から独立させる。
+    openSpy.mockClear();
     await db.open(); // already open → must not reopen
     expect(openSpy).not.toHaveBeenCalled();
     openSpy.mockRestore();

@@ -14,13 +14,21 @@
 import { vi } from 'vitest';
 
 // === Observer mocks ===
-vi.stubGlobal('ResizeObserver', vi.fn(() => ({
-  observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn()
-})));
+//
+// NOTE: `new` される global の差し替えは**アロー関数で書いてはいけない**。
+// アロー関数は [[Construct]] を持たないため `new X()` が
+// `TypeError: ... is not a constructor` で落ちる。vitest 2 では実装が
+// 素通りしていて表面化していなかったが、これは元から誤りだった
+// (vitest 4 で 120 件超のテストがこの1つの誤りで落ちた)。
+// 通常の `function` 式で書くこと — オブジェクトを return すれば
+// コンストラクタの戻り値としてそれが採用される。
+vi.stubGlobal('ResizeObserver', vi.fn(function () {
+  return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+}));
 
-vi.stubGlobal('IntersectionObserver', vi.fn(() => ({
-  observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn()
-})));
+vi.stubGlobal('IntersectionObserver', vi.fn(function () {
+  return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+}));
 
 vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
   matches: false, media: query, onchange: null,
@@ -213,7 +221,7 @@ if (typeof globalThis.createImageBitmap === 'undefined') {
 
 // === OffscreenCanvas ===
 if (typeof globalThis.OffscreenCanvas === 'undefined') {
-  vi.stubGlobal('OffscreenCanvas', vi.fn((w: number, h: number) => {
+  vi.stubGlobal('OffscreenCanvas', vi.fn(function (w: number, h: number) {
     const ctx2d = {
       fillRect: vi.fn(), clearRect: vi.fn(), drawImage: vi.fn(),
       beginPath: vi.fn(), closePath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(),
@@ -304,12 +312,14 @@ function makeAudioContextLike(sampleRate = 48000) {
   };
 }
 if (typeof globalThis.AudioContext === 'undefined') {
-  vi.stubGlobal('AudioContext', vi.fn((opts?: { sampleRate?: number }) => makeAudioContextLike(opts?.sampleRate)));
+  vi.stubGlobal('AudioContext', vi.fn(function (opts?: { sampleRate?: number }) {
+    return makeAudioContextLike(opts?.sampleRate);
+  }));
 }
 
 // === OfflineAudioContext (createBufferSource/createBiquadFilter + startRendering) ===
 if (typeof globalThis.OfflineAudioContext === 'undefined') {
-  vi.stubGlobal('OfflineAudioContext', vi.fn((channels: number, length: number, rate: number) => {
+  vi.stubGlobal('OfflineAudioContext', vi.fn(function (channels: number, length: number, rate: number) {
     const base = makeAudioContextLike(rate);
     return {
       ...base,

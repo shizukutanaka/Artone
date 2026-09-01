@@ -104,9 +104,47 @@ async function main(): Promise<void> {
 
   console.log(detector.formatReport(report));
 
+  // critical は**再現を要求する**。
+  //
+  // ## なぜか (実測)
+  // これらは共有マシン上のマイクロベンチで、同一コードのまま繰り返すと
+  // `effect.gaussian_blur_720p` の p95 が 16.73ms → 19.75 → 22.10 → 26.81ms と
+  // 振れる (平均は 16.25 → 17.57ms とほぼ動かない)。判定は mean と p95 の
+  // 悪いほうを採るため、**スケジューラの外れ値ひとつでゲートが落ちる**。
+  //
+  // しきい値を緩めるのは誤った解で、本物の退行まで見逃す。代わりに
+  // 「疑わしい benchmark だけを測り直し、二度とも critical なら退行と認める」。
+  // 単発のノイズは再現せず、本物の退行は必ず再現する。p95 を判定から外さない
+  // のは bench/CLAUDE.md「平均だけで判断しない」に従うため。
+  let confirmedCritical = report.regressions.filter((r) => r.severity === 'critical');
+  if (confirmedCritical.length > 0) {
+    const names = new Set(confirmedCritical.map((r) => r.name));
+    console.log(`Re-measuring ${names.size} critical candidate(s) to rule out measurement noise...`);
+    const recheck = bench.runner();
+    recheck.registerAll(standardBenchmarks.filter((b) => names.has(b.name)));
+    const second = await recheck.runAll();
+    const secondReport = detector.detect(baseline, second);
+    const stillCritical = new Set(
+      secondReport.regressions
+        .filter((entry) => entry.severity === 'critical')
+        .map((entry) => entry.name)
+    );
+    for (const r of confirmedCritical) {
+      if (!stillCritical.has(r.name)) {
+        console.log(`  ${r.name}: not reproduced on re-measurement — treated as noise`);
+      }
+    }
+    confirmedCritical = confirmedCritical.filter((r) => stillCritical.has(r.name));
+    console.log('');
+  }
+
   // ゲートの判定は3つ全ての AND。1つでも欠けると「緑なのに守れていない」状態になる。
   const failures: string[] = [];
-  if (!report.passed) failures.push('critical performance regression vs baseline');
+  if (confirmedCritical.length > 0) {
+    failures.push(
+      `critical performance regression vs baseline (reproduced): ${confirmedCritical.map((r) => r.name).join(', ')}`
+    );
+  }
   if (budgetViolations.length > 0) failures.push(`${budgetViolations.length} budget violation(s)`);
   if (missingBaseline.length > 0) failures.push(`${missingBaseline.length} benchmark(s) outside regression detection`);
 

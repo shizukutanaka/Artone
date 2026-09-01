@@ -40,12 +40,18 @@ async function main(): Promise<void> {
   }
   console.log('');
 
-  // budget 超過警告 (BenchmarkSpec.budget: 期待最大時間)
+  // budget 超過 (BenchmarkSpec.budget: 期待最大時間)。
+  //
+  // REGRESSION fix: ここは以前 `console.warn` だけで**終了コードに影響しなかった**。
+  // その結果 `effect.alpha_composite_1080p` が予算 18ms に対し 36.68ms
+  // (+103.8%) でも `Status: PASS` / exit 0 になり、CI 品質ゲート
+  // 「パフォーマンス退行 critical なし」が**通ってしまっていた**。
+  // 予算は「許容できる上限の宣言」であって参考値ではない — 破ったら落とす。
   const budgetViolations = bench.checkBudgets(standardBenchmarks, results);
   if (budgetViolations.length > 0) {
-    console.warn(`Budget exceeded (${budgetViolations.length}):`);
+    console.error(`Budget exceeded (${budgetViolations.length}):`);
     for (const v of budgetViolations) {
-      console.warn(`  ${v.name}: ${v.actualMeanMs.toFixed(2)}ms > budget ${v.budgetMs}ms (+${v.exceedPercent.toFixed(1)}%)`);
+      console.error(`  ${v.name}: ${v.actualMeanMs.toFixed(2)}ms > budget ${v.budgetMs}ms (+${v.exceedPercent.toFixed(1)}%)`);
     }
     console.log('');
   }
@@ -83,10 +89,14 @@ async function main(): Promise<void> {
   // unprotected with zero visible signal in CI output. Surface the gap
   // explicitly instead of leaving it silent (bench/CLAUDE.md: this suite is
   // the CI gate against performance decay over a 10-year lifetime).
+  //
+  // これも警告止まりでは意味がない: 「ベースラインに無い」= 退行検出の**外**に
+  // いるということで、黙って通すと守っているつもりの穴が広がり続ける
+  // (実際 13 本中 5 本が外に出たまま、そのうち1本が予算超過していた)。
   const missingBaseline = detector.findMissingBaseline(baseline, results);
   if (missingBaseline.length > 0) {
-    console.warn(
-      `WARNING: ${missingBaseline.length} benchmark(s) have no baseline entry and are NOT covered by ` +
+    console.error(
+      `${missingBaseline.length} benchmark(s) have no baseline entry and are NOT covered by ` +
       `regression detection. Run 'npm run bench:baseline' to add them: ${missingBaseline.join(', ')}`
     );
     console.log('');
@@ -94,10 +104,17 @@ async function main(): Promise<void> {
 
   console.log(detector.formatReport(report));
 
-  if (!report.passed) {
-    console.error('FAILED: Critical performance regression detected');
+  // ゲートの判定は3つ全ての AND。1つでも欠けると「緑なのに守れていない」状態になる。
+  const failures: string[] = [];
+  if (!report.passed) failures.push('critical performance regression vs baseline');
+  if (budgetViolations.length > 0) failures.push(`${budgetViolations.length} budget violation(s)`);
+  if (missingBaseline.length > 0) failures.push(`${missingBaseline.length} benchmark(s) outside regression detection`);
+
+  if (failures.length > 0) {
+    console.error(`FAILED: ${failures.join('; ')}`);
     process.exit(1);
   }
+  console.log('Gate: PASS (no regression, all budgets met, all benchmarks covered)');
 }
 
 main().catch((err) => {

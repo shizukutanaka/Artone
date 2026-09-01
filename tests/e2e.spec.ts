@@ -18,29 +18,7 @@
  * # AI generated (reviewed)
  */
 import { test, expect, type Page } from '@playwright/test';
-
-/**
- * 初回起動のオンボーディング (ティア選択 → テンプレート選択) を抜けてエディタへ。
- *
- * 画面が出る前に判断すると「Skip も timeline も無い」状態を**もう終わった**と
- * 誤読して即座に諦めてしまう。毎回どちらかが現れるまで待ってから進める。
- */
-async function openEditor(page: Page): Promise<void> {
-  await page.goto('/');
-  const timeline = page.getByTestId('timeline');
-  for (let step = 0; step < 5; step++) {
-    if (await timeline.count()) break;
-    const skip = page.getByRole('button', { name: /^Skip$/ });
-    await Promise.race([
-      skip.first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined),
-      timeline.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined),
-    ]);
-    if (await timeline.count()) break;
-    if (!(await skip.count())) break;
-    await skip.first().click();
-  }
-  await expect(timeline).toBeVisible({ timeout: 15_000 });
-}
+import { openEditor } from './open-editor';
 
 /**
  * ブラウザ内で短い WebM を作り、取り込み用の file input へ流し込む。

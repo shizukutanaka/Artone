@@ -195,6 +195,7 @@
     "itemsLabel": "项",
     "sidebarClose": "关闭媒体面板",
     "sidebarOpen": "打开媒体面板",
+    "fileInputLabel": "选择要导入的媒体文件",
     "status": {
       "pending": "待处理",
       "proxy": "代理",

@@ -172,6 +172,59 @@ describe('BenchmarkRunner', () => {
 
 // ── RegressionDetector ────────────────────────────────────────────────────────
 
+describe('RegressionDetector — ノイズ下限', () => {
+  /**
+   * ## 背景 (この節が固定する回帰)
+   * 判定が**割合のみ**だった頃、1ms に満たないベンチのタイマ揺らぎが CRITICAL に
+   * なっていた。コード変更ゼロでベースラインを取り直した直後の再実行で
+   * `0.00ms → 0.00ms (+100.3%)` が CRITICAL と報告され、性能ゲートが落ちた。
+   * ノイズを退行と呼ぶゲートは、本物の退行を埋もれさせる。
+   */
+
+  it('REGRESSION: a sub-millisecond jump is not a regression however large the percent', () => {
+    const detector = new RegressionDetector();
+    const baseline = makeBaseline('1.0.0', [makeResult('tiny', 0.02, { p95Ms: 0.03 })]);
+    // 倍以上になっているが、実時間では 0.02ms しか動いていない。
+    const report = detector.detect(baseline, [makeResult('tiny', 0.05, { p95Ms: 0.06 })]);
+
+    expect(report.regressions).toEqual([]);
+    expect(report.passed).toBe(true);
+  });
+
+  it('still catches a regression once the absolute change is real', () => {
+    const detector = new RegressionDetector();
+    const baseline = makeBaseline('1.0.0', [makeResult('big', 10, { p95Ms: 10 })]);
+    // +50% かつ実時間で 5ms — ノイズでは説明できない。
+    const report = detector.detect(baseline, [makeResult('big', 15, { p95Ms: 15 })]);
+
+    expect(report.regressions).toHaveLength(1);
+    expect(report.regressions[0].severity).toBe('critical');
+    expect(report.passed).toBe(false);
+  });
+
+  it('does not report sub-millisecond noise as an improvement either', () => {
+    // 片側だけ足切りすると「97% 高速化」という嘘の実績が報告される。
+    const detector = new RegressionDetector();
+    const baseline = makeBaseline('1.0.0', [makeResult('tiny', 0.05, { p95Ms: 0.05 })]);
+    const report = detector.detect(baseline, [makeResult('tiny', 0.01, { p95Ms: 0.01 })]);
+
+    expect(report.improvements).toEqual([]);
+  });
+
+  it('uses whichever of mean or p95 moved further when applying the floor', () => {
+    const detector = new RegressionDetector();
+    const baseline = makeBaseline('1.0.0', [makeResult('tail', 10, { p95Ms: 10 })]);
+    // 平均はほぼ不変だが p95 が 4ms 悪化 — 60fps では末尾こそが効く。
+    const report = detector.detect(baseline, [makeResult('tail', 10.05, { p95Ms: 14 })]);
+
+    expect(report.regressions).toHaveLength(1);
+  });
+
+  it('exposes the floor as a documented constant', () => {
+    expect(RegressionDetector.MIN_ABSOLUTE_DELTA_MS).toBe(0.5);
+  });
+});
+
 describe('RegressionDetector', () => {
   let detector: RegressionDetector;
 

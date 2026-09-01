@@ -195,6 +195,7 @@
     "itemsLabel": "éléments",
     "sidebarClose": "Fermer le panneau média",
     "sidebarOpen": "Ouvrir le panneau média",
+    "fileInputLabel": "Choisir des fichiers média à importer",
     "status": {
       "pending": "En attente",
       "proxy": "Proxy",

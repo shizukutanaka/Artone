@@ -195,6 +195,7 @@
     "itemsLabel": "アイテム",
     "sidebarClose": "メディアパネルを閉じる",
     "sidebarOpen": "メディアパネルを開く",
+    "fileInputLabel": "取り込むメディアファイルを選択",
     "status": {
       "pending": "待機中",
       "proxy": "プロキシ",

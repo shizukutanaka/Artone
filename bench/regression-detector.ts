@@ -187,6 +187,25 @@ export class RegressionDetector {
   /** デフォルトしきい値 (%): 5%以上で minor, 15% major, 30% critical */
   static readonly THRESHOLDS = { minor: 5, major: 15, critical: 30 };
 
+  /**
+   * ノイズ下限 (ms)。これ未満の**絶対差**は、割合がいくつでも退行/改善と見なさない。
+   *
+   * ## なぜ必要か
+   * 割合だけで判定すると、**1ms に満たないベンチのノイズが CRITICAL になる**。
+   * 実測: コード変更ゼロでベースラインを取り直した直後の再実行で
+   * `render.canvas_putImageData_1080p: 0.00ms → 0.00ms (+100.3%)`、
+   * `decode.parse_box_atom: 0.00ms → 0.00ms (+76.8%)` が CRITICAL 判定になり、
+   * ゲートが落ちた。タイマ分解能とスケジューラ揺らぎを「性能退行」と呼んでいる
+   * だけで、意味が無いどころか**本物の退行を埋もれさせる**。
+   *
+   * 0.5ms を採るのは 60fps のフレーム予算 16.7ms に対する下限として — 単一処理の
+   * 0.5ms 未満の増減がフレームを予算から押し出すことはない。逆にこれを超える
+   * 変化は、割合しきい値と合わせて初めて退行として扱う。
+   *
+   * 改善側にも同じ下限を適用する (でないとノイズを「97% 高速化」と報告してしまう)。
+   */
+  static readonly MIN_ABSOLUTE_DELTA_MS = 0.5;
+
   /** ベンチ別カスタムしきい値 (config 化) */
   private perBenchThresholds: Map<string, { minor: number; major: number; critical: number }> = new Map();
 
@@ -221,6 +240,14 @@ export class RegressionDetector {
       // Judge severity from whichever of mean/p95 regressed worse.
       const p95Delta = base.p95Ms > 0 ? ((cur.p95Ms - base.p95Ms) / base.p95Ms) * 100 : meanDelta;
       const delta = Math.max(meanDelta, p95Delta);
+
+      // 割合の前に**絶対差**で足切りする。どちらの指標で判定するにせよ、
+      // 実時間で 0.5ms 動いていないものは性能上の事実ではなく測定ノイズである。
+      const absoluteDeltaMs = Math.max(
+        Math.abs(cur.meanMs - base.meanMs),
+        Math.abs(cur.p95Ms - base.p95Ms),
+      );
+      if (absoluteDeltaMs < RegressionDetector.MIN_ABSOLUTE_DELTA_MS) continue;
 
       // REGRESSION fix: THRESHOLDS' own doc comment says "5%以上で minor, 15%
       // major, 30% critical" (5/15/30 percent OR MORE), but these comparisons

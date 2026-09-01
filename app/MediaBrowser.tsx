@@ -301,12 +301,18 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = React.memo(({
         >
           + {t('media.import')}
         </button>
+        {/*
+          非表示でも支援技術からは到達しうるため、ラベルが要る。
+          WCAG 監査がエディタ画面を見るようになって初めて critical として
+          検出された箇所 (以前はオンボーディング画面しか監査していなかった)。
+        */}
         <input
           ref={fileInputRef}
           data-testid="file-input"
           type="file"
           multiple
           accept="video/*,audio/*,image/*"
+          aria-label={t('media.fileInputLabel')}
           onChange={handleFiles}
           style={{ display: 'none' }}
         />
@@ -314,6 +320,8 @@ export const MediaBrowser: React.FC<MediaBrowserProps> = React.memo(({
         <input
           type="text"
           placeholder={t('media.search')}
+          // placeholder は支援技術にとってラベルではない (入力すると消える)。
+          aria-label={t('media.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{

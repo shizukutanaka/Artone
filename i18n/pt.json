@@ -195,6 +195,7 @@
     "itemsLabel": "itens",
     "sidebarClose": "Fechar painel de mídia",
     "sidebarOpen": "Abrir painel de mídia",
+    "fileInputLabel": "Escolher arquivos de mídia para importar",
     "status": {
       "pending": "Pendente",
       "proxy": "Proxy",

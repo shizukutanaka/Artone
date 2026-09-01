@@ -195,6 +195,7 @@
     "itemsLabel": "элементов",
     "sidebarClose": "Закрыть панель медиа",
     "sidebarOpen": "Открыть панель медиа",
+    "fileInputLabel": "Выберите медиафайлы для импорта",
     "status": {
       "pending": "Ожидание",
       "proxy": "Прокси",

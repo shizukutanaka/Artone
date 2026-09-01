@@ -201,11 +201,35 @@ export class A11yAuditor {
     }
   }
 
+  /**
+   * テキスト背後の**実際に塗られている色**を祖先方向へ探す。
+   *
+   * 決定できない場合は `null` を返す — 呼び出し側はその要素の判定を飛ばす。
+   * **推測して比率を出さない**ことが重要で、間違った比率は無いより悪い
+   * (誤検出はゲートへの信頼を壊し、結局ゲートごと無効化される)。
+   *
+   * ## 決定できない2つのケース (どちらも以前は誤った値を返していた)
+   *
+   * 1. **グラデーション等の背景画像**。`backgroundColor` しか見ないと、画像を
+   *    塗っている要素を**素通りして**さらに上の色を拾う。実測: ヘッダのバッジは
+   *    cyan→blue のグラデーション上の黒文字 (実際は約 5.3:1 で AAA 大文字基準を
+   *    満たす) だが、グラデーションを飛ばして暗いヘッダ色と比べ **1.14:1 の
+   *    critical** として報告していた。背景画像を塗る要素に当たった時点で、
+   *    その色は静的には決まらない。
+   * 2. **どこにも塗りが見つからない**場合。以前は白 (`[255,255,255]`) を返して
+   *    いたが、本アプリは暗色テーマであり、白い背景を仮定した比率は事実と無関係。
+   */
   private findBackground(el: Element): [number, number, number] | null {
     let cur: Element | null = el;
     while (cur) {
       let style: CSSStyleDeclaration;
       try { style = this.host.window.getComputedStyle(cur); } catch { break; }
+
+      // 背景画像 (グラデーション含む) を塗る要素に当たったら、そこが背後であり
+      // 色は一意に決まらない。素通りして上の色を拾うと嘘の比率になる。
+      const image = style.backgroundImage;
+      if (image && image !== 'none') return null;
+
       const raw = style.backgroundColor;
 
       // 完全透明をスキップ
@@ -225,7 +249,7 @@ export class A11yAuditor {
       if (bg) return bg;
       cur = cur.parentElement;
     }
-    return [255, 255, 255];
+    return null;
   }
 
   private checkImages(root: Element): void {

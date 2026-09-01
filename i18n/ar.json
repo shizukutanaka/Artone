@@ -195,6 +195,7 @@
     "itemsLabel": "عناصر",
     "sidebarClose": "إغلاق لوحة الوسائط",
     "sidebarOpen": "فتح لوحة الوسائط",
+    "fileInputLabel": "اختر ملفات الوسائط للاستيراد",
     "status": {
       "pending": "قيد الانتظار",
       "proxy": "بروكسي",

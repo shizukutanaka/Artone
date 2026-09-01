@@ -10,7 +10,22 @@ import type { BenchmarkSpec } from './regression-detector';
 // ベンチマーク間の状態共有 (globalThis as any の代替)
 const store = new Map<string, unknown>();
 function put<T>(key: string, value: T): void { store.set(key, value); }
-function get<T>(key: string): T | undefined { return store.get(key) as T | undefined; }
+/**
+ * setup() が用意した作業バッファを取り出す。
+ *
+ * 見つからなければ**即座に落とす**。以前は `T | undefined` を返しており、
+ * 呼び出し側が全て `!` で潰していたが、キーの綴り違いや setup() の書き忘れは
+ * `undefined` のまま計測へ流れ、**中身の無いバッファを測った数値**が
+ * ベースラインに入りうる。ベンチは「速いこと」ではなく「正しく測れていること」
+ * が先で、黙って0要素を測るより落ちるほうがよい。
+ */
+function get<T>(key: string): T {
+  const value = store.get(key);
+  if (value === undefined) {
+    throw new Error(`benchmark buffer "${key}" was not initialised by setup()`);
+  }
+  return value as T;
+}
 
 // === レンダリング系 ===
 
@@ -24,7 +39,7 @@ const renderBenchmarks: BenchmarkSpec[] = [
     },
     run: () => {
       // 単純な ImageData 塗りつぶし (CPU フォールバック計測)
-      const buf = get<Uint8ClampedArray>('fill1080p')!;
+      const buf = get<Uint8ClampedArray>('fill1080p');
       for (let i = 0; i < buf.length; i += 4) {
         buf[i] = 255;
         buf[i + 1] = 128;
@@ -46,9 +61,9 @@ const renderBenchmarks: BenchmarkSpec[] = [
     },
     run: () => {
       // 4x4 行列合成 (アフィン変換)
-      const a = get<Float32Array>('matA')!;
-      const b = get<Float32Array>('matB')!;
-      const r = get<Float32Array>('matR')!;
+      const a = get<Float32Array>('matA');
+      const b = get<Float32Array>('matB');
+      const r = get<Float32Array>('matR');
       for (let i = 0; i < 4; i++) {
         for (let j = 0; j < 4; j++) {
           let sum = 0;
@@ -75,8 +90,8 @@ const effectBenchmarks: BenchmarkSpec[] = [
     },
     run: () => {
       // 簡易 LUT 適用
-      const data = get<Uint8ClampedArray>('lutData')!;
-      const lut = get<Uint8ClampedArray>('lut256')!;
+      const data = get<Uint8ClampedArray>('lutData');
+      const lut = get<Uint8ClampedArray>('lut256');
       for (let i = 0; i < data.length; i += 4) {
         data[i] = lut[data[i]];
         data[i + 1] = lut[data[i + 1]];
@@ -96,9 +111,9 @@ const effectBenchmarks: BenchmarkSpec[] = [
     run: () => {
       const w = 1280;
       const h = 720;
-      const data = get<Float32Array>('blurSrc')!;
-      const out = get<Float32Array>('blurDst')!;
-      const k = get<Float32Array>('blurK')!;
+      const data = get<Float32Array>('blurSrc');
+      const out = get<Float32Array>('blurDst');
+      const k = get<Float32Array>('blurK');
       for (let y = 2; y < h - 2; y++) {
         for (let x = 2; x < w - 2; x++) {
           let s = 0;
@@ -120,7 +135,7 @@ const codecBenchmarks: BenchmarkSpec[] = [
     setup: () => { put('boxBuf', new Uint8Array(8192)); },
     run: () => {
       // MP4 box parsing シミュレーション
-      const buf = get<Uint8Array>('boxBuf')!;
+      const buf = get<Uint8Array>('boxBuf');
       for (let i = 0; i < 1000; i++) {
         const size = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
         const type = String.fromCharCode(buf[4], buf[5], buf[6], buf[7]);
@@ -140,8 +155,8 @@ const codecBenchmarks: BenchmarkSpec[] = [
     },
     run: () => {
       // フレームサイズ予測 (DCT 簡易計算)
-      const block = get<Float32Array>('dctBlock')!;
-      const out = get<Float32Array>('dctOut')!;
+      const block = get<Float32Array>('dctBlock');
+      const out = get<Float32Array>('dctOut');
       for (let u = 0; u < 8; u++) {
         for (let v = 0; v < 8; v++) {
           let s = 0;
@@ -173,7 +188,7 @@ const exportBenchmarks: BenchmarkSpec[] = [
       put('muxChunk', chunk);
     },
     run: () => {
-      const chunk = get<Uint8Array>('muxChunk')!;
+      const chunk = get<Uint8Array>('muxChunk');
       let crc = 0xffffffff;
       for (let i = 0; i < chunk.length; i++) {
         crc ^= chunk[i];
@@ -195,7 +210,7 @@ const startupBenchmarks: BenchmarkSpec[] = [
       put('jsonStr', JSON.stringify(obj));
     },
     run: () => {
-      JSON.parse(get<string>('jsonStr')!);
+      JSON.parse(get<string>('jsonStr'));
     },
   },
 ];
@@ -234,7 +249,7 @@ const realisticBenchmarks: BenchmarkSpec[] = [
       put('benchDst', new Uint8Array(8 * 1024 * 1024));
     },
     run: () => {
-      get<Uint8Array>('benchDst')!.set(get<Uint8Array>('benchSrc')!);
+      get<Uint8Array>('benchDst').set(get<Uint8Array>('benchSrc'));
     },
   },
   {
@@ -254,9 +269,9 @@ const realisticBenchmarks: BenchmarkSpec[] = [
       put('audioOut', new Float32Array(n));
     },
     run: () => {
-      const a = get<Float32Array>('audioA')!;
-      const b = get<Float32Array>('audioB')!;
-      const out = get<Float32Array>('audioOut')!;
+      const a = get<Float32Array>('audioA');
+      const b = get<Float32Array>('audioB');
+      const out = get<Float32Array>('audioOut');
       // 2ch ミックス + ゲイン
       for (let i = 0; i < a.length; i++) {
         out[i] = a[i] * 0.7 + b[i] * 0.3;
@@ -275,9 +290,9 @@ const realisticBenchmarks: BenchmarkSpec[] = [
     },
     run: () => {
       compositeSrcOver(
-        get<Uint8ClampedArray>('fg')!,
-        get<Uint8ClampedArray>('bg')!,
-        get<Uint8ClampedArray>('out')!,
+        get<Uint8ClampedArray>('fg'),
+        get<Uint8ClampedArray>('bg'),
+        get<Uint8ClampedArray>('out'),
       );
     },
   },
@@ -299,8 +314,8 @@ const realisticBenchmarks: BenchmarkSpec[] = [
       put('crcTable', table);
     },
     run: () => {
-      const buf = get<Uint8Array>('crcBuf')!;
-      const table = get<Uint32Array>('crcTable')!;
+      const buf = get<Uint8Array>('crcBuf');
+      const table = get<Uint32Array>('crcTable');
       let crc = 0xffffffff;
       for (let i = 0; i < buf.length; i++) {
         crc = (crc >>> 8) ^ table[(crc ^ buf[i]) & 0xff];

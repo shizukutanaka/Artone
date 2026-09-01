@@ -12,6 +12,7 @@
  * @license MIT
  */
 
+import { require2dContext, ensureSurface, type DrawSurface } from './canvas-context';
 import { createLogger } from '../app/logger';
 import { setHighQualityScaling } from '../app/utils';
 
@@ -20,6 +21,7 @@ import { setHighQualityScaling } from '../app/utils';
 // ============================================================
 
 const log = createLogger('WebCodecs');
+
 
 export interface CodecConfig {
   codec: string;
@@ -739,7 +741,7 @@ export class VideoPipeline {
     // Single canvas reused for all thumbnails (same dimensions) — createImageBitmap
     // captures a snapshot of the current canvas state, so reuse is safe.
     const thumbCanvas = new OffscreenCanvas(width, height);
-    const thumbCtx = thumbCanvas.getContext('2d')!;
+    const thumbCtx = require2dContext(thumbCanvas);
     setHighQualityScaling(thumbCtx);
 
     for (let i = 0; i < count; i++) {
@@ -798,19 +800,16 @@ export const FrameProcessors = {
   // clobbered by pipeline B's drawImage() before A finished reading pixels
   // back, corrupting output. Each factory call now gets its own canvas.
   grayscale: () => {
-    let canvas: OffscreenCanvas | null = null;
-    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    let surface: DrawSurface | null = null;
     // new VideoFrame(canvas, …) snapshots pixel state synchronously, so the
     // canvas can be reused immediately after the call returns.
     return async (frame: VideoFrame): Promise<VideoFrame> => {
       const w = frame.displayWidth, h = frame.displayHeight;
-      if (!canvas || canvas.width !== w || canvas.height !== h) {
-        canvas = new OffscreenCanvas(w, h);
-        // willReadFrequently: pixels are read back via getImageData below.
-        ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-      }
-      ctx!.drawImage(frame, 0, 0);
-      const imageData = ctx!.getImageData(0, 0, w, h);
+      // willReadFrequently: pixels are read back via getImageData below.
+      surface = ensureSurface(surface, w, h, { willReadFrequently: true });
+      const { canvas, ctx } = surface;
+      ctx.drawImage(frame, 0, 0);
+      const imageData = ctx.getImageData(0, 0, w, h);
       const data = imageData.data;
 
       for (let i = 0; i < data.length; i += 4) {
@@ -818,7 +817,7 @@ export const FrameProcessors = {
         data[i] = data[i + 1] = data[i + 2] = gray;
       }
 
-      ctx!.putImageData(imageData, 0, 0);
+      ctx.putImageData(imageData, 0, 0);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
@@ -828,17 +827,15 @@ export const FrameProcessors = {
     // Lazy-init canvas per closure: each factory call gets its own canvas that
     // is created on the first frame and resized only when dimensions change.
     // new VideoFrame(canvas, …) snapshots pixel state, so canvas reuse is safe.
-    let canvas: OffscreenCanvas | null = null;
-    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    let surface: DrawSurface | null = null;
     const filterStr = `brightness(${1 + brightness}) contrast(${1 + contrast})`;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
       const { displayWidth: w, displayHeight: h } = frame;
-      if (!canvas || canvas.width !== w || canvas.height !== h) {
-        canvas = new OffscreenCanvas(w, h);
-        ctx = canvas.getContext('2d')!;
-        ctx.filter = filterStr;
-      }
-      ctx!.drawImage(frame, 0, 0);
+      const created = !surface || surface.canvas.width !== w || surface.canvas.height !== h;
+      surface = ensureSurface(surface, w, h);
+      const { canvas, ctx } = surface;
+      if (created) ctx.filter = filterStr;
+      ctx.drawImage(frame, 0, 0);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
@@ -847,7 +844,7 @@ export const FrameProcessors = {
   resize: (width: number, height: number) => {
     // Canvas dimensions are fixed by the factory args — create once, reuse every frame.
     const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d')!;
+    const ctx = require2dContext(canvas);
     setHighQualityScaling(ctx);
     return async (frame: VideoFrame): Promise<VideoFrame> => {
       ctx.drawImage(frame, 0, 0, width, height);
@@ -859,7 +856,7 @@ export const FrameProcessors = {
   crop: (x: number, y: number, width: number, height: number) => {
     // Output dimensions are fixed by factory args — create canvas once.
     const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d')!;
+    const ctx = require2dContext(canvas);
     return async (frame: VideoFrame): Promise<VideoFrame> => {
       ctx.drawImage(frame, x, y, width, height, 0, 0, width, height);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
@@ -874,19 +871,16 @@ export const FrameProcessors = {
     const sin = Math.abs(Math.sin(radians));
     // Lazy-grow canvas: output dimensions depend on input frame size. For a fixed
     // source resolution (the common case) the canvas is created once and reused.
-    let canvas: OffscreenCanvas | null = null;
-    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    let surface: DrawSurface | null = null;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
       const newWidth  = frame.displayWidth  * cos + frame.displayHeight * sin;
       const newHeight = frame.displayWidth  * sin + frame.displayHeight * cos;
-      if (!canvas || canvas.width !== newWidth || canvas.height !== newHeight) {
-        canvas = new OffscreenCanvas(newWidth, newHeight);
-        ctx = canvas.getContext('2d')!;
-      }
-      ctx!.setTransform(1, 0, 0, 1, 0, 0); // reset before each frame
-      ctx!.translate(newWidth / 2, newHeight / 2);
-      ctx!.rotate(radians);
-      ctx!.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
+      surface = ensureSurface(surface, newWidth, newHeight);
+      const { canvas, ctx } = surface;
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // reset before each frame
+      ctx.translate(newWidth / 2, newHeight / 2);
+      ctx.rotate(radians);
+      ctx.drawImage(frame, -frame.displayWidth / 2, -frame.displayHeight / 2);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
@@ -895,18 +889,15 @@ export const FrameProcessors = {
   flip: (horizontal: boolean, vertical: boolean) => {
     // Lazy-init canvas: created on first frame, reused when dimensions are stable.
     // setTransform() replaces (not accumulates) the transform matrix, so no save/restore.
-    let canvas: OffscreenCanvas | null = null;
-    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    let surface: DrawSurface | null = null;
     const sx = horizontal ? -1 : 1;
     const sy = vertical   ? -1 : 1;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
       const { displayWidth: w, displayHeight: h } = frame;
-      if (!canvas || canvas.width !== w || canvas.height !== h) {
-        canvas = new OffscreenCanvas(w, h);
-        ctx = canvas.getContext('2d')!;
-      }
-      ctx!.setTransform(sx, 0, 0, sy, horizontal ? w : 0, vertical ? h : 0);
-      ctx!.drawImage(frame, 0, 0);
+      surface = ensureSurface(surface, w, h);
+      const { canvas, ctx } = surface;
+      ctx.setTransform(sx, 0, 0, sy, horizontal ? w : 0, vertical ? h : 0);
+      ctx.drawImage(frame, 0, 0);
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };
   },
@@ -915,14 +906,14 @@ export const FrameProcessors = {
   watermark: (text: string, position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' = 'bottom-right') => {
     // Lazy-init canvas per closure: created on the first frame, resized only when
     // frame dimensions change. Text metrics and context state set once at init.
-    let canvas: OffscreenCanvas | null = null;
-    let ctx: OffscreenCanvasRenderingContext2D | null = null;
+    let surface: DrawSurface | null = null;
     let metricsWidth = 0;
     return async (frame: VideoFrame): Promise<VideoFrame> => {
       const { displayWidth: w, displayHeight: h } = frame;
-      if (!canvas || canvas.width !== w || canvas.height !== h) {
-        canvas = new OffscreenCanvas(w, h);
-        ctx = canvas.getContext('2d')!;
+      const created = !surface || surface.canvas.width !== w || surface.canvas.height !== h;
+      surface = ensureSurface(surface, w, h);
+      const { canvas, ctx } = surface;
+      if (created) {
         ctx.font = '24px sans-serif';
         ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
         ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
@@ -931,7 +922,7 @@ export const FrameProcessors = {
         metricsWidth = ctx.measureText(text).width;
       }
 
-      ctx!.drawImage(frame, 0, 0);
+      ctx.drawImage(frame, 0, 0);
 
       const padding = 20;
       let x: number, y: number;
@@ -955,8 +946,8 @@ export const FrameProcessors = {
           y = h - padding;
       }
 
-      ctx!.strokeText(text, x, y);
-      ctx!.fillText(text, x, y);
+      ctx.strokeText(text, x, y);
+      ctx.fillText(text, x, y);
 
       return new VideoFrame(canvas, { timestamp: frame.timestamp });
     };

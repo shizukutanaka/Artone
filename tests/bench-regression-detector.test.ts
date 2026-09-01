@@ -392,8 +392,34 @@ describe('RegressionDetector', () => {
     ];
     const report = detector.detect(baseline, current);
     expect(report.regressions).toHaveLength(1);
-    expect(report.regressions[0].severity).toBe('critical');
+    // 平均がほぼ動かなくても**必ず検出される**ことがこのテストの本旨。
     expect(report.regressions[0].p95DeltaPercent).toBeGreaterThan(30);
+    // 重大度は p95 用のしきい値 (平均の P95_THRESHOLD_FACTOR 倍) で決まる。
+    // +38% は major 相当 — 実測で p95 は無改変でも +60% 振れるため、この水準を
+    // critical (= ビルドを落とす) にすると測定ノイズでゲートが落ちる。
+    expect(report.regressions[0].severity).toBe('major');
+  });
+
+  it('a p95 blowup beyond the noise floor is still critical', () => {
+    // 感度を落としていないことの確認 — しきい値を広げたぶん、それを超える
+    // 本物の裾の悪化は従来どおり critical として build を落とす。
+    const baseline = makeBaseline('1.0.0', [
+      makeResult('a', 100, { p95Ms: 105, p99Ms: 108 }),
+    ]);
+    const current = [makeResult('a', 102, { p95Ms: 200, p99Ms: 220 })]; // p95 +90%
+    const report = detector.detect(baseline, current);
+    expect(report.regressions[0].severity).toBe('critical');
+  });
+
+  it('the mean keeps its own (tighter) thresholds', () => {
+    // p95 を広げたのは p95 だけ。平均は 5/15/30 のまま。
+    const baseline = makeBaseline('1.0.0', [
+      makeResult('a', 100, { p95Ms: 105, p99Ms: 108 }),
+    ]);
+    // 平均 +35% / p95 は据え置き → 平均側の critical しきい値 (30%) で critical。
+    const current = [makeResult('a', 135, { p95Ms: 106, p99Ms: 109 })];
+    const report = detector.detect(baseline, current);
+    expect(report.regressions[0].severity).toBe('critical');
   });
 
   it('REGRESSION: an improved mean with a worse p95 is not misreported as an improvement', () => {

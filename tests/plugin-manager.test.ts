@@ -318,7 +318,9 @@ describe('PluginManager — executeSandboxed', () => {
 
   beforeEach(() => {
     workers = [];
-    vi.stubGlobal('Worker', vi.fn(() => { const w = new FakeWorker(); workers.push(w); return w; }));
+    // `new Worker()` される差し替えなので、アロー関数では
+    // `TypeError: ... is not a constructor` になる (アローは [[Construct]] を持たない)。
+    vi.stubGlobal('Worker', vi.fn(function () { const w = new FakeWorker(); workers.push(w); return w; }));
     vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:fake'), revokeObjectURL: vi.fn() });
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });

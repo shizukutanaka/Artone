@@ -45,15 +45,13 @@ function copyI18nLocalesPlugin(): Plugin {
 export default defineConfig({
   // ----- プラグイン -----
   plugins: [
-    react({
-      // React Fast Refresh は既定で有効
-      // Babel設定 (最小)
-      babel: {
-        plugins: isProd ? [
-          ['transform-remove-console', { exclude: ['error', 'warn'] }]
-        ] : []
-      }
-    }),
+    // React Fast Refresh は既定で有効。
+    //
+    // NOTE: `@vitejs/plugin-react` 6 で `babel` オプションは廃止された。
+    // 本番の console 除去は esbuild 側の `drop` で行う (下の esbuild 設定)。
+    // プロダクションコードに console を残さない規約 (CLAUDE.md 禁止事項) は
+    // そちらで担保される。
+    react(),
 
     // バンドル分析 (ANALYZE=true で有効)
     isAnalyze && visualizer({
@@ -80,9 +78,17 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
       },
       output: {
-        manualChunks: {
-          // コア依存
-          'vendor-react': ['react', 'react-dom']
+        /**
+         * React を単一ベンダーチャンクへ固定する。
+         *
+         * Vite 8 のバンドラ (rolldown) は**関数形式のみ**を受け付ける
+         * (オブジェクト形式は `manualChunks is not a function` で失敗する)。
+         * 副次的に、パスで判定するため `react-dom/client` のような
+         * サブパス import も同じチャンクへ入る。
+         */
+        manualChunks(id: string): string | undefined {
+          if (/[\\/]node_modules[\\/](react|react-dom)[\\/]/.test(id)) return 'vendor-react';
+          return undefined;
         },
         // ファイル名ハッシュ
         entryFileNames: isProd ? 'js/[name].[hash].js' : 'js/[name].js',
@@ -191,6 +197,19 @@ export default defineConfig({
     jsx: 'automatic',
     // ドロップ
     drop: isProd ? ['debugger'] : [],
+    /**
+     * 本番ビルドから診断用 console を除去する (CLAUDE.md 禁止事項
+     * 「`console.log` をプロダクションコードに残す」の担保)。
+     *
+     * `@vitejs/plugin-react` 6 で `babel` オプションが廃止されたため、
+     * 従来 `transform-remove-console` が担っていた役割をここへ移した。
+     *
+     * `drop: ['console']` を使わないのは、**それが error/warn まで消す**ため。
+     * 障害時に何も出ないビルドは調査不能になる。`pure` は「戻り値を使わない
+     * 呼び出しは副作用が無いので除去してよい」と minifier に伝える指定で、
+     * ログ呼び出しはまさにその形をしている。
+     */
+    pure: isProd ? ['console.log', 'console.debug', 'console.info', 'console.trace'] : [],
     // ターゲット
     target: 'es2022',
     // 法的コメント

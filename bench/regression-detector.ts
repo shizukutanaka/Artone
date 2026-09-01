@@ -206,6 +206,22 @@ export class RegressionDetector {
    */
   static readonly MIN_ABSOLUTE_DELTA_MS = 0.5;
 
+  /**
+   * p95 に適用するしきい値の倍率。
+   *
+   * p95 は**裾の統計量**であり、平均より本質的にばらつく。共有マシンでの実測:
+   * 同一コードのまま繰り返すと `effect.gaussian_blur_720p` の p95 は
+   * 16.73 → 19.75 → 22.10 → 26.81ms と振れる一方、平均は 16.25 → 17.57ms と
+   * ほとんど動かない。両者を同じしきい値で裁くと、**スケジューラの外れ値ひとつが
+   * 「30% の critical 退行」になる**。
+   *
+   * p95 を判定から**外しはしない** (bench/CLAUDE.md「平均だけで判断しない」 —
+   * 60fps エディタでは裾の遅さこそが体感を壊す)。分散が大きい分だけしきい値を
+   * 広げる。倍率2は上記実測 (平均の変動幅に対し p95 は概ね2〜3倍振れる) の
+   * 下限側を採ったもの。
+   */
+  static readonly P95_THRESHOLD_FACTOR = 2;
+
   /** ベンチ別カスタムしきい値 (config 化) */
   private perBenchThresholds: Map<string, { minor: number; major: number; critical: number }> = new Map();
 
@@ -239,6 +255,8 @@ export class RegressionDetector {
       // (p95), which matters more for a 60fps editor than the mean does.
       // Judge severity from whichever of mean/p95 regressed worse.
       const p95Delta = base.p95Ms > 0 ? ((cur.p95Ms - base.p95Ms) / base.p95Ms) * 100 : meanDelta;
+      // 報告値は「悪いほう」。ただし**重大度の判定**は下で指標ごとのしきい値を使う
+      // (p95 は平均より本質的にばらつくため — P95_THRESHOLD_FACTOR 参照)。
       const delta = Math.max(meanDelta, p95Delta);
 
       // 割合の前に**絶対差**で足切りする。どちらの指標で判定するにせよ、
@@ -257,9 +275,20 @@ export class RegressionDetector {
       // 'critical' (which would NOT fail CI, since only 'critical'
       // regressions fail the build). Use >= to match the documented
       // "or more" semantics at each boundary.
-      if (delta >= t.minor) {
+      // 平均と p95 を**それぞれのしきい値**で裁き、重いほうを採る。
+      // 同一のしきい値で max(mean, p95) を裁くと、裾の外れ値ひとつが critical に
+      // なる (実測: 平均 +8% に対し p95 +32%)。
+      const p95T = RegressionDetector.P95_THRESHOLD_FACTOR;
+      const rank = (d: number, minor: number, major: number, critical: number): number =>
+        d >= critical ? 3 : d >= major ? 2 : d >= minor ? 1 : 0;
+      const severityRank = Math.max(
+        rank(meanDelta, t.minor, t.major, t.critical),
+        rank(p95Delta, t.minor * p95T, t.major * p95T, t.critical * p95T),
+      );
+
+      if (severityRank > 0) {
         const severity =
-          delta >= t.critical ? 'critical' : delta >= t.major ? 'major' : 'minor';
+          severityRank === 3 ? 'critical' : severityRank === 2 ? 'major' : 'minor';
         regressions.push({
           name: cur.name,
           baselineMeanMs: base.meanMs,

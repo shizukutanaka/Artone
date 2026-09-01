@@ -28,8 +28,10 @@ const mockVideoDecoder = {
   state: 'configured'
 };
 
-vi.stubGlobal('VideoEncoder', vi.fn(() => mockVideoEncoder));
-vi.stubGlobal('VideoDecoder', vi.fn(() => mockVideoDecoder));
+// `new` される global の差し替えは通常の `function` 式で書く
+// (アロー関数は [[Construct]] を持たないため `new X()` が落ちる)。
+vi.stubGlobal('VideoEncoder', vi.fn(function () { return mockVideoEncoder; }));
+vi.stubGlobal('VideoDecoder', vi.fn(function () { return mockVideoDecoder; }));
 
 // WebGPU Mock
 const mockGPUDevice = {
@@ -76,7 +78,7 @@ const mockAudioContext = {
   currentTime: 0,
   close: vi.fn()
 };
-vi.stubGlobal('AudioContext', vi.fn(() => mockAudioContext));
+vi.stubGlobal('AudioContext', vi.fn(function () { return mockAudioContext; }));
 
 // ==================================================
 // Test Suites

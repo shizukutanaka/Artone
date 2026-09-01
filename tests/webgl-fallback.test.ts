@@ -50,7 +50,10 @@ function makeGLMock() {
     createShader: vi.fn(() => { const s = {}; shaders.push(s); return s; }),
     shaderSource: vi.fn(),
     compileShader: vi.fn(),
-    getShaderParameter: vi.fn(() => true), // always compiles ok
+    // 実引数 (shader, pname) を受ける形で宣言する。個別のテストが pname を見て
+    // 分岐する差し替えを行うため、引数無しで宣言すると型が合わない
+    // (vitest 4 は Mock の呼び出しシグネチャを厳密に照合する)。
+    getShaderParameter: vi.fn((_shader: unknown, _pname: unknown) => true), // always compiles ok
     getShaderInfoLog: vi.fn(() => ''),
     deleteShader: vi.fn(),
     createProgram: vi.fn(() => { const p = {}; programs.push(p); return p; }),

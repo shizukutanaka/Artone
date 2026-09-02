@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { PixelBuffer, PixelSize } from '../core/pixel-geometry';
 import AIEffectsEngine, {
   transcriptionToWords,
   type TranscriptionResult,
@@ -404,12 +405,12 @@ describe('AIEffectsEngine — subscribe()', () => {
 
 type EnginePrivate = {
   estimateBgColor(d: Uint8ClampedArray, w: number, h: number): { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number };
-  buildBgMask(d: Uint8ClampedArray, w: number, h: number, bg: { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number }, threshold: number): Uint8Array;
+  buildBgMask(frame: PixelBuffer, bg: { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number }, threshold: number): Uint8Array;
   morphClose1D(mask: Uint8Array, w: number, h: number, r: number): Uint8Array;
   isSkinPixelYCbCr(r: number, g: number, b: number): boolean;
   findFaceCandidates(d: Uint8ClampedArray, w: number, h: number): Array<{ x: number; y: number; w: number; h: number; density: number }>;
   lanczos2Kernel(x: number): number;
-  resizeLanczos2(src: Uint8ClampedArray, sW: number, sH: number, dW: number, dH: number): Uint8ClampedArray;
+  resizeLanczos2(source: PixelBuffer, target: PixelSize): Uint8ClampedArray;
   applyMutedGrade(data: Uint8ClampedArray): void;
   applyVintageGrade(data: Uint8ClampedArray): void;
   applyCinematicGrade(data: Uint8ClampedArray): void;
@@ -462,7 +463,7 @@ describe('AIEffectsEngine — buildBgMask', () => {
     const engine = makeEngine();
     const data = solidImage(8, 8, 200, 100, 50);
     const bg = priv(engine).estimateBgColor(data, 8, 8);
-    const mask = priv(engine).buildBgMask(data, 8, 8, bg, 0.35);
+    const mask = priv(engine).buildBgMask({ data, width: 8, height: 8 }, bg, 0.35);
     // All pixels match background → entire mask should be 0 (background)
     expect(mask.every(v => v === 0)).toBe(true);
   });
@@ -478,7 +479,7 @@ describe('AIEffectsEngine — buildBgMask', () => {
     data[(cy * w + cx) * 4 + 2] = 0; // B=0
 
     const bg = priv(engine).estimateBgColor(data, w, h);
-    const mask = priv(engine).buildBgMask(data, w, h, bg, 0.1); // low threshold
+    const mask = priv(engine).buildBgMask({ data, width: w, height: h }, bg, 0.1); // low threshold
     expect(mask[cy * w + cx]).toBe(1); // center pixel is foreground
   });
 });
@@ -620,7 +621,7 @@ describe('AIEffectsEngine — resizeLanczos2', () => {
   it('2×2 → 4×4 produces the correct number of bytes', () => {
     const e = makeEngine();
     const src = new Uint8ClampedArray(2 * 2 * 4).fill(128);
-    const dst = priv(e).resizeLanczos2(src, 2, 2, 4, 4);
+    const dst = priv(e).resizeLanczos2({ data: src, width: 2, height: 2 }, { width: 4, height: 4 });
     expect(dst.length).toBe(4 * 4 * 4);
   });
 
@@ -629,7 +630,7 @@ describe('AIEffectsEngine — resizeLanczos2', () => {
     const src = solidImage(4, 4, 200, 100, 50).map(v => v) as unknown as Uint8ClampedArray;
     // Create proper Uint8ClampedArray
     const srcClamped = new Uint8ClampedArray(src);
-    const dst = priv(e).resizeLanczos2(srcClamped, 4, 4, 8, 8);
+    const dst = priv(e).resizeLanczos2({ data: srcClamped, width: 4, height: 4 }, { width: 8, height: 8 });
     for (let i = 0; i < dst.length; i++) {
       expect(dst[i]).toBeGreaterThanOrEqual(0);
       expect(dst[i]).toBeLessThanOrEqual(255);
@@ -643,7 +644,7 @@ describe('AIEffectsEngine — resizeLanczos2', () => {
     for (let i = 0; i < 16; i++) {
       src[i * 4] = 200; src[i * 4 + 1] = 100; src[i * 4 + 2] = 50; src[i * 4 + 3] = 255;
     }
-    const dst = priv(e).resizeLanczos2(src, 4, 4, 8, 8);
+    const dst = priv(e).resizeLanczos2({ data: src, width: 4, height: 4 }, { width: 8, height: 8 });
     // All output pixels should be close to the source colour
     for (let i = 0; i < 64; i++) {
       expect(dst[i * 4]).toBeCloseTo(200, -1);     // R ±16

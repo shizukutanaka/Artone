@@ -13,6 +13,7 @@
  */
 
 import { require2dContext, ensureSurface, type DrawSurface } from '../core/canvas-context';
+import type { PixelBuffer, PixelSize, PlaneBuffer } from '../core/pixel-geometry';
 
 // ============================================================
 // Types
@@ -317,7 +318,7 @@ export class AIEffectsEngine {
     const threshold = options.threshold ?? 0.35;
 
     const bg = this.estimateBgColor(data, width, height);
-    const mask = this.buildBgMask(data, width, height, bg, threshold);
+    const mask = this.buildBgMask({ data, width, height }, bg, threshold);
     const cleaned = this.morphClose1D(mask, width, height, 3);
 
     for (let i = 0; i < width * height; i++) {
@@ -682,7 +683,10 @@ export class AIEffectsEngine {
     this._upscaleSrc.ctx.drawImage(frame, 0, 0);
     const srcData = this._upscaleSrc.ctx.getImageData(0, 0, width, height);
 
-    const resized = this.resizeLanczos2(srcData.data, width, height, newWidth, newHeight);
+    const resized = this.resizeLanczos2(
+      { data: srcData.data, width, height },
+      { width: newWidth, height: newHeight },
+    );
 
     this._upscaleDst = ensureSurface(this._upscaleDst, newWidth, newHeight);
     const dstImageData = this._upscaleDst.ctx.createImageData(newWidth, newHeight);
@@ -873,10 +877,11 @@ export class AIEffectsEngine {
 
   /** Per-pixel Mahalanobis distance → binary foreground (1) / background (0) mask. */
   private buildBgMask(
-    data: Uint8ClampedArray, width: number, height: number,
+    frame: PixelBuffer,
     bg: { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number },
     threshold: number
   ): Uint8Array {
+    const { data, width, height } = frame;
     const n = width * height;
     if (this.bgMaskBuf.length < n) this.bgMaskBuf = new Uint8Array(n);
     const mask = this.bgMaskBuf;
@@ -896,24 +901,28 @@ export class AIEffectsEngine {
     if (this.morphBufA.length < n) this.morphBufA = new Uint8Array(n);
     if (this.morphBufB.length < n) this.morphBufB = new Uint8Array(n);
     // dilate: mask → (tmp=A, dst=B)
-    this.dilate1D(mask, width, height, r, this.morphBufA, this.morphBufB);
+    this.dilate1D({ data: mask, width, height }, r, { tmp: this.morphBufA, dst: this.morphBufB });
     // erode: B → (tmp=A, dst=B); H-pass reads B while V-pass writes B — safe because
     // H-pass fully consumes B into A before V-pass begins writing to B.
-    this.erode1D(this.morphBufB, width, height, r, this.morphBufA, this.morphBufB);
+    this.erode1D({ data: this.morphBufB, width, height }, r, { tmp: this.morphBufA, dst: this.morphBufB });
     return this.morphBufB;
   }
 
   private dilate1D(
-    src: Uint8Array, width: number, height: number, r: number,
-    tmp: Uint8Array, dst: Uint8Array,
+    src: PlaneBuffer,
+    radius: number,
+    scratch: { tmp: Uint8Array; dst: Uint8Array },
   ): void {
+    const { data: plane, width, height } = src;
+    const r = radius;
+    const { tmp, dst } = scratch;
     // Horizontal
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let v = 0;
         for (let dx = -r; dx <= r && !v; dx++) {
           const nx = Math.max(0, Math.min(width - 1, x + dx));
-          v |= src[y * width + nx];
+          v |= plane[y * width + nx];
         }
         tmp[y * width + x] = v;
       }
@@ -932,15 +941,19 @@ export class AIEffectsEngine {
   }
 
   private erode1D(
-    src: Uint8Array, width: number, height: number, r: number,
-    tmp: Uint8Array, dst: Uint8Array,
+    src: PlaneBuffer,
+    radius: number,
+    scratch: { tmp: Uint8Array; dst: Uint8Array },
   ): void {
+    const { data: plane, width, height } = src;
+    const r = radius;
+    const { tmp, dst } = scratch;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let v = 1;
         for (let dx = -r; dx <= r && v; dx++) {
           const nx = Math.max(0, Math.min(width - 1, x + dx));
-          v &= src[y * width + nx];
+          v &= plane[y * width + nx];
         }
         tmp[y * width + x] = v;
       }
@@ -1056,10 +1069,12 @@ export class AIEffectsEngine {
    * Separable Lanczos-2 resize: horizontal pass then vertical pass.
    * Produces crisper results than canvas bilinear for AI upscale operations.
    */
-  private resizeLanczos2(
-    src: Uint8ClampedArray, srcW: number, srcH: number,
-    dstW: number, dstH: number
-  ): Uint8ClampedArray {
+  private resizeLanczos2(source: PixelBuffer, target: PixelSize): Uint8ClampedArray {
+    const src = source.data;
+    const srcW = source.width;
+    const srcH = source.height;
+    const dstW = target.width;
+    const dstH = target.height;
     const xRatio = srcW / dstW;
     // Horizontal pass: srcW×srcH → dstW×srcH (float buffer)
     const hBuf = new Float32Array(dstW * srcH * 4);

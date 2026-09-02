@@ -22,6 +22,7 @@
  * # AI generated (reviewed)
  */
 
+import type { PixelSource } from '../core/pixel-geometry';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** A set of 256-bin histograms for an RGBA image. */
@@ -239,20 +240,22 @@ export function buildLevelsLUT(params: LevelsParams = {}): Uint8ClampedArray {
  * @returns       New RGBA image with LUTs applied (alpha preserved).
  */
 export function applyChannelLUT(
-  src:    Uint8ClampedArray | Uint8Array,
-  width:  number,
-  height: number,
-  lutR:   Uint8ClampedArray | number[],
-  lutG?:  Uint8ClampedArray | number[],
-  lutB?:  Uint8ClampedArray | number[],
+  source: PixelSource,
+  luts: {
+    r: Uint8ClampedArray | number[];
+    g?: Uint8ClampedArray | number[];
+    b?: Uint8ClampedArray | number[];
+  },
 ): Uint8ClampedArray {
-  const gLut = lutG ?? lutR;
-  const bLut = lutB ?? lutR;
+  const { data: src, width, height } = source;
+  const rLut = luts.r;
+  const gLut = luts.g ?? rLut;
+  const bLut = luts.b ?? rLut;
   const out = new Uint8ClampedArray(src.length);
   const pixelCount = width * height;
   for (let i = 0; i < pixelCount; i++) {
     const off = i * 4;
-    out[off]     = lutR[src[off]];
+    out[off]     = rLut[src[off]];
     out[off + 1] = gLut[src[off + 1]];
     out[off + 2] = bLut[src[off + 2]];
     out[off + 3] = src[off + 3];
@@ -278,7 +281,7 @@ export function applyLevels(
   params: LevelsParams,
 ): Uint8ClampedArray {
   const lut = buildLevelsLUT(params);
-  return applyChannelLUT(src, width, height, lut);
+  return applyChannelLUT({ data: src, width, height }, { r: lut });
 }
 
 // ─── Histogram equalization ───────────────────────────────────────────────────
@@ -335,10 +338,10 @@ export function equalizeHistogram(
     const lutR = buildEqualizationLUT(hist.r);
     const lutG = buildEqualizationLUT(hist.g);
     const lutB = buildEqualizationLUT(hist.b);
-    return applyChannelLUT(src, width, height, lutR, lutG, lutB);
+    return applyChannelLUT({ data: src, width, height }, { r: lutR, g: lutG, b: lutB });
   }
   const lumaLut = buildEqualizationLUT(hist.luma);
-  return applyChannelLUT(src, width, height, lumaLut);
+  return applyChannelLUT({ data: src, width, height }, { r: lumaLut });
 }
 
 // ─── Auto contrast ────────────────────────────────────────────────────────────

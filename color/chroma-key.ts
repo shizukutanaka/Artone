@@ -24,6 +24,7 @@
  * # AI generated (reviewed)
  */
 
+import type { PixelSource } from '../core/pixel-geometry';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Options for chroma keying. */
@@ -203,12 +204,12 @@ function suppressSpill(
  * @returns           New RGBA image with spill reduced (alpha preserved).
  */
 export function suppressSpillImage(
-  src:      Uint8ClampedArray | Uint8Array,
-  width:    number,
-  height:   number,
-  keyColor: [number, number, number] = [0, 255, 0],
-  amount =  1,
+  source: PixelSource,
+  options: { keyColor?: [number, number, number]; amount?: number } = {},
 ): Uint8ClampedArray {
+  const { data: src, width, height } = source;
+  const keyColor = options.keyColor ?? [0, 255, 0];
+  const amount = options.amount ?? 1;
   const a = clamp01(amount);
   const keyChannel = dominantChannel(keyColor);
   const out = new Uint8ClampedArray(src.length);

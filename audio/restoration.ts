@@ -196,7 +196,26 @@ export function declick(input: Float32Array, opts: DeclickOptions = {}): Declick
  * Cubic Hermite interpolation between p1 and p2 with neighbours p0, p3.
  * Catmull-Rom tangents. t ∈ [0, 1].
  */
-function cubicHermite(p0: number, p1: number, p2: number, p3: number, t: number): number {
+/**
+ * Catmull-Rom 型の三次エルミート補間の制御点。
+ *
+ * 4つとも `number` で並べると**順番の取り違えを型が検出できない**
+ * (取り違えても落ちず、復元波形だけが歪む)。名前で受け取る。
+ * 呼び出し側は補間ループの**外**で1回だけ作るので、標本ごとの割り当ては増えない。
+ */
+interface HermitePoints {
+  /** 手前の外側 (p0)。 */
+  before: number;
+  /** 補間区間の始点 (p1)。 */
+  start: number;
+  /** 補間区間の終点 (p2)。 */
+  end: number;
+  /** 奥の外側 (p3)。 */
+  after: number;
+}
+
+function cubicHermite(points: HermitePoints, t: number): number {
+  const { before: p0, start: p1, end: p2, after: p3 } = points;
   const t2 = t * t;
   const t3 = t2 * t;
   const m1 = 0.5 * (p2 - p0);
@@ -248,14 +267,15 @@ export function declip(input: Float32Array, opts: DeclipOptions = {}): DeclipRes
         const a = i - 1;       // last good sample before
         const b = end + 1;     // first good sample after
         if (a >= 1 && b <= n - 2) {
-          const p0 = output[a - 1];
-          const p1 = output[a];
-          const p2 = output[b];
-          const p3 = output[b + 1];
+          // 制御点はループ不変。外で1回だけ組む。
+          const points = {
+            before: output[a - 1], start: output[a],
+            end: output[b], after: output[b + 1],
+          };
           const span = b - a;
           for (let k = a + 1; k < b; k++) {
             const t = (k - a) / span;
-            let v = cubicHermite(p0, p1, p2, p3, t);
+            let v = cubicHermite(points, t);
             // Ensure the restored peak at least reaches the clip ceiling
             if (sign > 0) v = Math.max(v, clipThreshold);
             else          v = Math.min(v, -clipThreshold);

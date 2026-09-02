@@ -107,7 +107,7 @@ describe('vignette', () => {
 describe('deinterlace', () => {
   it('bob removes combing (odd lines interpolated from neighbours)', () => {
     const img = combImage(4, 6);
-    const out = deinterlace(img, 4, 6, 'bob', 'tff');
+    const out = deinterlace({ data: img, width: 4, height: 6 }, { method: 'bob', order: 'tff' });
     // tff keeps even lines (bright 240); odd lines become avg of neighbours
     // line 1 = avg(line0=240, line2=240) = 240
     expect(px(out, 0, 0, 4)[0]).toBe(240); // kept
@@ -116,14 +116,14 @@ describe('deinterlace', () => {
 
   it('bob bff keeps odd lines', () => {
     const img = combImage(4, 6);
-    const out = deinterlace(img, 4, 6, 'bob', 'bff');
+    const out = deinterlace({ data: img, width: 4, height: 6 }, { method: 'bob', order: 'bff' });
     // bff keeps odd lines (dark 10); even lines interpolated
     expect(px(out, 0, 1, 4)[0]).toBe(10);  // kept
   });
 
   it('blend reduces line-to-line variance', () => {
     const img = combImage(4, 6);
-    const out = deinterlace(img, 4, 6, 'blend');
+    const out = deinterlace({ data: img, width: 4, height: 6 }, { method: 'blend' });
     // After blend, adjacent lines should be much closer than 240 vs 10
     const line0 = px(out, 0, 1, 4)[0];
     const line1 = px(out, 0, 2, 4)[0];
@@ -132,19 +132,19 @@ describe('deinterlace', () => {
 
   it('preserves dimensions', () => {
     const img = combImage(8, 8);
-    expect(deinterlace(img, 8, 8).length).toBe(img.length);
+    expect(deinterlace({ data: img, width: 8, height: 8 }).length).toBe(img.length);
   });
 
   it('preserves alpha', () => {
     const img = combImage(4, 4);
     for (let i = 3; i < img.length; i += 4) img[i] = 200;
-    const out = deinterlace(img, 4, 4, 'blend');
+    const out = deinterlace({ data: img, width: 4, height: 4 }, { method: 'blend' });
     for (let i = 3; i < out.length; i += 4) expect(out[i]).toBe(200);
   });
 
   it('progressive (solid) image is essentially unchanged by bob', () => {
     const img = solid(4, 6, [100, 100, 100, 255]);
-    const out = deinterlace(img, 4, 6, 'bob');
+    const out = deinterlace({ data: img, width: 4, height: 6 }, { method: 'bob' });
     for (let i = 0; i < out.length; i++) {
       if (i % 4 === 3) continue;
       expect(out[i]).toBe(100);
@@ -168,7 +168,7 @@ describe('detectCombing', () => {
   it('deinterlaced image scores lower than original', () => {
     const img = combImage(8, 8);
     const before = detectCombing(img, 8, 8);
-    const after = detectCombing(deinterlace(img, 8, 8, 'blend'), 8, 8);
+    const after = detectCombing(deinterlace({ data: img, width: 8, height: 8 }, { method: 'blend' }), 8, 8);
     expect(after).toBeLessThan(before);
   });
 

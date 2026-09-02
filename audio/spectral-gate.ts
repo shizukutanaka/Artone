@@ -204,13 +204,21 @@ function makeHannWindow(N: number): Float32Array {
  * Apply spectral subtraction to a single windowed FFT spectrum.
  * Returns modified bins [re0,im0, ...] of the same length.
  */
+/** スペクトル減算の強さ。 */
+interface SubtractionParams {
+  /** 過剰減算係数。 */
+  alpha: number;
+  /** 残留ノイズの下限 (線形)。 */
+  floorLinear: number;
+}
+
 function subtractNoise(
   bins: Float32Array,
   noisePow: Float32Array,
-  alpha: number,
-  floorLinear: number,
+  params: SubtractionParams,
   out?: Float32Array,
 ): Float32Array {
+  const { alpha, floorLinear } = params;
   const buf   = out ?? new Float32Array(bins.length);
   const bins2 = bins.length >> 1; // N/2 + 1 complex bins
   for (let k = 0; k < bins2; k++) {
@@ -297,7 +305,7 @@ export function applySpectralGate(
     for (let i = 0; i < N; i++) frame[i] = input[off + i] * hann[i];
 
     const spec     = fft(frame);
-    const modified = subtractNoise(spec, noisePow, alpha, floorLin);
+    const modified = subtractNoise(spec, noisePow, { alpha, floorLinear: floorLin });
 
     // OLA: add IFFT output directly (no synthesis window).
     // For periodic Hann with 50 % overlap, ∑_k hann[n − k·hop] = 1 ∀ n,
@@ -424,7 +432,7 @@ export function createSpectralGateProcessor(options: SpectralGateOptions = {}): 
     }
 
     const modified = noiseReady
-      ? subtractNoise(spec, noisePow, alpha, floorLin, subtractBuf)
+      ? subtractNoise(spec, noisePow, { alpha, floorLinear: floorLin }, subtractBuf)
       : spec; // passthrough during profiling
 
     const recon = ifft(modified, N, ifftWorkBuf, ifftOutBuf);

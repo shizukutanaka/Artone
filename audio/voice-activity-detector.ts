@@ -188,14 +188,20 @@ function initState(initialFloorDb: number): ProcessingState {
   return { noiseFloor: initialFloorDb, hangoverRemain: 0 };
 }
 
+/** フレーム分割の設定 (3つとも `number` なので組で運ぶ)。 */
+interface Framing {
+  windowSize: number;
+  hopSize: number;
+  sampleRate: number;
+}
+
 function analyseAudio(
-  audio:      Float32Array,
-  windowSize: number,
-  hopSize:    number,
-  sampleRate: number,
-  opts:       Required<VADOptions>,
-  state:      ProcessingState,
+  audio:   Float32Array,
+  framing: Framing,
+  opts:    Required<VADOptions>,
+  state:   ProcessingState,
 ): VADResult {
+  const { windowSize, hopSize, sampleRate } = framing;
   const numFrames  = Math.max(0, Math.floor((audio.length - windowSize) / hopSize) + 1);
   const energy     = new Float32Array(numFrames);
   const zcr        = new Float32Array(numFrames);
@@ -294,7 +300,7 @@ export function detectVoiceActivity(
 ): VADResult {
   const o     = resolveOptions(options);
   const state = initState(-60); // initial noise floor: -60 dBFS
-  return analyseAudio(audio, o.windowSize, o.hopSize, o.sampleRate, o, state);
+  return analyseAudio(audio, { windowSize: o.windowSize, hopSize: o.hopSize, sampleRate: o.sampleRate }, o, state);
 }
 
 /**
@@ -352,7 +358,7 @@ export function createVAD(options: VADOptions = {}): VADProcessor {
     for (const blk of blocks) { merged.set(blk, off); off += blk.length; }
     // Re-analyse from fresh state but preserve current noise floor estimate
     const freshState = initState(-60);
-    return analyseAudio(merged, o.windowSize, o.hopSize, o.sampleRate, o, freshState);
+    return analyseAudio(merged, { windowSize: o.windowSize, hopSize: o.hopSize, sampleRate: o.sampleRate }, o, freshState);
   }
 
   function reset(): void {

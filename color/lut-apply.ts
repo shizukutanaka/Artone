@@ -49,7 +49,23 @@ export interface CurvePoint {
  * Math is identical to the previous version: `a + (b - a) * t` lerps, applied
  * along R, then G, then B.
  */
-function trilinear(data: Float32Array, N: number, r: number, g: number, b: number, out: number[]): void {
+/** 3D LUT の格子 (データと1辺の分割数は常に対)。 */
+interface LutGrid {
+  data: Float32Array;
+  /** 1辺のサンプル数。 */
+  size: number;
+}
+
+/**
+ * 正規化 RGB (各 0..1)。3つとも `number` なので順番の取り違えを型が検出できず、
+ * **色が入れ替わった映像**という形でしか現れない。
+ */
+type Rgb01 = readonly [r: number, g: number, b: number];
+
+function trilinear(lut: LutGrid, rgb: Rgb01, out: number[]): void {
+  const data = lut.data;
+  const N = lut.size;
+  const [r, g, b] = rgb;
   const scale = N - 1;
   const ri = Math.min(Math.max(r * scale, 0), scale);
   const gi = Math.min(Math.max(g * scale, 0), scale);
@@ -99,7 +115,7 @@ export function sampleLUT(lut: LUTData, r: number, g: number, b: number): [numbe
   const N = lut.size;
   if (N < 2) return [r, g, b];
   const out: [number, number, number] = [0, 0, 0];
-  trilinear(lut.data, N, r, g, b, out);
+  trilinear({ data: lut.data, size: N }, [r, g, b], out);
   return out;
 }
 
@@ -111,11 +127,15 @@ export function applyLUTToBuffer(data: Uint8ClampedArray, lut: LUTData): void {
   const N = lut.size;
   if (N < 2) return; // degenerate LUT → identity (leave pixels untouched)
 
-  const lutData = lut.data;
+  // 走査中は不変。格子と入力タプルはループの**外**で1回だけ作り、以降は
+  // 中身を書き換えて使い回す (画素ごとの割り当てを増やさない)。
+  const grid: LutGrid = { data: lut.data, size: N };
+  const rgbIn: [number, number, number] = [0, 0, 0];
   // One reusable scratch tuple for the whole buffer — no per-pixel allocation.
   const px: number[] = [0, 0, 0];
   for (let i = 0; i < data.length; i += 4) {
-    trilinear(lutData, N, data[i] / 255, data[i + 1] / 255, data[i + 2] / 255, px);
+    rgbIn[0] = data[i] / 255; rgbIn[1] = data[i + 1] / 255; rgbIn[2] = data[i + 2] / 255;
+    trilinear(grid, rgbIn, px);
     data[i]     = Math.round(Math.max(0, Math.min(1, px[0])) * 255);
     data[i + 1] = Math.round(Math.max(0, Math.min(1, px[1])) * 255);
     data[i + 2] = Math.round(Math.max(0, Math.min(1, px[2])) * 255);

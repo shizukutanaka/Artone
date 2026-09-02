@@ -70,12 +70,13 @@ export function fitCropSize(sourceWidth: number, sourceHeight: number, targetAsp
 
 /** 中心 (cx,cy) とクロップ寸法から、source 境界にクランプした矩形を返す。 */
 function clampedWindow(
-  cx: number,
-  cy: number,
+  center: { cx: number; cy: number },
   size: { width: number; height: number },
-  sourceWidth: number,
-  sourceHeight: number
+  source: { width: number; height: number },
 ): CropWindow {
+  const { cx, cy } = center;
+  const sourceWidth = source.width;
+  const sourceHeight = source.height;
   const half = { w: size.width / 2, h: size.height / 2 };
   const x = Math.max(0, Math.min(sourceWidth - size.width, cx - half.w));
   const y = Math.max(0, Math.min(sourceHeight - size.height, cy - half.h));
@@ -132,7 +133,7 @@ export function computeReframe(
       cy = ny;
     }
 
-    out.push(clampedWindow(cx, cy, size, sourceWidth, sourceHeight));
+    out.push(clampedWindow({ cx: cx, cy: cy }, size, { width: sourceWidth, height: sourceHeight }));
   }
 
   return out;

@@ -18,7 +18,10 @@ import type { PixelBuffer, PixelSize } from '../render/spatial-resampler';
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 /** Create a solid RGBA buffer (all pixels same colour). */
-function solid(r: number, g: number, b: number, a: number, w: number, h: number): Uint8ClampedArray {
+/** 単色画像。`(r,g,b,a,w,h)` と6つ並べると取り違えても落ちないので組で受ける。 */
+function solid(rgba: readonly [number, number, number, number], size: PixelSize): Uint8ClampedArray {
+  const [r, g, b, a] = rgba;
+  const w = size.width, h = size.height;
   const data = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     data[i * 4]     = r;
@@ -53,7 +56,7 @@ const KERNELS: [string, KernelFn][] = [
 
 describe('output size', () => {
   it.each(KERNELS)('%s returns buffer of dstW×dstH×4 bytes', (_name, fn) => {
-    const src = solid(100, 150, 200, 255, 10, 10);
+    const src = solid([100, 150, 200, 255], size(10, 10));
     const out = fn(buf(src, 10, 10), size(5, 8));
     expect(out.length).toBe(5 * 8 * 4);
   });
@@ -65,7 +68,7 @@ describe('solid colour preservation', () => {
   // A solid-colour image should resample to the same solid colour
   it.each(KERNELS)('%s preserves solid colour on 2× upscale', (_name, fn) => {
     const r = 120, g = 80, b = 200, a = 255;
-    const src = solid(r, g, b, a, 4, 4);
+    const src = solid([r, g, b, a], size(4, 4));
     const out = fn(buf(src, 4, 4), size(8, 8));
     for (let y = 0; y < 8; y++) {
       for (let x = 0; x < 8; x++) {
@@ -80,7 +83,7 @@ describe('solid colour preservation', () => {
 
   it.each(KERNELS)('%s preserves solid colour on 2× downscale', (_name, fn) => {
     const r = 220, g = 30, b = 90, a = 200;
-    const src = solid(r, g, b, a, 8, 8);
+    const src = solid([r, g, b, a], size(8, 8));
     const out = fn(buf(src, 8, 8), size(4, 4));
     for (let y = 0; y < 4; y++) {
       for (let x = 0; x < 4; x++) {
@@ -115,7 +118,7 @@ describe('scale to 1×1', () => {
 
 describe('identity resize', () => {
   it.each(KERNELS)('%s identical dimensions returns same pixel values', (_name, fn) => {
-    const src = solid(80, 160, 240, 255, 4, 4);
+    const src = solid([80, 160, 240, 255], size(4, 4));
     const out = fn(buf(src, 4, 4), size(4, 4));
     for (let i = 0; i < src.length; i++) {
       expect(Math.abs(out[i] - src[i])).toBeLessThanOrEqual(1);
@@ -127,7 +130,7 @@ describe('identity resize', () => {
 
 describe('alpha channel', () => {
   it.each(KERNELS)('%s preserves alpha = 0 (transparent)', (_name, fn) => {
-    const src = solid(200, 200, 200, 0, 4, 4);
+    const src = solid([200, 200, 200, 0], size(4, 4));
     const out = fn(buf(src, 4, 4), size(8, 8));
     for (let y = 0; y < 8; y++) {
       for (let x = 0; x < 8; x++) {
@@ -141,7 +144,7 @@ describe('alpha channel', () => {
 
 describe('non-square resize', () => {
   it.each(KERNELS)('%s handles non-square source and dest', (_name, fn) => {
-    const src = solid(60, 120, 180, 255, 16, 9);
+    const src = solid([60, 120, 180, 255], size(16, 9));
     const out = fn(buf(src, 16, 9), size(8, 5));
     expect(out.length).toBe(8 * 5 * 4);
     // Spot-check centre pixel colour
@@ -154,14 +157,14 @@ describe('non-square resize', () => {
 
 describe('resample() unified API', () => {
   it('defaults to bilinear', () => {
-    const src = solid(100, 200, 50, 255, 4, 4);
+    const src = solid([100, 200, 50, 255], size(4, 4));
     const out = resample(buf(src, 4, 4), size(8, 8));
     expect(out.length).toBe(8 * 8 * 4);
   });
 
   it.each(['nearest', 'bilinear', 'bicubic', 'lanczos3'] as const)(
     '%s kernel via resample() returns correct size', (kernel) => {
-      const src = solid(100, 100, 100, 255, 4, 4);
+      const src = solid([100, 100, 100, 255], size(4, 4));
       const out = resample(buf(src, 4, 4), size(6, 6), { kernel });
       expect(out.length).toBe(6 * 6 * 4);
     }

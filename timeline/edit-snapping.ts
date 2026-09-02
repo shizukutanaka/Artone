@@ -243,12 +243,11 @@ const EMPTY_SET: ReadonlySet<string> = new Set<string>();
  * @returns              A ClipSnapResult with the adjusted start and shift.
  */
 export function snapClipDrag(
-  clipId:        string,
-  proposedStart: number,
-  duration:      number,
-  targets:       readonly SnapTarget[],
-  threshold:     number,
+  drag:      { clipId: string; proposedStart: number; duration: number },
+  targets:   readonly SnapTarget[],
+  threshold: number,
 ): ClipSnapResult {
+  const { clipId, proposedStart, duration } = drag;
   const exclude = new Set<string>([clipId]);
   const startSnap = snapValue(proposedStart, targets, threshold, exclude);
   const endSnap   = snapValue(proposedStart + duration, targets, threshold, exclude);

@@ -32,6 +32,24 @@ export function require2dContext(
   return ctx;
 }
 
+/**
+ * `HTMLCanvasElement` の 2D コンテキストを取得する。取れなければ落とす。
+ *
+ * DOM 上のキャンバス版。null になる条件も対処も {@link require2dContext} と
+ * 同じで、違いはキャンバスの種類だけ (`media/` のサムネイル生成が DOM 側の
+ * キャンバスを使う)。
+ */
+export function requireElement2dContext(
+  canvas: HTMLCanvasElement,
+  options?: CanvasRenderingContext2DSettings,
+): CanvasRenderingContext2D {
+  const ctx = canvas.getContext('2d', options);
+  if (!ctx) {
+    throw new Error('Canvas 2D context is unavailable (too many contexts or out of memory)');
+  }
+  return ctx;
+}
+
 /** 遅延生成する描画面 (キャンバスとその 2D コンテキストは常に対で扱う)。 */
 export interface DrawSurface {
   canvas: OffscreenCanvas;

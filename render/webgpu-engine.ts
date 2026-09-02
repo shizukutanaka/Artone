@@ -433,11 +433,11 @@ export class WebGPURenderEngine {
     this.pipelines.set('composite', this.device.createRenderPipeline({
       layout: 'auto',
       vertex: {
-        module: this.shaders.get('composite')!,
+        module: this.requireShader('composite'),
         entryPoint: 'vs'
       },
       fragment: {
-        module: this.shaders.get('composite')!,
+        module: this.requireShader('composite'),
         entryPoint: 'fs',
         targets: [{
           format,
@@ -454,11 +454,11 @@ export class WebGPURenderEngine {
     this.pipelines.set('transform', this.device.createRenderPipeline({
       layout: 'auto',
       vertex: {
-        module: this.shaders.get('transform')!,
+        module: this.requireShader('transform'),
         entryPoint: 'vs'
       },
       fragment: {
-        module: this.shaders.get('transform')!,
+        module: this.requireShader('transform'),
         entryPoint: 'fs',
         targets: [{
           format,
@@ -475,9 +475,23 @@ export class WebGPURenderEngine {
     for (const name of ['blur', 'chromaKey']) {
       this.pipelines.set(name, this.device.createComputePipeline({
         layout: 'auto',
-        compute: { module: this.shaders.get(name)!, entryPoint: 'main' }
+        compute: { module: this.requireShader(name), entryPoint: 'main' }
       }));
     }
+  }
+
+  /**
+   * 名前でシェーダモジュールを引く。無ければ理由付きで落とす。
+   *
+   * `this.shaders.get(name)!` のままだと、`createRenderPipeline({ module: undefined })`
+   * が **WebGPU のバリデーションエラー**として原因から遠い場所で落ちる
+   * (どのシェーダが無いのかも分からない)。デバイス喪失時に `shaders` は
+   * clear されるため、これは実際に起こりうる。
+   */
+  private requireShader(name: string): GPUShaderModule {
+    const module = this.shaders.get(name);
+    if (!module) throw new Error(`WebGPU shader module not compiled: ${name}`);
+    return module;
   }
 
   // ============================================================
@@ -491,10 +505,12 @@ export class WebGPURenderEngine {
     if (!this.device) return null;
 
     // Check cache
-    if (this.textureCache.has(id)) {
+    // has + get の二度引きをやめる。`!` が要らなくなるうえ Map 参照も1回で済む。
+    const cached = this.textureCache.get(id);
+    if (cached) {
       this.cacheHits++;
       this.updateCacheOrder(id);
-      return this.textureCache.get(id)!;
+      return cached;
     }
 
     this.cacheMisses++;
@@ -634,7 +650,10 @@ export class WebGPURenderEngine {
     }
 
     // Use persistent uniform buffer (pre-allocated in init) — avoids createBuffer per frame.
-    const paramBuffer = this._effectParamGPUBuf!;
+    // デバイス喪失時に null へ戻されるフィールドなので `!` で潰さない
+    // (null のまま writeBuffer へ渡すと、原因の分からない WebGPU エラーになる)。
+    const paramBuffer = this._effectParamGPUBuf;
+    if (!paramBuffer) return null;
     this.device.queue.writeBuffer(paramBuffer, 0, paramData);
 
     const bindGroup = this.device.createBindGroup({
@@ -674,7 +693,9 @@ export class WebGPURenderEngine {
     paramData[2] = 0;
     paramData[3] = 0;
     // Use persistent uniform buffer (pre-allocated in init) — avoids createBuffer per frame.
-    const paramBuffer = this._compositeParamGPUBuf!;
+    // デバイス喪失時に null へ戻されるため `!` で潰さない (上の applyEffect と同じ)。
+    const paramBuffer = this._compositeParamGPUBuf;
+    if (!paramBuffer) return;
     this.device.queue.writeBuffer(paramBuffer, 0, paramData);
 
     const bindGroup = this.device.createBindGroup({

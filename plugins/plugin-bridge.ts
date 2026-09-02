@@ -9,6 +9,7 @@
  * - プリセット管理
  * - プラグインチェーン
  */
+import { escapeHtml } from '../core/html-escape';
 
 // ==================== Types ====================
 
@@ -99,11 +100,6 @@ function requireElement<T extends Element>(root: ParentNode, selector: string): 
   return el;
 }
 
-/** HTML の特殊文字 → 実体参照。{@link escapeHtml} の置換表。 */
-const HTML_ESCAPES: Readonly<Record<string, string>> = {
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-};
-
 export class PluginBridge {
   private audioContext: AudioContext;
   private descriptors: Map<string, PluginDescriptor> = new Map();
@@ -115,13 +111,6 @@ export class PluginBridge {
 
   private readonly BLOCK_SIZE = 128;
 
-  /** Escape HTML special characters to prevent XSS when injecting plugin metadata into innerHTML. */
-  private static escapeHtml(s: string): string {
-    // 置換表は正規表現と同じ5文字を覆う。`?? c` は到達しないが、`!` で潰すより
-    // 安全側に倒れる — 表と正規表現が将来ずれても**未エスケープの文字を
-    // undefined に変えてしまう**ことがない (XSS 対策としてはそこが要点)。
-    return s.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c] ?? c);
-  }
   
   constructor(audioContext: AudioContext) {
     this.audioContext = audioContext;
@@ -593,7 +582,7 @@ export class PluginBridge {
   }
   
   private createGenericUI(instance: PluginInstance, signal?: AbortSignal): HTMLElement {
-    const esc = PluginBridge.escapeHtml;
+    const esc = escapeHtml;
     const container = document.createElement('div');
     container.className = 'plugin-ui';
     container.innerHTML = `

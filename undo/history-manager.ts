@@ -13,6 +13,7 @@
  */
 import { color } from '../app/design-system';
 import { createLogger } from '../app/logger';
+import { escapeHtml } from '../core/html-escape';
 
 const log = createLogger('HistoryManager');
 
@@ -1156,11 +1157,6 @@ export function mountHistoryPanel(
   return () => container.removeEventListener('click', onClick);
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!
-  ));
-}
 
 function getTypeColor(type: string): string {
   const colors: Record<string, string> = {

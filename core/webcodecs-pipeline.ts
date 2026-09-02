@@ -358,7 +358,13 @@ export class VideoPipeline {
       return false;
     }
 
-    this.decoderConfig = support.config!;
+    // `isConfigSupported` は supported=true でも config を省略しうる
+    // (仕様上 optional)。`!` で潰すと undefined を configure() へ渡すことになる。
+    if (!support.config) {
+      log.warn('Decoder reported support without a config:', fullConfig);
+      return false;
+    }
+    this.decoderConfig = support.config;
     return true;
   }
 
@@ -380,7 +386,11 @@ export class VideoPipeline {
       return false;
     }
 
-    this.encoderConfig = support.config!;
+    if (!support.config) {
+      log.warn('Encoder reported support without a config:', fullConfig);
+      return false;
+    }
+    this.encoderConfig = support.config;
     return true;
   }
 

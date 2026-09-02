@@ -1,5 +1,6 @@
 import { color } from '../app/design-system';
 import { setHighQualityScaling } from '../app/utils';
+import { requireElement2dContext } from '../core/canvas-context';
 /**
  * Artone v3 — Media Browser
  * 
@@ -508,7 +509,7 @@ export class MediaBrowser {
         canvas.width = width * scale;
         canvas.height = height * scale;
 
-        const ctx = canvas.getContext('2d')!;
+        const ctx = requireElement2dContext(canvas);
         setHighQualityScaling(ctx);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
@@ -537,7 +538,7 @@ export class MediaBrowser {
       const canvas = document.createElement('canvas');
       canvas.width = 160;
       canvas.height = 90;
-      const ctx = canvas.getContext('2d')!;
+      const ctx = requireElement2dContext(canvas);
 
       ctx.fillStyle = color.surface1;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -581,7 +582,7 @@ export class MediaBrowser {
         canvas.width = img.width * scale;
         canvas.height = img.height * scale;
 
-        const ctx = canvas.getContext('2d')!;
+        const ctx = requireElement2dContext(canvas);
         setHighQualityScaling(ctx);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
@@ -616,10 +617,11 @@ export class MediaBrowser {
       }
 
       // Tags
-      if (filter.tags && filter.tags.length > 0) {
-        items = items.filter(i =>
-          filter.tags!.every(t => i.tags.includes(t))
-        );
+      // クロージャの中では `filter.tags` の絞り込みが効かない (外側の if は
+      // 内側の関数まで及ばない)。ローカルに取ってから使う。
+      const requiredTags = filter.tags;
+      if (requiredTags && requiredTags.length > 0) {
+        items = items.filter(i => requiredTags.every(t => i.tags.includes(t)));
       }
 
       // Favorite
@@ -628,16 +630,19 @@ export class MediaBrowser {
       }
 
       // Duration
-      if (filter.minDuration !== undefined) {
-        items = items.filter(i => i.duration >= filter.minDuration!);
+      const minDuration = filter.minDuration;
+      if (minDuration !== undefined) {
+        items = items.filter(i => i.duration >= minDuration);
       }
-      if (filter.maxDuration !== undefined) {
-        items = items.filter(i => i.duration <= filter.maxDuration!);
+      const maxDuration = filter.maxDuration;
+      if (maxDuration !== undefined) {
+        items = items.filter(i => i.duration <= maxDuration);
       }
 
       // Rating
-      if (filter.minRating !== undefined) {
-        items = items.filter(i => i.rating >= filter.minRating!);
+      const minRating = filter.minRating;
+      if (minRating !== undefined) {
+        items = items.filter(i => i.rating >= minRating);
       }
 
       // Sort

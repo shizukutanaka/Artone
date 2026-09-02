@@ -86,6 +86,24 @@ interface ProcessBuffer {
 
 // ==================== Plugin Bridge ====================
 
+/**
+ * 直前に組み立てたマークアップから要素を引く。無ければ落とす。
+ *
+ * `querySelector(...)!` は「テンプレートを書き換えたのに参照側を直し忘れた」
+ * 場合に **null に対する操作**として遠い場所で落ちる。ここで何が見つからな
+ * かったかを言って落としたほうが原因に近い。
+ */
+function requireElement<T extends Element>(root: ParentNode, selector: string): T {
+  const el = root.querySelector<T>(selector);
+  if (!el) throw new Error(`Plugin UI element not found: ${selector}`);
+  return el;
+}
+
+/** HTML の特殊文字 → 実体参照。{@link escapeHtml} の置換表。 */
+const HTML_ESCAPES: Readonly<Record<string, string>> = {
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+};
+
 export class PluginBridge {
   private audioContext: AudioContext;
   private descriptors: Map<string, PluginDescriptor> = new Map();
@@ -99,9 +117,10 @@ export class PluginBridge {
 
   /** Escape HTML special characters to prevent XSS when injecting plugin metadata into innerHTML. */
   private static escapeHtml(s: string): string {
-    return s.replace(/[&<>"']/g, (c) => (
-      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!
-    ));
+    // 置換表は正規表現と同じ5文字を覆う。`?? c` は到達しないが、`!` で潰すより
+    // 安全側に倒れる — 表と正規表現が将来ずれても**未エスケープの文字を
+    // undefined に変えてしまう**ことがない (XSS 対策としてはそこが要点)。
+    return s.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c] ?? c);
   }
   
   constructor(audioContext: AudioContext) {
@@ -280,8 +299,11 @@ export class PluginBridge {
 
     // Update WASM instance — O(1) index lookup via pre-built map
     const exports = instance.wasmInstance.exports as { setParameter?: (id: number, value: number) => void };
-    if (exports.setParameter) {
-      const paramIndex = instance.paramIndexById.get(parameterId)!;
+    const paramIndex = instance.paramIndexById.get(parameterId);
+    // `parameterId` はプラグイン側から渡りうる値なので、索引に無いことがある。
+    // `!` で潰すと `undefined` がそのまま WASM の setParameter へ入る
+    // (plugins/CLAUDE.md: ここはセキュリティ境界)。無ければ WASM へは送らない。
+    if (exports.setParameter && paramIndex !== undefined) {
       exports.setParameter(paramIndex, clampedValue);
     }
     
@@ -644,7 +666,7 @@ export class PluginBridge {
     `;
     
     // Create parameter knobs
-    const paramsContainer = container.querySelector('.plugin-params')!;
+    const paramsContainer = requireElement(container, '.plugin-params');
     for (const param of instance.descriptor.parameters) {
       if (param.flags.hidden) continue;
       
@@ -663,7 +685,7 @@ export class PluginBridge {
       `;
       
       // Knob interaction
-      const knob = paramEl.querySelector('.plugin-param-knob')!;
+      const knob = requireElement<HTMLElement>(paramEl, '.plugin-param-knob');
       let isDragging = false;
       let startY = 0;
       let startValue = 0;
@@ -700,7 +722,7 @@ export class PluginBridge {
     }
     
     // Bypass button
-    const bypassBtn = container.querySelector('.plugin-bypass')!;
+    const bypassBtn = requireElement(container, '.plugin-bypass');
     bypassBtn.addEventListener('click', () => {
       const newState = !instance.bypassed;
       this.setBypass(instance.id, newState);
@@ -733,7 +755,7 @@ export class PluginBridge {
     const pointer = paramEl.querySelector('.knob-pointer') as SVGLineElement;
     pointer.setAttribute('transform', `rotate(${angle} 30 30)`);
     
-    const valueEl = paramEl.querySelector('.plugin-param-value')!;
+    const valueEl = requireElement(paramEl, '.plugin-param-value');
     valueEl.textContent = this.formatValue(value, param);
   }
   

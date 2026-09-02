@@ -12,6 +12,7 @@
  */
 
 import { normalizeCues, type ReadabilityOptions } from './readability';
+import { ensureSurface, type DrawSurface } from '../core/canvas-context';
 
 // ============================================================
 // Line-break segmentation (CJK-aware)
@@ -250,8 +251,8 @@ export class CaptionManager {
   private activeTrackId: string | null = null;
   private listeners: Set<() => void> = new Set();
   // Cached canvas for burnInCaptions() — recreated only when frame dimensions change.
-  private _burnCanvas: OffscreenCanvas | null = null;
-  private _burnCtx: OffscreenCanvasRenderingContext2D | null = null;
+  // キャンバスとコンテキストは対で扱う (core/canvas-context.ts に集約)。
+  private _burnSurface: DrawSurface | null = null;
   // Per-track maximum observed caption duration (seconds). Only grows — a conservative
   // upper bound used as the getCaptionsAtTime lookback window.
   private _trackMaxDuration: Map<string, number> = new Map();
@@ -795,12 +796,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const width = videoFrame.displayWidth;
     const height = videoFrame.displayHeight;
 
-    if (!this._burnCanvas || this._burnCanvas.width !== width || this._burnCanvas.height !== height) {
-      this._burnCanvas = new OffscreenCanvas(width, height);
-      this._burnCtx = this._burnCanvas.getContext('2d')!;
-    }
-    const canvas = this._burnCanvas;
-    const ctx = this._burnCtx!;
+    this._burnSurface = ensureSurface(this._burnSurface, width, height);
+    const { canvas, ctx } = this._burnSurface;
 
     // Draw video frame (overwrites canvas from previous call)
     ctx.drawImage(videoFrame, 0, 0);

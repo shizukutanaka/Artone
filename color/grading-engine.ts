@@ -14,6 +14,7 @@
 
 import { applyLUTToBuffer, applyCurvesToBuffer, buildCurve } from './lut-apply';
 import { createLogger } from '../app/logger';
+import { ensureSurface, type DrawSurface } from '../core/canvas-context';
 
 const log = createLogger('GradingEngine');
 
@@ -454,11 +455,11 @@ export class ColorGradingEngine {
   /** Cached compute pipeline — created once after GPU init, reused per frame. */
   private computePipeline: GPUComputePipeline | null = null;
   // Per-frame canvas caches (lazy-grow on dimension change)
-  private _stagingCanvas: OffscreenCanvas | null = null;
-  private _outCanvas: OffscreenCanvas | null = null;
-  private _outCtx: OffscreenCanvasRenderingContext2D | null = null;
-  private _cpuCanvas: OffscreenCanvas | null = null;
-  private _cpuCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _stagingSurface: DrawSurface | null = null;
+  // キャンバスとコンテキストは常に対で扱う。別々の `| null` に持つと型が
+  // 絞り込めず、使用箇所すべてが `!` になる (core/canvas-context.ts に集約)。
+  private _outSurface: DrawSurface | null = null;
+  private _cpuSurface: DrawSurface | null = null;
   /** Reusable 20-element uniform data buffer (80 bytes — ColorWheels struct). */
   private readonly _uniformData = new Float32Array(20);
 
@@ -734,17 +735,20 @@ export class ColorGradingEngine {
     input: ImageBitmap | HTMLVideoElement | HTMLCanvasElement,
     wheels: ColorWheels,
   ): Promise<ImageBitmap> {
-    const gpu = this.gpu!;
-    const pipeline = this.computePipeline!;
+    // どちらも初期化に失敗すると null のまま。`!` で潰すと後段の GPU 呼び出しが
+    // 原因から遠い場所で落ちるため、ここで理由を言って落とす。
+    const gpu = this.gpu;
+    const pipeline = this.computePipeline;
+    if (!gpu || !pipeline) {
+      throw new Error('ColorGradingEngine: GPU pipeline is not initialized');
+    }
     const w = input instanceof HTMLVideoElement ? input.videoWidth  : input.width;
     const h = input instanceof HTMLVideoElement ? input.videoHeight : input.height;
 
     // copyExternalImageToTexture does not accept HTMLVideoElement — draw first.
-    if (!this._stagingCanvas || this._stagingCanvas.width !== w || this._stagingCanvas.height !== h) {
-      this._stagingCanvas = new OffscreenCanvas(w, h);
-    }
-    this._stagingCanvas.getContext('2d')!.drawImage(input, 0, 0);
-    const staging = this._stagingCanvas;
+    this._stagingSurface = ensureSurface(this._stagingSurface, w, h);
+    this._stagingSurface.ctx.drawImage(input, 0, 0);
+    const staging = this._stagingSurface.canvas;
 
     const inputTex = gpu.createTexture({
       label: 'grade-in',
@@ -829,12 +833,9 @@ export class ColorGradingEngine {
     uniformBuf.destroy();
     readbackBuf.destroy();
 
-    if (!this._outCanvas || this._outCanvas.width !== w || this._outCanvas.height !== h) {
-      this._outCanvas = new OffscreenCanvas(w, h);
-      this._outCtx = this._outCanvas.getContext('2d')!;
-    }
-    this._outCtx!.putImageData(imgData, 0, 0);
-    return createImageBitmap(this._outCanvas);
+    this._outSurface = ensureSurface(this._outSurface, w, h);
+    this._outSurface.ctx.putImageData(imgData, 0, 0);
+    return createImageBitmap(this._outSurface.canvas);
   }
 
   private async processCPU(
@@ -844,16 +845,10 @@ export class ColorGradingEngine {
     const w = input instanceof HTMLVideoElement ? input.videoWidth : input.width;
     const h = input instanceof HTMLVideoElement ? input.videoHeight : input.height;
     
-    if (!this._cpuCanvas || this._cpuCanvas.width !== w || this._cpuCanvas.height !== h) {
-      this._cpuCanvas = new OffscreenCanvas(w, h);
-      // willReadFrequently: this context exists to read pixels back via
-      // getImageData for CPU grading; avoids per-call GPU→CPU readback.
-      const newCtx = this._cpuCanvas.getContext('2d', { willReadFrequently: true });
-      if (!newCtx) throw new Error('ColorGradingEngine: failed to acquire 2D context for CPU grading');
-      this._cpuCtx = newCtx;;
-    }
-    const canvas = this._cpuCanvas;
-    const ctx = this._cpuCtx!;
+    // willReadFrequently: this context exists to read pixels back via
+    // getImageData for CPU grading; avoids per-call GPU→CPU readback.
+    this._cpuSurface = ensureSurface(this._cpuSurface, w, h, { willReadFrequently: true });
+    const { canvas, ctx } = this._cpuSurface;
     ctx.drawImage(input, 0, 0);
 
     const imgData = ctx.getImageData(0, 0, w, h);

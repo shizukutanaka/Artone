@@ -222,14 +222,40 @@ function buildMvhd(timescale: number, durationMs: number, nextTrackId: number): 
   ]));
 }
 
+/**
+ * ムービー全体の時間軸。`durationMs` と `movieTimescale` は常に組で運ぶ
+ * (どちらも `number` で、取り違えると**尺が桁違いのファイル**が出る)。
+ */
+interface MovieTiming {
+  durationMs: number;
+  movieTimescale: number;
+}
+
+/** 映像サンプルの表。 */
+interface VideoSampleTable {
+  sizes: number[];
+  keyframeIndices: number[];
+  /** サンプル記述 (stsd) のエントリと、その4文字型。 */
+  stsdEntry: Uint8Array;
+  entryType: string;
+  chunkOffset: number;
+}
+
+/** 音声サンプルの表。 */
+interface AudioSampleTable {
+  sizes: number[];
+  /** サンプルごとの時間差 (mdhd の timescale 基準)。 */
+  deltas: number[];
+  chunkOffset: number;
+}
+
 function buildTkhd(
   trackId: number,
-  durationMs: number,
-  movieTimescale: number,
-  width: number,
-  height: number,
-  isAudio: boolean,
+  timing: MovieTiming,
+  track: { width: number; height: number; isAudio: boolean },
 ): Uint8Array {
+  const { durationMs, movieTimescale } = timing;
+  const { width, height, isAudio } = track;
   const duration = Math.round(durationMs * movieTimescale / 1000);
   return fullBox('tkhd', 0, 3, concat([  // flags=3: track_enabled | track_in_movie
     u32(0),            // creation_time
@@ -474,15 +500,12 @@ function buildStco(chunkOffset: number): Uint8Array {
 // ============================================================
 
 function buildVideoStbl(
-  sampleCount: number,
-  timescale: number,
-  fps: number,
-  sampleSizes: number[],
-  keyframeIndices: number[],
-  stsdEntry: Uint8Array,
-  entryType: string,
-  chunkOffset: number,
+  samples: VideoSampleTable,
+  media: { timescale: number; fps: number },
 ): Uint8Array {
+  const { sizes: sampleSizes, keyframeIndices, stsdEntry, entryType, chunkOffset } = samples;
+  const { timescale, fps } = media;
+  const sampleCount = sampleSizes.length;
   // fps=0 → timescale=0 → 0/0 = NaN → u32(NaN)=0 → all stts deltas zero → corrupt MP4.
   if (!(fps > 0)) throw new RangeError(`buildVideoStbl: fps must be > 0, got ${fps}`);
   const sampleDelta = Math.round(timescale / fps);
@@ -496,13 +519,9 @@ function buildVideoStbl(
   ]));
 }
 
-function buildAudioStbl(
-  sampleCount: number,
-  sampleSizes: number[],
-  sampleDeltas: number[],
-  sampleEntry: Uint8Array,
-  chunkOffset: number,
-): Uint8Array {
+function buildAudioStbl(samples: AudioSampleTable, sampleEntry: Uint8Array): Uint8Array {
+  const { sizes: sampleSizes, deltas: sampleDeltas, chunkOffset } = samples;
+  const sampleCount = sampleSizes.length;
   return box('stbl', concat([
     buildStsd(false, sampleEntry, 'mp4a'),
     buildSttsVariable(sampleDeltas),
@@ -513,20 +532,13 @@ function buildAudioStbl(
 }
 
 function buildVideoTrak(
-  durationMs: number,
-  movieTimescale: number,
+  timing: MovieTiming,
   videoTrack: MP4VideoTrack,
-  sampleSizes: number[],
-  keyframeIndices: number[],
-  stsdEntry: Uint8Array,
-  entryType: string,
-  chunkOffset: number,
+  samples: VideoSampleTable,
 ): Uint8Array {
+  const { durationMs } = timing;
   const mediaTimescale = Math.round(videoTrack.fps * 1000);  // e.g., 30000 for 30fps
-  const stbl = buildVideoStbl(
-    sampleSizes.length, mediaTimescale, videoTrack.fps,
-    sampleSizes, keyframeIndices, stsdEntry, entryType, chunkOffset,
-  );
+  const stbl = buildVideoStbl(samples, { timescale: mediaTimescale, fps: videoTrack.fps });
   const minf = box('minf', concat([buildVmhd(), buildDinf(), stbl]));
   const mdia = box('mdia', concat([
     buildMdhd(mediaTimescale, durationMs),
@@ -534,21 +546,19 @@ function buildVideoTrak(
     minf,
   ]));
   return box('trak', concat([
-    buildTkhd(1, durationMs, movieTimescale, videoTrack.width, videoTrack.height, false),
+    buildTkhd(1, timing, { width: videoTrack.width, height: videoTrack.height, isAudio: false }),
     mdia,
   ]));
 }
 
 function buildAudioTrak(
-  durationMs: number,
-  movieTimescale: number,
+  timing: MovieTiming,
   audioTrack: MP4AudioTrack,
-  sampleSizes: number[],
-  sampleDeltas: number[],
-  chunkOffset: number,
+  samples: AudioSampleTable,
 ): Uint8Array {
+  const { durationMs } = timing;
   const sampleEntry = buildMp4a(audioTrack.sampleRate, audioTrack.channels);
-  const stbl = buildAudioStbl(sampleSizes.length, sampleSizes, sampleDeltas, sampleEntry, chunkOffset);
+  const stbl = buildAudioStbl(samples, sampleEntry);
   const minf = box('minf', concat([buildSmhd(), buildDinf(), stbl]));
   const mdia = box('mdia', concat([
     buildMdhd(audioTrack.sampleRate, durationMs),
@@ -556,7 +566,7 @@ function buildAudioTrak(
     minf,
   ]));
   return box('trak', concat([
-    buildTkhd(2, durationMs, movieTimescale, 0, 0, true),
+    buildTkhd(2, timing, { width: 0, height: 0, isAudio: true }),
     mdia,
   ]));
 }
@@ -638,16 +648,24 @@ export function muxMP4(
 
   // Two-pass moov building: first with placeholder offsets, then with exact offsets.
   function buildMoov(videoChunkOffset: number, audioChunkOffset: number): Uint8Array {
-    const videoTrak = buildVideoTrak(
-      durationMs, movieTimescale, videoTrack,
-      videoSizes, keyframeIndices, videoStsdEntry, videoEntryType, videoChunkOffset,
-    );
+    const timing: MovieTiming = { durationMs, movieTimescale };
+    const videoTrak = buildVideoTrak(timing, videoTrack, {
+      sizes: videoSizes,
+      keyframeIndices,
+      stsdEntry: videoStsdEntry,
+      entryType: videoEntryType,
+      chunkOffset: videoChunkOffset,
+    });
     const parts: Uint8Array[] = [
       buildMvhd(movieTimescale, durationMs, hasAudio ? 3 : 2),
       videoTrak,
     ];
     if (hasAudio) {
-      parts.push(buildAudioTrak(durationMs, movieTimescale, audioTrack!, audioSizes, audioSampleDeltas, audioChunkOffset));
+      parts.push(buildAudioTrak(timing, audioTrack, {
+        sizes: audioSizes,
+        deltas: audioSampleDeltas,
+        chunkOffset: audioChunkOffset,
+      }));
     }
     return box('moov', concat(parts));
   }

@@ -242,6 +242,25 @@ export function _getBezierCacheSizeForTesting(): number {
 // Animation Engine
 // ============================================================
 
+/** キーフレームを打つ先 (どのアニメーションのどのプロパティか)。 */
+export interface KeyframeTarget {
+  animationId: string;
+  propertyName: string;
+}
+
+/**
+ * 打つキーフレームの内容。
+ *
+ * `time` と `value` はどちらも `number` で、位置引数だと取り違えても落ちず
+ * **意図と違うアニメーション**になるだけ。名前で受け取る。
+ */
+export interface KeyframeSpec {
+  time: number;
+  value: number;
+  easing?: EasingType;
+  bezierHandles?: Partial<{ inX: number; inY: number; outX: number; outY: number }>;
+}
+
 export class KeyframeAnimator {
   private animations: Map<string, Animation> = new Map();
   private listeners: Set<() => void> = new Set();
@@ -311,14 +330,11 @@ export class KeyframeAnimator {
   // Keyframe Operations
   // ============================================================
 
-  addKeyframe(
-    animationId: string,
-    propertyName: string,
-    time: number,
-    value: number,
-    easing: EasingType = 'easeInOut',
-    bezierHandles?: Partial<{ inX: number; inY: number; outX: number; outY: number }>
-  ): Keyframe | null {
+  addKeyframe(target: KeyframeTarget, spec: KeyframeSpec): Keyframe | null {
+    const { animationId, propertyName } = target;
+    const { time, value } = spec;
+    const easing = spec.easing ?? 'easeInOut';
+    const bezierHandles = spec.bezierHandles;
     const animation = this.animations.get(animationId);
     if (!animation) return null;
 
@@ -514,11 +530,8 @@ export class KeyframeAnimator {
 
     for (const kf of keyframes) {
       this.addKeyframe(
-        animationId,
-        propertyName,
-        kf.time + offset,
-        kf.value,
-        kf.easing
+        { animationId, propertyName },
+        { time: kf.time + offset, value: kf.value, easing: kf.easing },
       );
     }
   }

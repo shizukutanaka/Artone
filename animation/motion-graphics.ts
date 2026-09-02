@@ -532,7 +532,10 @@ export class MotionGraphicsEngine {
     switch (shape) {
       case 'rectangle':
         if (cornerRadius) {
-          this.roundRect(-size.width / 2, -size.height / 2, size.width, size.height, cornerRadius);
+          this.roundRect(
+            { x: -size.width / 2, y: -size.height / 2, w: size.width, h: size.height },
+            cornerRadius,
+          );
         } else {
           this.ctx.rect(-size.width / 2, -size.height / 2, size.width, size.height);
         }
@@ -581,7 +584,9 @@ export class MotionGraphicsEngine {
     this.ctx.restore();
   }
 
-  private roundRect(x: number, y: number, w: number, h: number, r: number): void {
+  /** 角丸矩形のパスを引く (`rect` は左上と大きさ、`r` は角の半径)。 */
+  private roundRect(rect: { x: number; y: number; w: number; h: number }, r: number): void {
+    const { x, y, w, h } = rect;
     if (!this.ctx) return;
     this.ctx.moveTo(x + r, y);
     this.ctx.lineTo(x + w - r, y);

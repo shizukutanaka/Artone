@@ -246,6 +246,22 @@ export const CAPTION_PRESETS: CaptionPreset[] = [
 // Caption Manager
 // ============================================================
 
+/**
+ * 追加する字幕の中身。`startTime` と `endTime` はどちらも `number` で、
+ * 位置引数だと**入れ替えても落ちず**、負の長さの字幕が静かに生まれる。
+ */
+export interface CaptionSpec {
+  startTime: number;
+  endTime: number;
+  text: string;
+}
+
+/** 字幕の見た目 (省略時は既定)。 */
+export interface CaptionLook {
+  style?: Partial<CaptionStyle>;
+  position?: Partial<CaptionPosition>;
+}
+
 export class CaptionManager {
   private tracks: Map<string, CaptionTrack> = new Map();
   private activeTrackId: string | null = null;
@@ -312,14 +328,9 @@ export class CaptionManager {
   // Caption Operations
   // ============================================================
 
-  addCaption(
-    trackId: string,
-    startTime: number,
-    endTime: number,
-    text: string,
-    style?: Partial<CaptionStyle>,
-    position?: Partial<CaptionPosition>
-  ): Caption | null {
+  addCaption(trackId: string, cue: CaptionSpec, look: CaptionLook = {}): Caption | null {
+    const { startTime, endTime, text } = cue;
+    const { style, position } = look;
     const track = this.tracks.get(trackId);
     if (!track) return null;
 
@@ -446,7 +457,7 @@ export class CaptionManager {
 
     const normalized = normalizeCues(cues, readability ?? { profile: 'netflix' });
     for (const cue of normalized) {
-      this.addCaption(track.id, cue.start, cue.end, cue.text);
+      this.addCaption(track.id, { startTime: cue.start, endTime: cue.end, text: cue.text });
     }
 
     track.captions.sort((a, b) => a.startTime - b.startTime);
@@ -486,7 +497,7 @@ export class CaptionManager {
       const endTime = this.timeToSeconds(match[5], match[6], match[7], match[8]);
       const text = lines.slice(2).join('\n');
 
-      this.addCaption(track.id, startTime, endTime, text);
+      this.addCaption(track.id, { startTime: startTime, endTime: endTime, text: text });
     }
 
     return track;
@@ -527,7 +538,7 @@ export class CaptionManager {
       if (startTime === null || endTime === null) continue;
       const text = blockLines.slice(timeLineIndex + 1).join('\n').replace(/<[^>]+>/g, '');
 
-      this.addCaption(track.id, startTime, endTime, text);
+      this.addCaption(track.id, { startTime: startTime, endTime: endTime, text: text });
     }
 
     return track;
@@ -556,7 +567,7 @@ export class CaptionManager {
         const endTime = this.assTimeToSeconds(parts[2].trim());
         const text = parts.slice(9).join(',').replace(/\\N/g, '\n').replace(/\{[^}]+\}/g, '');
 
-        this.addCaption(track.id, startTime, endTime, text);
+        this.addCaption(track.id, { startTime: startTime, endTime: endTime, text: text });
       }
     }
 

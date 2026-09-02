@@ -101,7 +101,7 @@ describe('CaptionManager — caption operations', () => {
   });
 
   it('addCaption returns a caption with merged default style', () => {
-    const c = cm.addCaption(trackId, 0, 2, 'Hello')!;
+    const c = cm.addCaption(trackId, { startTime: 0, endTime: 2, text: 'Hello' })!;
     expect(c.text).toBe('Hello');
     expect(c.style.fontFamily).toBe('Arial'); // from DEFAULT_STYLE
     expect(c.startTime).toBe(0);
@@ -109,14 +109,14 @@ describe('CaptionManager — caption operations', () => {
   });
 
   it('addCaption merges partial style overrides', () => {
-    const c = cm.addCaption(trackId, 0, 2, 'Hi', { fontSize: 72, color: '#ff0000' })!;
+    const c = cm.addCaption(trackId, { startTime: 0, endTime: 2, text: 'Hi' }, { style: { fontSize: 72, color: '#ff0000' } })!;
     expect(c.style.fontSize).toBe(72);
     expect(c.style.color).toBe('#ff0000');
     expect(c.style.fontFamily).toBe('Arial'); // default preserved
   });
 
   it('addCaption returns null for unknown track', () => {
-    expect(cm.addCaption('nonexistent', 0, 2, 'x')).toBeNull();
+    expect(cm.addCaption('nonexistent', { startTime: 0, endTime: 2, text: 'x' })).toBeNull();
   });
 
   it('REGRESSION: addCaption rejects endTime <= startTime (invisible/corrupt captions)', () => {
@@ -124,61 +124,61 @@ describe('CaptionManager — caption operations', () => {
     // getCaptionsAtTime() would never return them (since time >= start && time < end
     // is unsatisfiable), and renderer code computing endTime-startTime could
     // produce NaN/Infinity in animated transitions.
-    expect(cm.addCaption(trackId, 2, 2, 'zero-dur')).toBeNull();   // endTime == startTime
-    expect(cm.addCaption(trackId, 3, 1, 'negative')).toBeNull();   // endTime < startTime
+    expect(cm.addCaption(trackId, { startTime: 2, endTime: 2, text: 'zero-dur' })).toBeNull();   // endTime == startTime
+    expect(cm.addCaption(trackId, { startTime: 3, endTime: 1, text: 'negative' })).toBeNull();   // endTime < startTime
     expect(cm.getActiveTrack()!.captions).toHaveLength(0);          // none stored
   });
 
   it('addCaption accepts endTime just above startTime', () => {
-    expect(cm.addCaption(trackId, 1, 1.001, 'short')).not.toBeNull();
+    expect(cm.addCaption(trackId, { startTime: 1, endTime: 1.001, text: 'short' })).not.toBeNull();
   });
 
   it('captions are kept sorted by startTime', () => {
-    cm.addCaption(trackId, 5, 6, 'C');
-    cm.addCaption(trackId, 0, 1, 'A');
-    cm.addCaption(trackId, 2, 3, 'B');
+    cm.addCaption(trackId, { startTime: 5, endTime: 6, text: 'C' });
+    cm.addCaption(trackId, { startTime: 0, endTime: 1, text: 'A' });
+    cm.addCaption(trackId, { startTime: 2, endTime: 3, text: 'B' });
     const texts = cm.getActiveTrack()!.captions.map(c => c.text);
     expect(texts).toEqual(['A', 'B', 'C']);
   });
 
   it('REGRESSION: addCaption does not mutate DEFAULT_STYLE across captions', () => {
-    const c1 = cm.addCaption(trackId, 0, 1, 'first', { fontSize: 99 })!;
-    const c2 = cm.addCaption(trackId, 1, 2, 'second')!;
+    const c1 = cm.addCaption(trackId, { startTime: 0, endTime: 1, text: 'first' }, { style: { fontSize: 99 } })!;
+    const c2 = cm.addCaption(trackId, { startTime: 1, endTime: 2, text: 'second' })!;
     // c2 must have the default font size, not c1's override
     expect(c1.style.fontSize).toBe(99);
     expect(c2.style.fontSize).toBe(48); // DEFAULT_STYLE.fontSize
   });
 
   it('updateCaption modifies a caption', () => {
-    const c = cm.addCaption(trackId, 0, 2, 'old')!;
+    const c = cm.addCaption(trackId, { startTime: 0, endTime: 2, text: 'old' })!;
     cm.updateCaption(trackId, c.id, { text: 'new' });
     expect(cm.getActiveTrack()!.captions[0].text).toBe('new');
   });
 
   it('updateCaption re-sorts when startTime changes', () => {
-    const a = cm.addCaption(trackId, 0, 1, 'A')!;
-    cm.addCaption(trackId, 5, 6, 'B');
+    const a = cm.addCaption(trackId, { startTime: 0, endTime: 1, text: 'A' })!;
+    cm.addCaption(trackId, { startTime: 5, endTime: 6, text: 'B' });
     cm.updateCaption(trackId, a.id, { startTime: 10 });
     const texts = cm.getActiveTrack()!.captions.map(c => c.text);
     expect(texts).toEqual(['B', 'A']);
   });
 
   it('deleteCaption removes a caption', () => {
-    const c = cm.addCaption(trackId, 0, 2, 'x')!;
+    const c = cm.addCaption(trackId, { startTime: 0, endTime: 2, text: 'x' })!;
     cm.deleteCaption(trackId, c.id);
     expect(cm.getActiveTrack()!.captions).toHaveLength(0);
   });
 
   it('getCaptionsAtTime returns captions active at a time', () => {
-    cm.addCaption(trackId, 0, 5, 'A');
-    cm.addCaption(trackId, 10, 15, 'B');
+    cm.addCaption(trackId, { startTime: 0, endTime: 5, text: 'A' });
+    cm.addCaption(trackId, { startTime: 10, endTime: 15, text: 'B' });
     const at = cm.getCaptionsAtTime(trackId, 2);
     expect(at).toHaveLength(1);
     expect(at[0].text).toBe('A');
   });
 
   it('getCaptionsAtTime uses exclusive end boundary', () => {
-    cm.addCaption(trackId, 0, 5, 'A');
+    cm.addCaption(trackId, { startTime: 0, endTime: 5, text: 'A' });
     expect(cm.getCaptionsAtTime(trackId, 5)).toHaveLength(0); // 5 is end → excluded
     expect(cm.getCaptionsAtTime(trackId, 4.999)).toHaveLength(1);
   });
@@ -190,14 +190,14 @@ describe('CaptionManager — caption operations', () => {
     // past the cached max duration without updating it, so getCaptionsAtTime's
     // binary-search-plus-bounded-lookback silently stopped finding it once the
     // query time was far enough past the caption's start.
-    const a = cm.addCaption(trackId, 0, 5, 'A')!; // duration 5, cache max = 5
+    const a = cm.addCaption(trackId, { startTime: 0, endTime: 5, text: 'A' })!; // duration 5, cache max = 5
     cm.updateCaption(trackId, a.id, { endTime: 90 }); // now spans 0-90
     const at = cm.getCaptionsAtTime(trackId, 70);
     expect(at.map(c => c.text)).toEqual(['A']);
   });
 
   it('REGRESSION: updateCaption moving startTime much earlier keeps the caption reachable', () => {
-    const a = cm.addCaption(trackId, 500, 505, 'A')!; // duration 5, cache max = 5
+    const a = cm.addCaption(trackId, { startTime: 500, endTime: 505, text: 'A' })!; // duration 5, cache max = 5
     cm.updateCaption(trackId, a.id, { startTime: 0 }); // now spans 0-505
     const at = cm.getCaptionsAtTime(trackId, 490);
     expect(at.map(c => c.text)).toEqual(['A']);
@@ -223,11 +223,11 @@ describe('CAPTION_PRESETS', () => {
     // Mutating the default preset must not leak into newly-added captions.
     const cm = makeManager();
     const trackId = cm.createTrack('T').id;
-    const before = cm.addCaption(trackId, 0, 1, 'before')!.style.fontSize;
+    const before = cm.addCaption(trackId, { startTime: 0, endTime: 1, text: 'before' })!.style.fontSize;
 
     defaultPreset.style.fontSize = 200; // mutate the preset
 
-    const after = cm.addCaption(trackId, 1, 2, 'after')!.style.fontSize;
+    const after = cm.addCaption(trackId, { startTime: 1, endTime: 2, text: 'after' })!.style.fontSize;
     expect(after).toBe(before); // unaffected by preset mutation
 
     // Restore for other tests
@@ -238,11 +238,11 @@ describe('CAPTION_PRESETS', () => {
     const netflixPreset = CAPTION_PRESETS.find(p => p.id === 'netflix')!;
     const cm = makeManager();
     const trackId = cm.createTrack('T').id;
-    const before = cm.addCaption(trackId, 0, 1, 'before')!.position.y;
+    const before = cm.addCaption(trackId, { startTime: 0, endTime: 1, text: 'before' })!.position.y;
 
     netflixPreset.position.y = 999; // mutate the preset
 
-    const after = cm.addCaption(trackId, 1, 2, 'after')!.position.y;
+    const after = cm.addCaption(trackId, { startTime: 1, endTime: 2, text: 'after' })!.position.y;
     expect(after).toBe(before); // unaffected by preset mutation
 
     // Restore for other tests
@@ -314,7 +314,7 @@ describe('SRT import/export', () => {
     // (5.005 % 1) * 1000 = 4.9999… floors to 4. Deriving from rounded integer
     // milliseconds is exact.
     const t = cm.createTrack('ms');
-    cm.addCaption(t.id, 3.456, 5.005, 'x'); // both endpoints chosen to hit the float-floor bug
+    cm.addCaption(t.id, { startTime: 3.456, endTime: 5.005, text: 'x' }); // both endpoints chosen to hit the float-floor bug
     const out = cm.exportSRT(t.id);
     expect(out).toContain('00:00:03,456 --> 00:00:05,005');
   });
@@ -323,7 +323,7 @@ describe('SRT import/export', () => {
     // 59.9996s is closer to 60.000 than to 59.999; rounding must roll it over
     // to 00:01:00,000 rather than the old floor's 00:00:59,999.
     const t = cm.createTrack('rollover');
-    cm.addCaption(t.id, 59.9996, 61, 'x');
+    cm.addCaption(t.id, { startTime: 59.9996, endTime: 61, text: 'x' });
     expect(cm.exportSRT(t.id)).toContain('00:01:00,000 -->');
   });
 
@@ -390,7 +390,7 @@ describe('VTT import/export', () => {
     // so it inherited the same float-floor bug: 5.005s -> ".004". The rounded
     // integer-millisecond derivation fixes both formats together.
     const t = cm.createTrack('vtt-ms');
-    cm.addCaption(t.id, 3.456, 5.005, 'x');
+    cm.addCaption(t.id, { startTime: 3.456, endTime: 5.005, text: 'x' });
     expect(cm.exportVTT(t.id)).toContain('00:00:03.456 --> 00:00:05.005');
   });
 
@@ -495,7 +495,7 @@ describe('ASS import/export', () => {
     // Same float-floor bug as SRT, at centisecond resolution: (4.13 % 1) * 100
     // = 12.999… floored to 12, so 4.13s serialized as ".12" instead of ".13".
     const t = cm.createTrack('ass-cs');
-    cm.addCaption(t.id, 4.13, 5.29, 'x'); // both endpoints hit the bug
+    cm.addCaption(t.id, { startTime: 4.13, endTime: 5.29, text: 'x' }); // both endpoints hit the bug
     const out = cm.exportASS(t.id);
     expect(out).toContain('0:00:04.13,0:00:05.29');
   });
@@ -654,7 +654,7 @@ describe('REGRESSION: renderCaption() with empty text does not call fillRect(-In
     const manager = new CaptionManager();
     const track = manager.createTrack('t', 'en');
     // Add a caption with empty text — valid in SRT (blank cue)
-    const caption = manager.addCaption(track.id, 0, 1, '')!;
+    const caption = manager.addCaption(track.id, { startTime: 0, endTime: 1, text: '' })!;
     expect(caption).not.toBeNull();
 
     const fillRectCalls: unknown[][] = [];

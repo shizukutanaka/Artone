@@ -154,13 +154,13 @@ describe('uchimura', () => {
 
   it('supports custom contrast parameter (a=1.5 → brighter shoulder)', () => {
     // With higher contrast, midtone x=0.5 is in the shoulder → brighter
-    const high = uchimura(0.5, 1, 1.5);
-    const norm = uchimura(0.5, 1, 1.0);
+    const high = uchimura(0.5, { P: 1, a: 1.5 });
+    const norm = uchimura(0.5, { P: 1, a: 1.0 });
     expect(high).toBeGreaterThan(norm);
   });
 
   it('pedestal b>0 raises black floor', () => {
-    expect(uchimura(0, 1, 1, 0.22, 0.4, 1.33, 0.05)).toBeCloseTo(0.05, 5);
+    expect(uchimura(0, { P: 1, a: 1, m: 0.22, l: 0.4, c: 1.33, b: 0.05 })).toBeCloseTo(0.05, 5);
   });
 });
 

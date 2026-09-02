@@ -17,7 +17,13 @@ import {
 // ============================================================
 
 /** Build an ImageData with uniform pixel color. */
-function solidImageData(w: number, h: number, r: number, g: number, b: number, a = 255): ImageData {
+/** 単色 ImageData。寸法と色を組で受ける (全部 `number` で取り違えても落ちない)。 */
+function solidImageData(
+  size: { w: number; h: number },
+  rgba: readonly [number, number, number, number?],
+): ImageData {
+  const { w, h } = size;
+  const [r, g, b, a = 255] = rgba;
   const data = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     data[i * 4]     = r;
@@ -103,7 +109,7 @@ describe('HistogramScope.getStats()', () => {
   });
 
   it('all-white image: max R/G/B/Y = 255, min = 255', () => {
-    const img = solidImageData(4, 4, 255, 255, 255);
+    const img = solidImageData({ w: 4, h: 4 }, [255, 255, 255]);
     const stats = scope.getStats(img);
     expect(stats.max.r).toBe(255);
     expect(stats.max.g).toBe(255);
@@ -114,7 +120,7 @@ describe('HistogramScope.getStats()', () => {
   });
 
   it('all-black image: min R/G/B = 0, max = 0', () => {
-    const img = solidImageData(4, 4, 0, 0, 0);
+    const img = solidImageData({ w: 4, h: 4 }, [0, 0, 0]);
     const stats = scope.getStats(img);
     expect(stats.min.r).toBe(0);
     expect(stats.min.g).toBe(0);
@@ -125,7 +131,7 @@ describe('HistogramScope.getStats()', () => {
   });
 
   it('average is correct for uniform color', () => {
-    const img = solidImageData(4, 4, 100, 150, 200);
+    const img = solidImageData({ w: 4, h: 4 }, [100, 150, 200]);
     const stats = scope.getStats(img);
     expect(stats.average.r).toBeCloseTo(100);
     expect(stats.average.g).toBeCloseTo(150);
@@ -134,26 +140,26 @@ describe('HistogramScope.getStats()', () => {
 
   it('luma (y) average matches BT.709 formula', () => {
     const r = 100, g = 150, b = 200;
-    const img = solidImageData(4, 4, r, g, b);
+    const img = solidImageData({ w: 4, h: 4 }, [r, g, b]);
     const stats = scope.getStats(img);
     const expected = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     expect(stats.average.y).toBeCloseTo(expected, 1);
   });
 
   it('clipping.highlights detected for near-255 values', () => {
-    const img = solidImageData(4, 4, 255, 255, 255);
+    const img = solidImageData({ w: 4, h: 4 }, [255, 255, 255]);
     const stats = scope.getStats(img);
     expect(stats.clipping.highlights).toBeGreaterThan(0);
   });
 
   it('clipping.shadows detected for near-0 values', () => {
-    const img = solidImageData(4, 4, 0, 0, 0);
+    const img = solidImageData({ w: 4, h: 4 }, [0, 0, 0]);
     const stats = scope.getStats(img);
     expect(stats.clipping.shadows).toBeGreaterThan(0);
   });
 
   it('clipping percentages are in [0, 100]', () => {
-    const img = solidImageData(4, 4, 128, 128, 128);
+    const img = solidImageData({ w: 4, h: 4 }, [128, 128, 128]);
     const stats = scope.getStats(img);
     expect(stats.clipping.highlights).toBeGreaterThanOrEqual(0);
     expect(stats.clipping.highlights).toBeLessThanOrEqual(100);
@@ -162,7 +168,7 @@ describe('HistogramScope.getStats()', () => {
   });
 
   it('skinTonePercentage is 0 for mid-gray image', () => {
-    const img = solidImageData(4, 4, 128, 128, 128);
+    const img = solidImageData({ w: 4, h: 4 }, [128, 128, 128]);
     const stats = scope.getStats(img);
     // Gray has u≈0, v≈0 — near the vectorscope origin, outside any hue sector.
     expect(stats.skinTonePercentage).toBe(0);
@@ -178,7 +184,7 @@ describe('HistogramScope.getStats()', () => {
       [92, 51, 38],    // dark skin, ~118°, y=58
       [200, 172, 135], // pale skin, ~144°, y=175
     ]) {
-      const img = solidImageData(4, 4, r, g, b);
+      const img = solidImageData({ w: 4, h: 4 }, [r, g, b]);
       const stats = scope.getStats(img);
       expect(stats.skinTonePercentage).toBe(100);
     }
@@ -186,7 +192,7 @@ describe('HistogramScope.getStats()', () => {
 
   it('does not flag clearly non-skin hues (green/blue/cyan) as skin', () => {
     for (const [r, g, b] of [[0, 255, 0], [0, 0, 255], [0, 255, 255]]) {
-      const img = solidImageData(4, 4, r, g, b);
+      const img = solidImageData({ w: 4, h: 4 }, [r, g, b]);
       const stats = scope.getStats(img);
       expect(stats.skinTonePercentage).toBe(0);
     }
@@ -206,7 +212,7 @@ describe('HistogramScope.getStats()', () => {
   });
 
   it('ScopeAnalysis has all required fields', () => {
-    const img = solidImageData(2, 2, 100, 120, 140);
+    const img = solidImageData({ w: 2, h: 2 }, [100, 120, 140]);
     const stats: ScopeAnalysis = scope.getStats(img);
     expect(stats).toHaveProperty('min');
     expect(stats).toHaveProperty('max');
@@ -282,7 +288,7 @@ describe('ScopesManager.analyze() — waveform mode persistence', () => {
       manager.enable('waveform');
       manager.enable('parade');
 
-      const img = solidImageData(10, 10, 128, 128, 128);
+      const img = solidImageData({ w: 10, h: 10 }, [128, 128, 128]);
 
       // First analysis with both waveform and parade active
       const results1 = manager.analyze(img as unknown as VideoFrame);
@@ -315,7 +321,7 @@ describe('ScopesManager.analyze() — waveform mode persistence', () => {
     'analyze() with no scopes enabled returns empty map',
     () => {
       const manager = new ScopesManager();
-      const img = solidImageData(4, 4, 100, 100, 100);
+      const img = solidImageData({ w: 4, h: 4 }, [100, 100, 100]);
       const results = manager.analyze(img as unknown as VideoFrame);
       expect(results.size).toBe(0);
     }
@@ -327,7 +333,7 @@ describe('ScopesManager.analyze() — waveform mode persistence', () => {
       const manager = new ScopesManager();
       manager.enable('waveform');
       manager.enable('histogram');
-      const img = solidImageData(8, 8, 200, 150, 100);
+      const img = solidImageData({ w: 8, h: 8 }, [200, 150, 100]);
       const results = manager.analyze(img as unknown as VideoFrame);
       expect(results.has('waveform')).toBe(true);
       expect(results.has('histogram')).toBe(true);
@@ -344,7 +350,7 @@ describe('WaveformScope.analyze()', () => {
   it.skipIf(!canvasAvailable)('returns ImageBitmap for luma mode', () => {
     const scope = new WaveformScope({ width: 64, height: 64 });
     scope.setMode('luma');
-    const img = solidImageData(8, 8, 128, 64, 32);
+    const img = solidImageData({ w: 8, h: 8 }, [128, 64, 32]);
     const bitmap = scope.analyze(img);
     expect(bitmap).toBeDefined();
   });
@@ -352,7 +358,7 @@ describe('WaveformScope.analyze()', () => {
   it.skipIf(!canvasAvailable)('returns ImageBitmap for rgb mode', () => {
     const scope = new WaveformScope({ width: 64, height: 64 });
     scope.setMode('rgb');
-    const img = solidImageData(8, 8, 100, 150, 200);
+    const img = solidImageData({ w: 8, h: 8 }, [100, 150, 200]);
     const bitmap = scope.analyze(img);
     expect(bitmap).toBeDefined();
   });
@@ -360,7 +366,7 @@ describe('WaveformScope.analyze()', () => {
   it.skipIf(!canvasAvailable)('returns ImageBitmap for parade mode', () => {
     const scope = new WaveformScope({ width: 64, height: 64 });
     scope.setMode('parade');
-    const img = solidImageData(8, 8, 200, 100, 50);
+    const img = solidImageData({ w: 8, h: 8 }, [200, 100, 50]);
     const bitmap = scope.analyze(img);
     expect(bitmap).toBeDefined();
   });
@@ -413,7 +419,7 @@ describe('Vectorscope.analyze()', () => {
   it.skipIf(!canvasAvailable)('returns ImageBitmap for standard mode', () => {
     const scope = new Vectorscope({ width: 64, height: 64 });
     scope.setMode('standard');
-    const img = solidImageData(4, 4, 100, 150, 200);
+    const img = solidImageData({ w: 4, h: 4 }, [100, 150, 200]);
     const bitmap = scope.analyze(img);
     expect(bitmap).toBeDefined();
   });
@@ -421,7 +427,7 @@ describe('Vectorscope.analyze()', () => {
   it.skipIf(!canvasAvailable)('returns ImageBitmap for skin-tone mode', () => {
     const scope = new Vectorscope({ width: 64, height: 64 });
     scope.setMode('skin-tone');
-    const img = solidImageData(4, 4, 200, 150, 100);
+    const img = solidImageData({ w: 4, h: 4 }, [200, 150, 100]);
     const bitmap = scope.analyze(img);
     expect(bitmap).toBeDefined();
   });
@@ -431,7 +437,7 @@ describe('HistogramScope.analyze()', () => {
   it.skipIf(!canvasAvailable)('returns ImageBitmap for RGB mode', () => {
     const scope = new HistogramScope({ width: 64, height: 64 });
     scope.setShowRGB(true);
-    const img = solidImageData(4, 4, 100, 150, 200);
+    const img = solidImageData({ w: 4, h: 4 }, [100, 150, 200]);
     const bitmap = scope.analyze(img);
     expect(bitmap).toBeDefined();
   });
@@ -439,7 +445,7 @@ describe('HistogramScope.analyze()', () => {
   it.skipIf(!canvasAvailable)('returns ImageBitmap for luma mode', () => {
     const scope = new HistogramScope({ width: 64, height: 64 });
     scope.setShowRGB(false);
-    const img = solidImageData(4, 4, 128, 128, 128);
+    const img = solidImageData({ w: 4, h: 4 }, [128, 128, 128]);
     const bitmap = scope.analyze(img);
     expect(bitmap).toBeDefined();
   });

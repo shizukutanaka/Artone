@@ -43,7 +43,10 @@ function makeFrame(
 }
 
 /** Solid colour frame */
-function solidFrame(w: number, h: number, r: number, g: number, b: number): GifFrameInput {
+/** 単色フレーム。寸法と色を組で受ける。 */
+function solidFrame(size: { w: number; h: number }, rgb: readonly [number, number, number]): GifFrameInput {
+  const { w, h } = size;
+  const [r, g, b] = rgb;
   return makeFrame(w, h, () => [r, g, b, 255]);
 }
 
@@ -68,7 +71,7 @@ function readU16LE(bytes: Uint8Array, offset: number): number {
 
 describe('encodeGif — header and trailer', () => {
   it('output starts with GIF89a magic bytes', () => {
-    const bytes = encodeGif([solidFrame(4, 4, 255, 0, 0)]);
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [255, 0, 0])]);
     expect(bytes[0]).toBe(0x47); // G
     expect(bytes[1]).toBe(0x49); // I
     expect(bytes[2]).toBe(0x46); // F
@@ -78,24 +81,24 @@ describe('encodeGif — header and trailer', () => {
   });
 
   it('output ends with GIF trailer byte 0x3B', () => {
-    const bytes = encodeGif([solidFrame(4, 4, 0, 255, 0)]);
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [0, 255, 0])]);
     expect(bytes[bytes.length - 1]).toBe(0x3B);
   });
 
   it('encodes width and height in Logical Screen Descriptor', () => {
-    const bytes = encodeGif([solidFrame(20, 15, 0, 0, 255)]);
+    const bytes = encodeGif([solidFrame({ w: 20, h: 15 }, [0, 0, 255])]);
     expect(readU16LE(bytes, 6)).toBe(20);
     expect(readU16LE(bytes, 8)).toBe(15);
   });
 
   it('global colour table flag is set (bit 7 of packed field)', () => {
-    const bytes = encodeGif([solidFrame(8, 8, 128, 128, 128)]);
+    const bytes = encodeGif([solidFrame({ w: 8, h: 8 }, [128, 128, 128])]);
     // Logical Screen Descriptor packed byte is at offset 10
     expect(bytes[10] & 0x80).toBe(0x80);
   });
 
   it('returns a non-empty Uint8Array', () => {
-    const bytes = encodeGif([solidFrame(4, 4, 100, 150, 200)]);
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [100, 150, 200])]);
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(20);
   });
@@ -108,13 +111,13 @@ describe('encodeGif — header and trailer', () => {
 describe('encodeGif — global colour table', () => {
   it('global colour table is 768 bytes (256 × RGB)', () => {
     // Starts at offset 13 (after 6-byte header + 7-byte LSD)
-    const bytes = encodeGif([solidFrame(4, 4, 255, 0, 0)]);
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [255, 0, 0])]);
     // Just verify the file is large enough to contain a 768-byte GCT
     expect(bytes.length).toBeGreaterThan(13 + 768);
   });
 
   it('frame produces a local colour table flag in Image Descriptor', () => {
-    const bytes = encodeGif([solidFrame(4, 4, 0, 255, 0)]);
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [0, 255, 0])]);
     // Find Image Separator (0x2C) and check the packed field
     let sepIdx = -1;
     for (let i = 0; i < bytes.length - 1; i++) {
@@ -133,7 +136,7 @@ describe('encodeGif — global colour table', () => {
 
 describe('encodeGif — Netscape looping extension', () => {
   it('is present for animated (multi-frame) GIFs', () => {
-    const frames = [solidFrame(4, 4, 255, 0, 0), solidFrame(4, 4, 0, 0, 255)];
+    const frames = [solidFrame({ w: 4, h: 4 }, [255, 0, 0]), solidFrame({ w: 4, h: 4 }, [0, 0, 255])];
     const bytes = encodeGif(frames);
     // Search for Netscape block: 0x21 0xFF
     let found = false;
@@ -144,7 +147,7 @@ describe('encodeGif — Netscape looping extension', () => {
   });
 
   it('is absent for single-frame GIFs', () => {
-    const bytes = encodeGif([solidFrame(4, 4, 255, 0, 0)]);
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [255, 0, 0])]);
     let found = false;
     for (let i = 0; i < bytes.length - 1; i++) {
       if (bytes[i] === 0x21 && bytes[i + 1] === 0xFF) { found = true; break; }
@@ -154,7 +157,7 @@ describe('encodeGif — Netscape looping extension', () => {
 
   it('encodes loopCount=0 (infinite) correctly', () => {
     const bytes = encodeGif(
-      [solidFrame(4, 4, 1, 2, 3), solidFrame(4, 4, 4, 5, 6)],
+      [solidFrame({ w: 4, h: 4 }, [1, 2, 3]), solidFrame({ w: 4, h: 4 }, [4, 5, 6])],
       { loopCount: 0 }
     );
     // Netscape extension layout from the 0x21 0xFF marker:
@@ -172,7 +175,7 @@ describe('encodeGif — Netscape looping extension', () => {
 
   it('encodes non-zero loopCount', () => {
     const bytes = encodeGif(
-      [solidFrame(4, 4, 0, 0, 0), solidFrame(4, 4, 255, 255, 255)],
+      [solidFrame({ w: 4, h: 4 }, [0, 0, 0]), solidFrame({ w: 4, h: 4 }, [255, 255, 255])],
       { loopCount: 5 }
     );
     for (let i = 0; i < bytes.length - 20; i++) {
@@ -191,7 +194,7 @@ describe('encodeGif — Netscape looping extension', () => {
 
 describe('encodeGif — Graphic Control Extension', () => {
   it('each frame contains a GCE (0x21 0xF9)', () => {
-    const bytes = encodeGif([solidFrame(4, 4, 10, 20, 30)]);
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [10, 20, 30])]);
     let found = false;
     for (let i = 0; i < bytes.length - 1; i++) {
       if (bytes[i] === 0x21 && bytes[i + 1] === 0xF9) { found = true; break; }
@@ -200,7 +203,7 @@ describe('encodeGif — Graphic Control Extension', () => {
   });
 
   it('GCE delay encodes delayMs correctly (centiseconds)', () => {
-    const frame = { ...solidFrame(4, 4, 0, 0, 0), delayMs: 500 }; // 50 cs
+    const frame = { ...solidFrame({ w: 4, h: 4 }, [0, 0, 0]), delayMs: 500 }; // 50 cs
     const bytes = encodeGif([frame]);
     for (let i = 0; i < bytes.length - 5; i++) {
       if (bytes[i] === 0x21 && bytes[i + 1] === 0xF9 && bytes[i + 2] === 0x04) {
@@ -213,7 +216,7 @@ describe('encodeGif — Graphic Control Extension', () => {
 
   it('clamps minimum delay to 1 centisecond', () => {
     // 5ms → 0.5cs → rounded to 1cs (minimum)
-    const frame = { ...solidFrame(4, 4, 0, 0, 0), delayMs: 5 };
+    const frame = { ...solidFrame({ w: 4, h: 4 }, [0, 0, 0]), delayMs: 5 };
     const bytes = encodeGif([frame]);
     for (let i = 0; i < bytes.length - 5; i++) {
       if (bytes[i] === 0x21 && bytes[i + 1] === 0xF9 && bytes[i + 2] === 0x04) {
@@ -231,7 +234,7 @@ describe('encodeGif — Graphic Control Extension', () => {
 
 describe('encodeGif — LZW data', () => {
   it('LZW minimum code size byte is 8 for 256-colour palette', () => {
-    const bytes = encodeGif([solidFrame(4, 4, 200, 100, 50)]);
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [200, 100, 50])]);
     // Image Descriptor from 0x2C:
     //   [0] 0x2C  [1-2] left  [3-4] top  [5-6] width  [7-8] height  [9] packed
     //   [10..777] local CT (256 × 3 = 768 bytes)
@@ -246,7 +249,7 @@ describe('encodeGif — LZW data', () => {
   });
 
   it('output is larger for a gradient frame than a solid frame (better LZW for solid)', () => {
-    const solidBytes = encodeGif([solidFrame(16, 16, 128, 128, 128)], { dither: false });
+    const solidBytes = encodeGif([solidFrame({ w: 16, h: 16 }, [128, 128, 128])], { dither: false });
     const gradBytes = encodeGif([gradientFrame(16, 16)], { dither: false });
     // Gradient requires more LZW codes → larger output
     expect(gradBytes.length).toBeGreaterThan(solidBytes.length);
@@ -259,11 +262,11 @@ describe('encodeGif — LZW data', () => {
 
 describe('encodeGif — multi-frame', () => {
   it('multi-frame GIF is larger than single-frame', () => {
-    const single = encodeGif([solidFrame(8, 8, 255, 0, 0)]);
+    const single = encodeGif([solidFrame({ w: 8, h: 8 }, [255, 0, 0])]);
     const multi = encodeGif([
-      solidFrame(8, 8, 255, 0, 0),
-      solidFrame(8, 8, 0, 255, 0),
-      solidFrame(8, 8, 0, 0, 255),
+      solidFrame({ w: 8, h: 8 }, [255, 0, 0]),
+      solidFrame({ w: 8, h: 8 }, [0, 255, 0]),
+      solidFrame({ w: 8, h: 8 }, [0, 0, 255]),
     ]);
     expect(multi.length).toBeGreaterThan(single.length);
   });
@@ -271,7 +274,7 @@ describe('encodeGif — multi-frame', () => {
   it('each frame has its own Image Separator (0x2C)', () => {
     const n = 3;
     const frames = Array.from({ length: n }, (_, i) =>
-      solidFrame(4, 4, i * 80, 255 - i * 80, 128)
+      solidFrame({ w: 4, h: 4 }, [i * 80, 255 - i * 80, 128])
     );
     const bytes = encodeGif(frames);
     let count = 0;
@@ -311,12 +314,12 @@ describe('encodeGif — dithering', () => {
 describe('encodeGif — options', () => {
   it('numColors is clamped to [2, 256]', () => {
     // Should not throw even with out-of-range values
-    expect(() => encodeGif([solidFrame(4, 4, 0, 0, 0)], { numColors: 0 })).not.toThrow();
-    expect(() => encodeGif([solidFrame(4, 4, 0, 0, 0)], { numColors: 9999 })).not.toThrow();
+    expect(() => encodeGif([solidFrame({ w: 4, h: 4 }, [0, 0, 0])], { numColors: 0 })).not.toThrow();
+    expect(() => encodeGif([solidFrame({ w: 4, h: 4 }, [0, 0, 0])], { numColors: 9999 })).not.toThrow();
   });
 
   it('works with minimal 1×1 frame', () => {
-    const bytes = encodeGif([solidFrame(1, 1, 255, 255, 255)]);
+    const bytes = encodeGif([solidFrame({ w: 1, h: 1 }, [255, 255, 255])]);
     expect(bytes[0]).toBe(0x47);
     expect(bytes[bytes.length - 1]).toBe(0x3B);
   });
@@ -335,7 +338,7 @@ describe('encodeGif — options', () => {
 
 describe('encodeGif — REGRESSION: color table size matches numColors < 256', () => {
   it('numColors=16 declares a 16-entry (not 256-entry) global and local color table', () => {
-    const bytes = encodeGif([solidFrame(8, 8, 200, 100, 50)], { numColors: 16, dither: false });
+    const bytes = encodeGif([solidFrame({ w: 8, h: 8 }, [200, 100, 50])], { numColors: 16, dither: false });
 
     // Logical Screen Descriptor packed byte (offset 10): GCT flag=1,
     // color resolution=N, sort=0, size=N. For 16 entries, N=3 (2^(3+1)=16).
@@ -374,7 +377,7 @@ describe('encodeGif — REGRESSION: color table size matches numColors < 256', (
     // requestedColors=2 rounds UP to the smallest valid table (4 entries,
     // N=1, minCodeSize=2) rather than declaring a 2-entry table whose
     // minCodeSize=1 many decoders reject.
-    const bytes = encodeGif([solidFrame(4, 4, 0, 0, 0)], { numColors: 2, dither: false });
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [0, 0, 0])], { numColors: 2, dither: false });
     expect(bytes[10] & 0x07).toBe(1); // N=1 -> declared size 4
     let sepIdx = -1;
     for (let i = 0; i < bytes.length; i++) {
@@ -391,13 +394,13 @@ describe('encodeGif — REGRESSION: color table size matches numColors < 256', (
     // GIF color tables must be a power of two; 200 requested colors cannot
     // be represented exactly, so it must round UP (never truncate the
     // palette to fewer entries than requested).
-    const bytes = encodeGif([solidFrame(4, 4, 10, 20, 30)], { numColors: 200, dither: false });
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [10, 20, 30])], { numColors: 200, dither: false });
     const declaredSize = 1 << ((bytes[10] & 0x07) + 1);
     expect(declaredSize).toBe(256);
   });
 
   it('default (no numColors option) still declares a 256-entry table with minCodeSize 8 (no regression for the default path)', () => {
-    const bytes = encodeGif([solidFrame(4, 4, 200, 100, 50)]);
+    const bytes = encodeGif([solidFrame({ w: 4, h: 4 }, [200, 100, 50])]);
     expect(bytes[10]).toBe(0xF7);
     let sepIdx = 0;
     for (let i = 0; i < bytes.length; i++) {
@@ -424,7 +427,7 @@ describe('encodeGif — error handling', () => {
 
 describe('encodeGif — colour quantisation', () => {
   it('pure red frame produces a palette with at least one reddish entry', () => {
-    const bytes = encodeGif([solidFrame(8, 8, 255, 0, 0)], { dither: false });
+    const bytes = encodeGif([solidFrame({ w: 8, h: 8 }, [255, 0, 0])], { dither: false });
 
     // The local colour table starts 9 bytes after the 0x2C Image Separator
     let sepIdx = -1;
@@ -447,7 +450,7 @@ describe('encodeGif — colour quantisation', () => {
 
   it('solid white frame has index 0 pixel mapped to a near-white palette entry', () => {
     // We don't peek inside indices, but we verify the output is a valid GIF
-    const bytes = encodeGif([solidFrame(8, 8, 255, 255, 255)], { dither: false });
+    const bytes = encodeGif([solidFrame({ w: 8, h: 8 }, [255, 255, 255])], { dither: false });
     expect(bytes[bytes.length - 1]).toBe(0x3B);
     expect(bytes.length).toBeGreaterThan(800); // header + GCT + LCT + LZW
   });

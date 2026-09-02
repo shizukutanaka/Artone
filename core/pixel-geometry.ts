@@ -33,6 +33,17 @@ export interface PixelBuffer extends PixelSize {
 }
 
 /**
+ * **読み取り用**の RGBA 画素バッファ。
+ *
+ * 入力は `Uint8ClampedArray` と `Uint8Array` のどちらも来るため、受け口は
+ * 両方を許す。{@link PixelBuffer} はこれに代入できる (出力側は書き込みで
+ * 自動クランプが要るので `Uint8ClampedArray` に固定する)。
+ */
+export interface PixelSource extends PixelSize {
+  data: Uint8ClampedArray | Uint8Array;
+}
+
+/**
  * 単チャンネルの平面バッファ (マスク・輝度など)。
  * `data.length === width * height` を満たす。
  */

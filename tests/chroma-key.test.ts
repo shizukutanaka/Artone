@@ -171,27 +171,27 @@ describe('chromaKey spill suppression', () => {
 describe('suppressSpillImage', () => {
   it('reduces green channel where it exceeds (r+b)/2', () => {
     const img = solid(2, 2, [50, 200, 60, 255]);
-    const out = suppressSpillImage(img, 2, 2, [0, 255, 0], 1);
+    const out = suppressSpillImage({ data: img, width: 2, height: 2 }, { keyColor: [0, 255, 0], amount: 1 });
     // green pulled to (50+60)/2 = 55
     expect(out[1]).toBeCloseTo(55, 0);
   });
 
   it('preserves alpha', () => {
     const img = solid(2, 2, [50, 200, 60, 180]);
-    const out = suppressSpillImage(img, 2, 2);
+    const out = suppressSpillImage({ data: img, width: 2, height: 2 });
     for (let i = 3; i < out.length; i += 4) expect(out[i]).toBe(180);
   });
 
   it('amount=0 leaves image unchanged', () => {
     const img = solid(2, 2, [50, 200, 60, 255]);
-    const out = suppressSpillImage(img, 2, 2, [0, 255, 0], 0);
+    const out = suppressSpillImage({ data: img, width: 2, height: 2 }, { keyColor: [0, 255, 0], amount: 0 });
     expect(Array.from(out)).toEqual(Array.from(img));
   });
 
   it('does not raise channels below the limit', () => {
     // green already below (r+b)/2 → unchanged
     const img = solid(2, 2, [200, 50, 200, 255]);
-    const out = suppressSpillImage(img, 2, 2, [0, 255, 0], 1);
+    const out = suppressSpillImage({ data: img, width: 2, height: 2 }, { keyColor: [0, 255, 0], amount: 1 });
     expect(out[1]).toBe(50);
   });
 });

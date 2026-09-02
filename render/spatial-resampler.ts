@@ -32,25 +32,10 @@ export interface ResampleOptions {
   kernel?: ResampleKernel;
 }
 
-/**
- * RGBA 画素バッファ (`data.length === width * height * 4`)。
- *
- * 幅・高さをデータと**一緒に**運ぶのが要点。以前は
- * `(src, srcW, srcH, dstW, dstH)` と数値4個を並べており、**型はすべて `number`
- * なので取り違えをコンパイラが検出できなかった** — 縦横の入れ替えや src/dst の
- * 取り違えは、落ちずに「歪んだ絵」を出す種類の誤りである。
- */
-export interface PixelBuffer {
-  data: Uint8ClampedArray;
-  width: number;
-  height: number;
-}
-
-/** 出力の画素寸法。 */
-export interface PixelSize {
-  width: number;
-  height: number;
-}
+// 画素バッファの形は `render/` と `ai/` の双方が要るため `core/` に置いてある。
+// ここからは再輸出のみ (既存の import パスを壊さない)。
+export type { PixelBuffer, PixelSize } from '../core/pixel-geometry';
+import type { PixelBuffer, PixelSize } from '../core/pixel-geometry';
 
 // ─── Nearest-neighbour ────────────────────────────────────────────────────────
 

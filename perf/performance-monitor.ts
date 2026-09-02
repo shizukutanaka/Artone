@@ -119,9 +119,14 @@ class RollingStats {
 
   push(value: number): void {
     if (this.values.length >= this.maxSize) {
-      const removed = this.values.shift()!;
-      this.sum -= removed;
-      this.sumSq -= removed * removed;
+      // `length >= maxSize` は空配列でも成り立つ (maxSize が 0 のとき)。
+      // `shift()!` で潰すと `undefined` が引き算に入り、以降 sum が NaN のまま
+      // 戻らなくなる — 統計が静かに壊れる種類の誤り。
+      const removed = this.values.shift();
+      if (removed !== undefined) {
+        this.sum -= removed;
+        this.sumSq -= removed * removed;
+      }
     }
     this.values.push(value);
     this.sum += value;

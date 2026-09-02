@@ -57,8 +57,12 @@ export class ServiceWorkerManager {
     // added another 'updatefound' listener that lived on for the
     // registration's full lifetime -- unbounded accumulation across manager
     // re-creation.
-    this.registration.addEventListener('updatefound', () => {
-      const worker = this.registration!.installing;
+    // 登録をローカルへ束ねてからリスナーを張る。`this.registration!` を
+    // リスナーの**中**で引き直すと、その間に解除 (null 代入) された場合に
+    // null へのアクセスになる。このリスナーが見るべきは登録時のそれ。
+    const registration = this.registration;
+    registration.addEventListener('updatefound', () => {
+      const worker = registration.installing;
       if (!worker) return;
       // Use { once: true } so the statechange listener auto-removes after first fire,
       // preventing a listener leak when updatefound fires multiple times (e.g., rapid

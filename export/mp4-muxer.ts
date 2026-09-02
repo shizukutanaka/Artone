@@ -594,7 +594,11 @@ export function muxMP4(
     throw new Error('muxMP4: at least one video chunk is required');
   }
 
-  const hasAudio = !!(audioTrack && audioChunks && audioChunks.length > 0);
+  // boolean では配列もトラックも絞り込めず、使用箇所が `audioChunks!` /
+  // `audioTrack!` になる。**値そのもの**で表す (webm-muxer.ts と同じ修正)。
+  const audio = audioTrack && audioChunks && audioChunks.length > 0
+    ? { track: audioTrack, chunks: audioChunks }
+    : null;
   const lastVideo = videoChunks[videoChunks.length - 1];
   const durationMs = (lastVideo.timestampUs + lastVideo.durationUs) / 1000;
   const movieTimescale = 1000;  // ms precision at movie level
@@ -634,14 +638,14 @@ export function muxMP4(
     .map((c, i) => c.isKeyframe ? i + 1 : -1)
     .filter(i => i > 0);
 
-  const audioFrames = hasAudio ? audioChunks!.map(c => c.data) : [];
+  const audioFrames = audio ? audio.chunks.map(c => c.data) : [];
   const audioSizes = audioFrames.map(f => f.length);
   // Per-chunk delta in audio-timescale (sample rate) ticks, derived from each
   // chunk's actual encoded duration — not assumed to be a constant 1024
   // samples, which overstated the track's total duration whenever the
   // sample count wasn't an exact multiple of the encoder's frame size.
-  const audioSampleDeltas = hasAudio
-    ? audioChunks!.map(c => Math.round((c.durationUs * audioTrack!.sampleRate) / 1_000_000))
+  const audioSampleDeltas = audio
+    ? audio.chunks.map(c => Math.round((c.durationUs * audio.track.sampleRate) / 1_000_000))
     : [];
 
   const ftyp = buildFtyp();
@@ -657,11 +661,11 @@ export function muxMP4(
       chunkOffset: videoChunkOffset,
     });
     const parts: Uint8Array[] = [
-      buildMvhd(movieTimescale, durationMs, hasAudio ? 3 : 2),
+      buildMvhd(movieTimescale, durationMs, audio ? 3 : 2),
       videoTrak,
     ];
-    if (hasAudio) {
-      parts.push(buildAudioTrak(timing, audioTrack, {
+    if (audio) {
+      parts.push(buildAudioTrak(timing, audio.track, {
         sizes: audioSizes,
         deltas: audioSampleDeltas,
         chunkOffset: audioChunkOffset,

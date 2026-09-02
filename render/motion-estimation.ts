@@ -238,10 +238,27 @@ export function lucasKanade(
  * Sum of absolute differences between a block in `prev` at (bx,by) and a block
  * in `next` shifted by (dx,dy).
  */
+/** 探索対象のブロック (左上位置と一辺)。 */
+interface Block {
+  x: number;
+  y: number;
+  size: number;
+}
+
+/** 動きベクトルの候補 (画素単位のずらし量)。 */
+interface Offset {
+  dx: number;
+  dy: number;
+}
+
 function blockSAD(
-  prev: GrayImage, next: GrayImage,
-  bx: number, by: number, size: number, dx: number, dy: number,
+  frames: { prev: GrayImage; next: GrayImage },
+  block: Block,
+  offset: Offset,
 ): number {
+  const { prev, next } = frames;
+  const { x: bx, y: by, size } = block;
+  const { dx, dy } = offset;
   let sad = 0;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -253,6 +270,29 @@ function blockSAD(
     }
   }
   return sad;
+}
+
+/**
+ * 探索窓の中で SAD が最小になるずらし量を返す。
+ *
+ * 呼び出し側に埋めたままだとブロック走査と探索窓の2重ループが入れ子になり
+ * 4重になる (`CLAUDE.md`「ネストはガード節で回避」)。「最良一致を探す」という
+ * 単位で名前を付ける。返す `Offset` は**ブロックごとに1個**なので、画素単位の
+ * SAD ループに割り当ては入らない。
+ */
+function findBestMatch(
+  frames: { prev: GrayImage; next: GrayImage },
+  block: Block,
+  searchRange: number,
+): Offset & { cost: number } {
+  let bestCost = Infinity, bestDx = 0, bestDy = 0;
+  for (let dy = -searchRange; dy <= searchRange; dy++) {
+    for (let dx = -searchRange; dx <= searchRange; dx++) {
+      const cost = blockSAD(frames, block, { dx, dy });
+      if (cost < bestCost) { bestCost = cost; bestDx = dx; bestDy = dy; }
+    }
+  }
+  return { dx: bestDx, dy: bestDy, cost: bestCost };
 }
 
 /**
@@ -273,20 +313,16 @@ export function blockMatch(
   const step        = opts.step        ?? blockSize;
 
   const vectors: BlockVector[] = [];
+  // 走査中は不変。ブロックごとに渡すのでループの外で1回だけ作る。
+  const frames = { prev, next };
 
   for (let by = 0; by + blockSize <= prev.height; by += step) {
     for (let bx = 0; bx + blockSize <= prev.width; bx += step) {
-      let bestCost = Infinity, bestDx = 0, bestDy = 0;
-      for (let dy = -searchRange; dy <= searchRange; dy++) {
-        for (let dx = -searchRange; dx <= searchRange; dx++) {
-          const cost = blockSAD(prev, next, bx, by, blockSize, dx, dy);
-          if (cost < bestCost) { bestCost = cost; bestDx = dx; bestDy = dy; }
-        }
-      }
+      const best = findBestMatch(frames, { x: bx, y: by, size: blockSize }, searchRange);
       vectors.push({
         center: { x: bx + blockSize / 2, y: by + blockSize / 2 },
-        motion: { x: bestDx, y: bestDy },
-        cost: bestCost,
+        motion: { x: best.dx, y: best.dy },
+        cost: best.cost,
       });
     }
   }

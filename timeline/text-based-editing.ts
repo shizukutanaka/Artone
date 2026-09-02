@@ -155,8 +155,11 @@ export class TextBasedEditor {
         speakerIndex++;
       }
 
-      // Start new paragraph on speaker change
-      if (speakerId !== currentSpeaker) {
+      // Start new paragraph on speaker change.
+      // `!currentParagraph ||` を足すのは型のためだけではない — 最初の語では
+      // 必ずこの分岐に入る、という**暗黙の前提**を条件として書き出したもの。
+      // 書かないと以降が `currentParagraph!` になり、前提がコメント頼みになる。
+      if (!currentParagraph || speakerId !== currentSpeaker) {
         if (currentParagraph) {
           paragraphs.push(currentParagraph);
         }
@@ -182,8 +185,8 @@ export class TextBasedEditor {
         isSilence: false
       };
 
-      currentParagraph!.words.push(word);
-      currentParagraph!.end = w.end;
+      currentParagraph.words.push(word);
+      currentParagraph.end = w.end;
     }
 
     if (currentParagraph) {

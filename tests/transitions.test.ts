@@ -12,6 +12,14 @@ import {
   radialWipe, irisWipe,
   getTransition,
 } from '../render/transitions';
+
+/**
+ * `(a, b, w, h, t) → TransitionInput` の短縮。
+ * 位置引数だった頃のテスト本文をそのまま読めるように保つ。
+ */
+const inp = (
+  a: Uint8ClampedArray, b: Uint8ClampedArray, width: number, height: number, t: number,
+) => ({ a, b, width, height, t });
 import type { TransitionKind } from '../render/transitions';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -64,33 +72,33 @@ describe('easing functions', () => {
 describe('crossDissolve', () => {
   it('t=0 returns A', () => {
     const a = solid(4, 4, RED), b = solid(4, 4, BLUE);
-    const out = crossDissolve(a, b, 4, 4, 0);
+    const out = crossDissolve(inp(a, b, 4, 4, 0));
     expect(pixel(out, 0, 0, 4)).toEqual([255, 0, 0]);
   });
 
   it('t=1 returns B', () => {
     const a = solid(4, 4, RED), b = solid(4, 4, BLUE);
-    const out = crossDissolve(a, b, 4, 4, 1);
+    const out = crossDissolve(inp(a, b, 4, 4, 1));
     expect(pixel(out, 0, 0, 4)).toEqual([0, 0, 255]);
   });
 
   it('t=0.5 is a 50/50 blend', () => {
     const a = solid(2, 2, [200, 0, 0]), b = solid(2, 2, [0, 0, 200]);
-    const out = crossDissolve(a, b, 2, 2, 0.5);
+    const out = crossDissolve(inp(a, b, 2, 2, 0.5));
     expect(out[0]).toBeCloseTo(100, -0.3);
     expect(out[2]).toBeCloseTo(100, -0.3);
   });
 
   it('result is always opaque', () => {
     const a = solid(4, 4, RED), b = solid(4, 4, BLUE);
-    const out = crossDissolve(a, b, 4, 4, 0.3);
+    const out = crossDissolve(inp(a, b, 4, 4, 0.3));
     for (let i = 3; i < out.length; i += 4) expect(out[i]).toBe(255);
   });
 
   it('clamps t outside [0,1]', () => {
     const a = solid(2, 2, RED), b = solid(2, 2, BLUE);
-    expect(pixel(crossDissolve(a, b, 2, 2, -1), 0, 0, 2)).toEqual([255, 0, 0]);
-    expect(pixel(crossDissolve(a, b, 2, 2, 2), 0, 0, 2)).toEqual([0, 0, 255]);
+    expect(pixel(crossDissolve(inp(a, b, 2, 2, -1)), 0, 0, 2)).toEqual([255, 0, 0]);
+    expect(pixel(crossDissolve(inp(a, b, 2, 2, 2)), 0, 0, 2)).toEqual([0, 0, 255]);
   });
 });
 
@@ -99,23 +107,23 @@ describe('crossDissolve', () => {
 describe('dipToColor', () => {
   it('t=0 returns A', () => {
     const a = solid(2, 2, RED), b = solid(2, 2, BLUE);
-    expect(pixel(dipToColor(a, b, 2, 2, 0), 0, 0, 2)).toEqual([255, 0, 0]);
+    expect(pixel(dipToColor(inp(a, b, 2, 2, 0)), 0, 0, 2)).toEqual([255, 0, 0]);
   });
 
   it('t=1 returns B', () => {
     const a = solid(2, 2, RED), b = solid(2, 2, BLUE);
-    expect(pixel(dipToColor(a, b, 2, 2, 1), 0, 0, 2)).toEqual([0, 0, 255]);
+    expect(pixel(dipToColor(inp(a, b, 2, 2, 1)), 0, 0, 2)).toEqual([0, 0, 255]);
   });
 
   it('t=0.5 is the dip color (black by default)', () => {
     const a = solid(2, 2, RED), b = solid(2, 2, BLUE);
-    const out = dipToColor(a, b, 2, 2, 0.5);
+    const out = dipToColor(inp(a, b, 2, 2, 0.5));
     expect(pixel(out, 0, 0, 2)).toEqual([0, 0, 0]);
   });
 
   it('dip to white reaches white at midpoint', () => {
     const a = solid(2, 2, RED), b = solid(2, 2, BLUE);
-    const out = dipToColor(a, b, 2, 2, 0.5, [255, 255, 255]);
+    const out = dipToColor(inp(a, b, 2, 2, 0.5), { color: [255, 255, 255] });
     expect(pixel(out, 0, 0, 2)).toEqual([255, 255, 255]);
   });
 });
@@ -125,20 +133,20 @@ describe('dipToColor', () => {
 describe('wipe', () => {
   it('t=0 is all A', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = wipe(a, b, 8, 4, 0, 'left');
+    const out = wipe(inp(a, b, 8, 4, 0), { direction: 'left' });
     expect(pixel(out, 7, 0, 8)).toEqual([255, 0, 0]);
   });
 
   it('t=1 is all B', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = wipe(a, b, 8, 4, 1, 'left');
+    const out = wipe(inp(a, b, 8, 4, 1), { direction: 'left' });
     expect(pixel(out, 0, 0, 8)).toEqual([0, 0, 255]);
     expect(pixel(out, 7, 0, 8)).toEqual([0, 0, 255]);
   });
 
   it('wipe-left reveals B from the left at t=0.5', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = wipe(a, b, 8, 4, 0.5, 'left');
+    const out = wipe(inp(a, b, 8, 4, 0.5), { direction: 'left' });
     // Left column should be B, right column should be A
     expect(pixel(out, 0, 0, 8)).toEqual([0, 0, 255]);
     expect(pixel(out, 7, 0, 8)).toEqual([255, 0, 0]);
@@ -146,22 +154,22 @@ describe('wipe', () => {
 
   it('wipe-right reveals B from the right', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = wipe(a, b, 8, 4, 0.5, 'right');
+    const out = wipe(inp(a, b, 8, 4, 0.5), { direction: 'right' });
     expect(pixel(out, 7, 0, 8)).toEqual([0, 0, 255]);
     expect(pixel(out, 0, 0, 8)).toEqual([255, 0, 0]);
   });
 
   it('wipe-up and wipe-down work vertically', () => {
     const a = solid(4, 8, RED), b = solid(4, 8, BLUE);
-    const up = wipe(a, b, 4, 8, 0.5, 'up');
+    const up = wipe(inp(a, b, 4, 8, 0.5), { direction: 'up' });
     expect(pixel(up, 0, 0, 4)).toEqual([0, 0, 255]); // top revealed
-    const down = wipe(a, b, 4, 8, 0.5, 'down');
+    const down = wipe(inp(a, b, 4, 8, 0.5), { direction: 'down' });
     expect(pixel(down, 0, 7, 4)).toEqual([0, 0, 255]); // bottom revealed
   });
 
   it('softness produces blended boundary pixels', () => {
     const a = solid(16, 1, RED), b = solid(16, 1, BLUE);
-    const out = wipe(a, b, 16, 1, 0.5, 'left', 0.3);
+    const out = wipe(inp(a, b, 16, 1, 0.5), { direction: 'left', softness: 0.3 });
     let hasBlend = false;
     for (let x = 0; x < 16; x++) {
       const [r, , bl] = pixel(out, x, 0, 16);
@@ -172,7 +180,7 @@ describe('wipe', () => {
 
   it('result is opaque', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = wipe(a, b, 8, 4, 0.5, 'left');
+    const out = wipe(inp(a, b, 8, 4, 0.5), { direction: 'left' });
     for (let i = 3; i < out.length; i += 4) expect(out[i]).toBe(255);
   });
 });
@@ -182,27 +190,27 @@ describe('wipe', () => {
 describe('slide', () => {
   it('t=0 shows A (B fully off-screen)', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = slide(a, b, 8, 4, 0, 'left');
+    const out = slide(inp(a, b, 8, 4, 0), { direction: 'left' });
     expect(pixel(out, 4, 0, 8)).toEqual([255, 0, 0]);
   });
 
   it('t=1 shows B (fully slid in)', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = slide(a, b, 8, 4, 1, 'left');
+    const out = slide(inp(a, b, 8, 4, 1), { direction: 'left' });
     expect(pixel(out, 0, 0, 8)).toEqual([0, 0, 255]);
     expect(pixel(out, 7, 0, 8)).toEqual([0, 0, 255]);
   });
 
   it('B occupies left portion mid-slide from left', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = slide(a, b, 8, 4, 0.5, 'left');
+    const out = slide(inp(a, b, 8, 4, 0.5), { direction: 'left' });
     // B entering from left → left side should be B
     expect(pixel(out, 0, 0, 8)).toEqual([0, 0, 255]);
   });
 
   it('result is opaque', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = slide(a, b, 8, 4, 0.5, 'left');
+    const out = slide(inp(a, b, 8, 4, 0.5), { direction: 'left' });
     for (let i = 3; i < out.length; i += 4) expect(out[i]).toBe(255);
   });
 });
@@ -212,20 +220,20 @@ describe('slide', () => {
 describe('push', () => {
   it('t=0 shows A', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = push(a, b, 8, 4, 0, 'left');
+    const out = push(inp(a, b, 8, 4, 0), { direction: 'left' });
     expect(pixel(out, 4, 0, 8)).toEqual([255, 0, 0]);
   });
 
   it('t=1 shows B', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = push(a, b, 8, 4, 1, 'left');
+    const out = push(inp(a, b, 8, 4, 1), { direction: 'left' });
     expect(pixel(out, 0, 0, 8)).toEqual([0, 0, 255]);
     expect(pixel(out, 7, 0, 8)).toEqual([0, 0, 255]);
   });
 
   it('mid-push shows both A and B', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = push(a, b, 8, 4, 0.5, 'left');
+    const out = push(inp(a, b, 8, 4, 0.5), { direction: 'left' });
     let hasRed = false, hasBlue = false;
     for (let x = 0; x < 8; x++) {
       const [r, , bl] = pixel(out, x, 0, 8);
@@ -238,7 +246,7 @@ describe('push', () => {
 
   it('result is opaque', () => {
     const a = solid(8, 4, RED), b = solid(8, 4, BLUE);
-    const out = push(a, b, 8, 4, 0.5, 'left');
+    const out = push(inp(a, b, 8, 4, 0.5), { direction: 'left' });
     for (let i = 3; i < out.length; i += 4) expect(out[i]).toBe(255);
   });
 });
@@ -248,13 +256,13 @@ describe('push', () => {
 describe('radialWipe', () => {
   it('t=0 is all A', () => {
     const a = solid(8, 8, RED), b = solid(8, 8, BLUE);
-    const out = radialWipe(a, b, 8, 8, 0);
+    const out = radialWipe(inp(a, b, 8, 8, 0));
     expect(pixel(out, 7, 7, 8)).toEqual([255, 0, 0]);
   });
 
   it('t=1 is all B', () => {
     const a = solid(8, 8, RED), b = solid(8, 8, BLUE);
-    const out = radialWipe(a, b, 8, 8, 1);
+    const out = radialWipe(inp(a, b, 8, 8, 1));
     for (let i = 0; i < out.length; i += 4) {
       expect(out[i + 2]).toBe(255); // blue channel
     }
@@ -262,7 +270,7 @@ describe('radialWipe', () => {
 
   it('mid-sweep shows both frames', () => {
     const a = solid(16, 16, RED), b = solid(16, 16, BLUE);
-    const out = radialWipe(a, b, 16, 16, 0.5);
+    const out = radialWipe(inp(a, b, 16, 16, 0.5));
     let hasRed = false, hasBlue = false;
     for (let i = 0; i < out.length; i += 4) {
       if (out[i] > 200) hasRed = true;
@@ -278,20 +286,20 @@ describe('radialWipe', () => {
 describe('irisWipe', () => {
   it('t=0 is all A', () => {
     const a = solid(8, 8, RED), b = solid(8, 8, BLUE);
-    const out = irisWipe(a, b, 8, 8, 0);
+    const out = irisWipe(inp(a, b, 8, 8, 0));
     expect(pixel(out, 0, 0, 8)).toEqual([255, 0, 0]);
   });
 
   it('t=1 is all B', () => {
     const a = solid(8, 8, RED), b = solid(8, 8, BLUE);
-    const out = irisWipe(a, b, 8, 8, 1);
+    const out = irisWipe(inp(a, b, 8, 8, 1));
     expect(pixel(out, 0, 0, 8)).toEqual([0, 0, 255]);
     expect(pixel(out, 7, 7, 8)).toEqual([0, 0, 255]);
   });
 
   it('center is B before corners during iris open', () => {
     const a = solid(16, 16, RED), b = solid(16, 16, BLUE);
-    const out = irisWipe(a, b, 16, 16, 0.4);
+    const out = irisWipe(inp(a, b, 16, 16, 0.4));
     // Center should be B (inside circle), corner should be A
     expect(pixel(out, 8, 8, 16)).toEqual([0, 0, 255]);
     expect(pixel(out, 0, 0, 16)).toEqual([255, 0, 0]);
@@ -299,7 +307,7 @@ describe('irisWipe', () => {
 
   it('result is opaque', () => {
     const a = solid(8, 8, RED), b = solid(8, 8, BLUE);
-    const out = irisWipe(a, b, 8, 8, 0.5);
+    const out = irisWipe(inp(a, b, 8, 8, 0.5));
     for (let i = 3; i < out.length; i += 4) expect(out[i]).toBe(255);
   });
 });
@@ -318,7 +326,7 @@ describe('getTransition', () => {
     const a = solid(8, 8, RED), b = solid(8, 8, BLUE);
     for (const kind of kinds) {
       const fn = getTransition(kind);
-      const out = fn(a, b, 8, 8, 0.5);
+      const out = fn(inp(a, b, 8, 8, 0.5));
       expect(out.length).toBe(8 * 8 * 4);
       for (let i = 3; i < out.length; i += 4) expect(out[i]).toBe(255);
     }
@@ -327,20 +335,20 @@ describe('getTransition', () => {
   it('t=0 returns A for cross-dissolve', () => {
     const a = solid(4, 4, RED), b = solid(4, 4, BLUE);
     const fn = getTransition('cross-dissolve');
-    expect(pixel(fn(a, b, 4, 4, 0), 0, 0, 4)).toEqual([255, 0, 0]);
+    expect(pixel(fn(inp(a, b, 4, 4, 0)), 0, 0, 4)).toEqual([255, 0, 0]);
   });
 
   it('t=1 returns B for cross-dissolve', () => {
     const a = solid(4, 4, RED), b = solid(4, 4, BLUE);
     const fn = getTransition('cross-dissolve');
-    expect(pixel(fn(a, b, 4, 4, 1), 0, 0, 4)).toEqual([0, 0, 255]);
+    expect(pixel(fn(inp(a, b, 4, 4, 1)), 0, 0, 4)).toEqual([0, 0, 255]);
   });
 
   it('applies easing to t', () => {
     const a = solid(2, 2, [200, 0, 0]), b = solid(2, 2, [0, 0, 200]);
     // easeIn(0.5) < 0.5 → dissolve closer to A than linear midpoint
-    const eased  = getTransition('cross-dissolve', easeIn)(a, b, 2, 2, 0.5);
-    const linear = getTransition('cross-dissolve', easeLinear)(a, b, 2, 2, 0.5);
+    const eased  = getTransition('cross-dissolve', easeIn)(inp(a, b, 2, 2, 0.5));
+    const linear = getTransition('cross-dissolve', easeLinear)(inp(a, b, 2, 2, 0.5));
     expect(eased[0]).toBeGreaterThan(linear[0]); // more red (A) retained
   });
 });

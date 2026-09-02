@@ -32,18 +32,37 @@ export interface ResampleOptions {
   kernel?: ResampleKernel;
 }
 
+/**
+ * RGBA 画素バッファ (`data.length === width * height * 4`)。
+ *
+ * 幅・高さをデータと**一緒に**運ぶのが要点。以前は
+ * `(src, srcW, srcH, dstW, dstH)` と数値4個を並べており、**型はすべて `number`
+ * なので取り違えをコンパイラが検出できなかった** — 縦横の入れ替えや src/dst の
+ * 取り違えは、落ちずに「歪んだ絵」を出す種類の誤りである。
+ */
+export interface PixelBuffer {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
+
+/** 出力の画素寸法。 */
+export interface PixelSize {
+  width: number;
+  height: number;
+}
+
 // ─── Nearest-neighbour ────────────────────────────────────────────────────────
 
 /**
  * Nearest-neighbour resampling. O(W×H) — fastest, blocky at magnification.
  */
-export function resampleNearest(
-  src: Uint8ClampedArray,
-  srcW: number,
-  srcH: number,
-  dstW: number,
-  dstH: number,
-): Uint8ClampedArray {
+export function resampleNearest(source: PixelBuffer, target: PixelSize): Uint8ClampedArray {
+  const src = source.data;
+  const srcW = source.width;
+  const srcH = source.height;
+  const dstW = target.width;
+  const dstH = target.height;
   const dst = new Uint8ClampedArray(dstW * dstH * 4);
   const xScale = srcW / dstW;
   const yScale = srcH / dstH;
@@ -68,13 +87,12 @@ export function resampleNearest(
  * Bilinear resampling with 2×2 weighted sample. O(4×W×H).
  * Good quality for moderate downscaling and upscaling.
  */
-export function resampleBilinear(
-  src: Uint8ClampedArray,
-  srcW: number,
-  srcH: number,
-  dstW: number,
-  dstH: number,
-): Uint8ClampedArray {
+export function resampleBilinear(source: PixelBuffer, target: PixelSize): Uint8ClampedArray {
+  const src = source.data;
+  const srcW = source.width;
+  const srcH = source.height;
+  const dstW = target.width;
+  const dstH = target.height;
   const dst = new Uint8ClampedArray(dstW * dstH * 4);
   const xScale = srcW / dstW;
   const yScale = srcH / dstH;
@@ -130,13 +148,12 @@ function cubicWeight(t: number): number {
  * Bicubic resampling using Keys cubic kernel (a=−0.5). O(16×W×H).
  * Produces sharper results than bilinear, especially at magnification.
  */
-export function resampleBicubic(
-  src: Uint8ClampedArray,
-  srcW: number,
-  srcH: number,
-  dstW: number,
-  dstH: number,
-): Uint8ClampedArray {
+export function resampleBicubic(source: PixelBuffer, target: PixelSize): Uint8ClampedArray {
+  const src = source.data;
+  const srcW = source.width;
+  const srcH = source.height;
+  const dstW = target.width;
+  const dstH = target.height;
   const dst = new Uint8ClampedArray(dstW * dstH * 4);
   const xScale = srcW / dstW;
   const yScale = srcH / dstH;
@@ -198,13 +215,12 @@ function lanczosWeight(t: number): number {
  * Lanczos-3 resampling. O(36×W×H) — best quality, slowest.
  * Preserves high-frequency detail at downscaling and minimises ringing.
  */
-export function resampleLanczos3(
-  src: Uint8ClampedArray,
-  srcW: number,
-  srcH: number,
-  dstW: number,
-  dstH: number,
-): Uint8ClampedArray {
+export function resampleLanczos3(source: PixelBuffer, target: PixelSize): Uint8ClampedArray {
+  const src = source.data;
+  const srcW = source.width;
+  const srcH = source.height;
+  const dstW = target.width;
+  const dstH = target.height;
   const dst = new Uint8ClampedArray(dstW * dstH * 4);
   const xScale = srcW / dstW;
   const yScale = srcH / dstH;
@@ -268,18 +284,15 @@ export function resampleLanczos3(
  * ```
  */
 export function resample(
-  src: Uint8ClampedArray,
-  srcW: number,
-  srcH: number,
-  dstW: number,
-  dstH: number,
+  source: PixelBuffer,
+  target: PixelSize,
   options: ResampleOptions = {},
 ): Uint8ClampedArray {
   const kernel = options.kernel ?? 'bilinear';
   switch (kernel) {
-    case 'nearest':  return resampleNearest(src, srcW, srcH, dstW, dstH);
-    case 'bilinear': return resampleBilinear(src, srcW, srcH, dstW, dstH);
-    case 'bicubic':  return resampleBicubic(src, srcW, srcH, dstW, dstH);
-    case 'lanczos3': return resampleLanczos3(src, srcW, srcH, dstW, dstH);
+    case 'nearest':  return resampleNearest(source, target);
+    case 'bilinear': return resampleBilinear(source, target);
+    case 'bicubic':  return resampleBicubic(source, target);
+    case 'lanczos3': return resampleLanczos3(source, target);
   }
 }

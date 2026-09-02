@@ -246,11 +246,7 @@ describe('HistoryManager', () => {
 describe('CommandFactory', () => {
   it('creates clipMove command', () => {
     const clip = { id: 'c1', trackId: 'v1', startFrame: 0 };
-    const cmd = CommandFactory.clipMove(
-      'c1', 'v1', 'v1', 0, 100,
-      () => clip,
-      vi.fn(),
-    );
+    const cmd = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'v1', toTrack: 'v1', fromFrame: 0, toFrame: 100 }, { get: () => clip, set: vi.fn() });
     expect(cmd.description).toContain('clip');
   });
 });

@@ -232,7 +232,7 @@ describe('MarkerManager — getStats', () => {
 // HistoryManager — 詳細テスト
 // ============================================================
 
-import { HistoryManager, CommandFactory, type Command } from '../undo/history-manager';
+import { HistoryManager, CommandFactory, type Command, type ClipLike } from '../undo/history-manager';
 
 describe('HistoryManager — Branch', () => {
   let history: HistoryManager;
@@ -443,10 +443,7 @@ describe('HistoryManager — beginGroup / endGroup', () => {
 describe('CommandFactory.clipMove', () => {
   it('execute moves clip, undo restores it', () => {
     let clip = { id: 'c1', trackId: 'v1', startFrame: 0 };
-    const cmd = CommandFactory.clipMove(
-      'c1', 'v1', 'v2', 0, 100,
-      () => clip, (c) => { clip = c as typeof clip; }
-    );
+    const cmd = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'v1', toTrack: 'v2', fromFrame: 0, toFrame: 100 }, { get: () => clip, set: (c) => { clip = c as typeof clip; } });
     cmd.execute();
     expect(clip.trackId).toBe('v2');
     expect(clip.startFrame).toBe(100);
@@ -456,15 +453,15 @@ describe('CommandFactory.clipMove', () => {
   });
 
   it('getDelta reports before/after', () => {
-    const cmd = CommandFactory.clipMove('x', 'v1', 'v2', 0, 50, () => ({}), () => {});
+    const cmd = CommandFactory.clipMove({ clipId: 'x', fromTrack: 'v1', toTrack: 'v2', fromFrame: 0, toFrame: 50 }, { get: () => ({ id: 'c1' }), set: () => {} });
     const d = cmd.getDelta();
     expect((d.before as { trackId: string }).trackId).toBe('v1');
     expect((d.after as { startFrame: number }).startFrame).toBe(50);
   });
 
   it('consecutive moves of the same clip merge (drag does not bloat history)', () => {
-    const a = CommandFactory.clipMove('c1', 'v1', 'v1', 0, 10, () => ({}), () => {});
-    const b = CommandFactory.clipMove('c1', 'v1', 'v1', 10, 20, () => ({}), () => {});
+    const a = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'v1', toTrack: 'v1', fromFrame: 0, toFrame: 10 }, { get: () => ({ id: 'c1' }), set: () => {} });
+    const b = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'v1', toTrack: 'v1', fromFrame: 10, toFrame: 20 }, { get: () => ({ id: 'c1' }), set: () => {} });
     // Same clip + within the 500ms window → mergeable.
     expect(a.canMergeWith?.(b)).toBe(true);
     // Merged command spans the original start to the latest target.
@@ -475,8 +472,8 @@ describe('CommandFactory.clipMove', () => {
   });
 
   it('moves of DIFFERENT clips do not merge', () => {
-    const a = CommandFactory.clipMove('c1', 'v1', 'v1', 0, 10, () => ({}), () => {});
-    const b = CommandFactory.clipMove('c2', 'v1', 'v1', 0, 10, () => ({}), () => {});
+    const a = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'v1', toTrack: 'v1', fromFrame: 0, toFrame: 10 }, { get: () => ({ id: 'c1' }), set: () => {} });
+    const b = CommandFactory.clipMove({ clipId: 'c2', fromTrack: 'v1', toTrack: 'v1', fromFrame: 0, toFrame: 10 }, { get: () => ({ id: 'c1' }), set: () => {} });
     expect(a.canMergeWith?.(b)).toBe(false); // different delta path
   });
 
@@ -485,8 +482,8 @@ describe('CommandFactory.clipMove', () => {
     let clip = { id: 'c1', trackId: 'v1', startFrame: 0 };
     const get = () => clip;
     const set = (c: unknown) => { clip = c as typeof clip; };
-    history.execute(CommandFactory.clipMove('c1', 'v1', 'v1', 0, 10, get, set));
-    history.execute(CommandFactory.clipMove('c1', 'v1', 'v1', 10, 20, get, set));
+    history.execute(CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'v1', toTrack: 'v1', fromFrame: 0, toFrame: 10 }, { get: get, set: set }));
+    history.execute(CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'v1', toTrack: 'v1', fromFrame: 10, toFrame: 20 }, { get: get, set: set }));
     // Two sub-moves of one drag collapse to a single undoable entry.
     expect(history.getHistory().length).toBe(1);
     expect(clip.startFrame).toBe(20);
@@ -497,11 +494,8 @@ describe('CommandFactory.clipMove', () => {
 
 describe('CommandFactory.clipTrim', () => {
   it('trim start: execute updates startFrame and sourceIn, undo restores', () => {
-    let clip: Record<string, unknown> = { id: 'c1', startFrame: 0, sourceIn: 100 };
-    const cmd = CommandFactory.clipTrim(
-      'c1', 'start', 0, 30,
-      () => clip, (c) => { clip = c as Record<string, unknown>; }
-    );
+    let clip: ClipLike = { id: 'c1', startFrame: 0, sourceIn: 100 };
+    const cmd = CommandFactory.clipTrim({ clipId: 'c1', edge: 'start', fromFrame: 0, toFrame: 30 }, { get: () => clip, set: (c) => { clip = c; } });
     cmd.execute();
     expect(clip.startFrame).toBe(30);
     expect(clip.sourceIn).toBe(130); // 100 + (30 - 0)
@@ -511,11 +505,8 @@ describe('CommandFactory.clipTrim', () => {
   });
 
   it('trim end: execute updates endFrame and sourceOut, undo restores', () => {
-    let clip: Record<string, unknown> = { id: 'c1', endFrame: 100, sourceOut: 200 };
-    const cmd = CommandFactory.clipTrim(
-      'c1', 'end', 100, 80,
-      () => clip, (c) => { clip = c as Record<string, unknown>; }
-    );
+    let clip: ClipLike = { id: 'c1', endFrame: 100, sourceOut: 200 };
+    const cmd = CommandFactory.clipTrim({ clipId: 'c1', edge: 'end', fromFrame: 100, toFrame: 80 }, { get: () => clip, set: (c) => { clip = c; } });
     cmd.execute();
     expect(clip.endFrame).toBe(80);
     expect(clip.sourceOut).toBe(180); // 200 + (80 - 100)
@@ -527,11 +518,8 @@ describe('CommandFactory.clipTrim', () => {
   it('REGRESSION: trim start without sourceIn defaults to 0 instead of NaN', () => {
     // ClipLike marks sourceIn optional; a clip created without it must not
     // corrupt to NaN via `undefined + n`.
-    let clip: Record<string, unknown> = { id: 'c1', startFrame: 0 };
-    const cmd = CommandFactory.clipTrim(
-      'c1', 'start', 0, 25,
-      () => clip, (c) => { clip = c as Record<string, unknown>; }
-    );
+    let clip: ClipLike = { id: 'c1', startFrame: 0 };
+    const cmd = CommandFactory.clipTrim({ clipId: 'c1', edge: 'start', fromFrame: 0, toFrame: 25 }, { get: () => clip, set: (c) => { clip = c; } });
     cmd.execute();
     expect(clip.sourceIn).toBe(25); // 0 (default) + 25
     expect(Number.isNaN(clip.sourceIn as number)).toBe(false);
@@ -544,22 +532,16 @@ describe('CommandFactory.clipTrim', () => {
   });
 
   it('REGRESSION: trim end without sourceOut defaults to 0 instead of NaN', () => {
-    let clip: Record<string, unknown> = { id: 'c1', endFrame: 100 };
-    const cmd = CommandFactory.clipTrim(
-      'c1', 'end', 100, 120,
-      () => clip, (c) => { clip = c as Record<string, unknown>; }
-    );
+    let clip: ClipLike = { id: 'c1', endFrame: 100 };
+    const cmd = CommandFactory.clipTrim({ clipId: 'c1', edge: 'end', fromFrame: 100, toFrame: 120 }, { get: () => clip, set: (c) => { clip = c; } });
     cmd.execute();
     expect(clip.sourceOut).toBe(20); // 0 (default) + (120 - 100)
     expect(Number.isNaN(clip.sourceOut as number)).toBe(false);
   });
 
   it('redo re-applies the trim', () => {
-    let clip: Record<string, unknown> = { id: 'c1', startFrame: 0, sourceIn: 50 };
-    const cmd = CommandFactory.clipTrim(
-      'c1', 'start', 0, 10,
-      () => clip, (c) => { clip = c as Record<string, unknown>; }
-    );
+    let clip: ClipLike = { id: 'c1', startFrame: 0, sourceIn: 50 };
+    const cmd = CommandFactory.clipTrim({ clipId: 'c1', edge: 'start', fromFrame: 0, toFrame: 10 }, { get: () => clip, set: (c) => { clip = c; } });
     cmd.execute();
     cmd.undo();
     cmd.redo();
@@ -568,7 +550,7 @@ describe('CommandFactory.clipTrim', () => {
   });
 
   it('getDelta reports before/after frames and path', () => {
-    const cmd = CommandFactory.clipTrim('c1', 'start', 0, 30, () => ({}), () => {});
+    const cmd = CommandFactory.clipTrim({ clipId: 'c1', edge: 'start', fromFrame: 0, toFrame: 30 }, { get: () => ({ id: 'c1' }), set: () => {} });
     const d = cmd.getDelta();
     expect((d.before as { frame: number }).frame).toBe(0);
     expect((d.after as { frame: number }).frame).toBe(30);
@@ -624,11 +606,8 @@ describe('CommandFactory.effectAdd', () => {
 
 describe('CommandFactory.audioVolume', () => {
   it('sets volume on execute, restores on undo', () => {
-    let clip = { audioVolume: 1.0 };
-    const cmd = CommandFactory.audioVolume(
-      'c1', 1.0, 0.5,
-      () => clip, (c) => { clip = c as typeof clip; }
-    );
+    let clip: ClipLike = { id: 'c1', audioVolume: 1.0 };
+    const cmd = CommandFactory.audioVolume('c1', 1.0, 0.5, { get: () => clip, set: (c) => { clip = c as typeof clip; } });
     cmd.execute();
     expect(clip.audioVolume).toBeCloseTo(0.5);
     cmd.undo();
@@ -637,13 +616,13 @@ describe('CommandFactory.audioVolume', () => {
 
   it('REGRESSION: canMergeWith+merge do not crash (missing merge caused TypeError)', () => {
     const h = new HistoryManager({ autoPersist: false });
-    let clip = { audioVolume: 1.0 };
+    let clip: ClipLike = { id: 'c1', audioVolume: 1.0 };
     const get = () => clip;
     const set = (c: unknown) => { clip = c as typeof clip; };
-    h.execute(CommandFactory.audioVolume('c1', 1.0, 0.8, get, set));
+    h.execute(CommandFactory.audioVolume('c1', 1.0, 0.8, { get: get, set: set }));
     // Second volume change within the 200 ms window → triggers canMergeWith+merge path.
     // Before the fix this threw "TypeError: lastCmd.merge is not a function".
-    expect(() => h.execute(CommandFactory.audioVolume('c1', 0.8, 0.5, get, set))).not.toThrow();
+    expect(() => h.execute(CommandFactory.audioVolume('c1', 0.8, 0.5, { get: get, set: set }))).not.toThrow();
     expect(clip.audioVolume).toBeCloseTo(0.5);
     // Single undo should jump back to the original volume (1.0).
     h.undo();
@@ -655,15 +634,15 @@ describe('CommandFactory.audioVolume', () => {
 describe('CommandFactory.colorGrade', () => {
   it('REGRESSION: canMergeWith+merge do not crash (missing merge caused TypeError)', () => {
     const h = new HistoryManager({ autoPersist: false });
-    let clip: Record<string, unknown> = {};
+    let clip: ClipLike = { id: 'c1' };
     const get = () => clip;
     const set = (c: unknown) => { clip = c as typeof clip; };
     const g1 = { contrast: 1.0 };
     const g2 = { contrast: 1.2 };
     const g3 = { contrast: 1.5 };
-    h.execute(CommandFactory.colorGrade('c1', 'exposure', g1, g2, get, set));
+    h.execute(CommandFactory.colorGrade({ clipId: 'c1', gradeType: 'exposure', fromGrade: g1, toGrade: g2 }, { get: get, set: set }));
     // Second grade change within 200 ms → triggers canMergeWith+merge path.
-    expect(() => h.execute(CommandFactory.colorGrade('c1', 'exposure', g2, g3, get, set))).not.toThrow();
+    expect(() => h.execute(CommandFactory.colorGrade({ clipId: 'c1', gradeType: 'exposure', fromGrade: g2, toGrade: g3 }, { get: get, set: set }))).not.toThrow();
     // Single undo must revert to g1 (original before the whole drag).
     h.undo();
     expect((clip.colorGrade as Record<string, unknown>)['exposure']).toEqual(g1);
@@ -674,11 +653,11 @@ describe('CommandFactory.clipTrim — snapshot-based undo', () => {
   it('REGRESSION: undo restores pre-execute state even if another command modified the clip', () => {
     // Bug: undo used delta arithmetic on LIVE clip state; if an interleaved
     // command changed sourceIn, undo would restore the wrong value.
-    let clip: Record<string, unknown> = { id: 'c1', startFrame: 0, sourceIn: 100 };
+    let clip: ClipLike = { id: 'c1', startFrame: 0, sourceIn: 100 };
     const get = () => clip;
     const set = (c: unknown) => { clip = c as typeof clip; };
 
-    const trim = CommandFactory.clipTrim('c1', 'start', 0, 30, get, set);
+    const trim = CommandFactory.clipTrim({ clipId: 'c1', edge: 'start', fromFrame: 0, toFrame: 30 }, { get: get, set: set });
     trim.execute();
     expect(clip.startFrame).toBe(30);
     expect(clip.sourceIn).toBe(130);

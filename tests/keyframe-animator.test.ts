@@ -38,16 +38,16 @@ describe('Easing functions via KeyframeAnimator.getValue()', () => {
     it(`${easing}: getValue at t=0 returns start value`, () => {
       const id = anim.createAnimation('test').id;
       anim.addProperty(id, 'x', 0);
-      anim.addKeyframe(id, 'x', 0,   0, easing);
-      anim.addKeyframe(id, 'x', 1.0, 100, easing);
+      anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: easing });
+      anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 100, easing: easing });
       expect(anim.getValue(id, 'x', 0)).toBeCloseTo(0, 4);
     });
 
     it(`${easing}: getValue at t=1 returns end value`, () => {
       const id = anim.createAnimation('test').id;
       anim.addProperty(id, 'x', 0);
-      anim.addKeyframe(id, 'x', 0,   0, easing);
-      anim.addKeyframe(id, 'x', 1.0, 100, easing);
+      anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: easing });
+      anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 100, easing: easing });
       expect(anim.getValue(id, 'x', 1.0)).toBeCloseTo(100, 4);
     });
   }
@@ -67,24 +67,24 @@ describe('Linear keyframe interpolation', () => {
   it('returns exact midpoint for linear easing', () => {
     const id = anim.createAnimation('test').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0,   0,   'linear');
-    anim.addKeyframe(id, 'x', 1.0, 100, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 100, easing: 'linear' });
     expect(anim.getValue(id, 'x', 0.5)).toBeCloseTo(50, 4);
   });
 
   it('returns first value before first keyframe', () => {
     const id = anim.createAnimation('test').id;
     anim.addProperty(id, 'x', 99);
-    anim.addKeyframe(id, 'x', 1.0, 20, 'linear');
-    anim.addKeyframe(id, 'x', 2.0, 40, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 20, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 2.0, value: 40, easing: 'linear' });
     expect(anim.getValue(id, 'x', 0)).toBeCloseTo(20, 4);
   });
 
   it('returns last value after last keyframe', () => {
     const id = anim.createAnimation('test').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0,   10, 'linear');
-    anim.addKeyframe(id, 'x', 1.0, 90, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 10, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 90, easing: 'linear' });
     expect(anim.getValue(id, 'x', 5.0)).toBeCloseTo(90, 4);
   });
 
@@ -97,7 +97,7 @@ describe('Linear keyframe interpolation', () => {
   it('returns single keyframe value regardless of time', () => {
     const id = anim.createAnimation('test').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0.5, 77, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.5, value: 77, easing: 'linear' });
     expect(anim.getValue(id, 'x', 0)).toBeCloseTo(77, 4);
     expect(anim.getValue(id, 'x', 1)).toBeCloseTo(77, 4);
   });
@@ -112,8 +112,8 @@ describe('Hold easing', () => {
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('test').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0,   0,   'hold');
-    anim.addKeyframe(id, 'x', 1.0, 100, 'hold');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'hold' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 100, easing: 'hold' });
     // Between 0 and 1 with hold: should stay at 0
     expect(anim.getValue(id, 'x', 0.5)).toBeCloseTo(0, 4);
     // After second keyframe: stays at 100
@@ -130,12 +130,12 @@ describe('Bezier easing', () => {
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('test').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0, 0, 'bezier', {
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'bezier', bezierHandles: {
       outX: 0.42, outY: 0,
-    });
-    anim.addKeyframe(id, 'x', 1.0, 100, 'bezier', {
+    } });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 100, easing: 'bezier', bezierHandles: {
       inX: 0.58, inY: 1,
-    });
+    } });
     const v025 = anim.getValue(id, 'x', 0.25);
     const v075 = anim.getValue(id, 'x', 0.75);
     // Symmetric: v025 + v075 ≈ 100
@@ -146,8 +146,8 @@ describe('Bezier easing', () => {
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('test').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0, 0, 'bezier', { outX: 0.5, outY: 0 });
-    anim.addKeyframe(id, 'x', 1.0, 100, 'bezier', { inX: 0.5, inY: 1 });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'bezier', bezierHandles: { outX: 0.5, outY: 0 } });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 100, easing: 'bezier', bezierHandles: { inX: 0.5, inY: 1 } });
     // Near-linear bezier should be close to linear midpoint
     expect(anim.getValue(id, 'x', 0.5)).toBeCloseTo(50, 0);
   });
@@ -163,10 +163,10 @@ describe('getAllValues', () => {
     const id = anim.createAnimation('multi').id;
     anim.addProperty(id, 'x', 0);
     anim.addProperty(id, 'y', 0);
-    anim.addKeyframe(id, 'x', 0, 0, 'linear');
-    anim.addKeyframe(id, 'x', 1.0, 100, 'linear');
-    anim.addKeyframe(id, 'y', 0, 0, 'linear');
-    anim.addKeyframe(id, 'y', 1.0, 200, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 100, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'y' }, { time: 0, value: 0, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'y' }, { time: 1.0, value: 200, easing: 'linear' });
     const vals = anim.getAllValues(id, 0.5);
     expect(vals.x).toBeCloseTo(50, 4);
     expect(vals.y).toBeCloseTo(100, 4);
@@ -193,22 +193,22 @@ describe('Keyframe CRUD', () => {
   });
 
   it('adds keyframes and retrieves them sorted', () => {
-    anim.addKeyframe(id, 'x', 0.8, 80, 'linear');
-    anim.addKeyframe(id, 'x', 0.2, 20, 'linear');
-    anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.8, value: 80, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.2, value: 20, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.5, value: 50, easing: 'linear' });
     expect(anim.getValue(id, 'x', 0.2)).toBeCloseTo(20, 4);
     expect(anim.getValue(id, 'x', 0.5)).toBeCloseTo(50, 4);
     expect(anim.getValue(id, 'x', 0.8)).toBeCloseTo(80, 4);
   });
 
   it('overwrites keyframe at the same time', () => {
-    anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
-    anim.addKeyframe(id, 'x', 0.5, 75, 'linear'); // overwrite
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.5, value: 50, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.5, value: 75, easing: 'linear' }); // overwrite
     expect(anim.getValue(id, 'x', 0.5)).toBeCloseTo(75, 4);
   });
 
   it('deleteKeyframe removes the keyframe', () => {
-    const kf = anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
+    const kf = anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.5, value: 50, easing: 'linear' });
     anim.deleteKeyframe(id, 'x', kf!.id);
     // After deletion: single value → returns that value or default
     expect(anim.getValue(id, 'x', 0.5)).toBe(0); // returns default
@@ -223,8 +223,8 @@ describe('Edge cases', () => {
   it('REGRESSION: unknown easing string falls back to linear instead of crashing', () => {
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('test').id;
-    anim.addKeyframe(id, 'x', 0, 0, 'easeIn');
-    anim.addKeyframe(id, 'x', 1.0, 100, 'easeIn');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'easeIn' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 100, easing: 'easeIn' });
     // Corrupt the easing via updateKeyframe (mimics deserialized stale data)
     const kfs = anim.getKeyframesInRange(id, 0, 1.0);
     anim.updateKeyframe(id, 'x', kfs[0].keyframe.id, {
@@ -255,7 +255,7 @@ describe('KeyframeAnimator — subscribe / notify', () => {
     const id = anim.createAnimation('bounce').id;
     const listener = vi.fn();
     anim.subscribe(listener);
-    anim.addKeyframe(id, 'x', 0, 0, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'linear' });
     expect(listener).toHaveBeenCalled();
   });
 
@@ -265,14 +265,14 @@ describe('KeyframeAnimator — subscribe / notify', () => {
     const listener = vi.fn();
     const unsub = anim.subscribe(listener);
     unsub();
-    anim.addKeyframe(id, 'x', 0, 10, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 10, easing: 'linear' });
     expect(listener).not.toHaveBeenCalled();
   });
 
   it('listener is called when a keyframe is deleted', () => {
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('test').id;
-    const kf = anim.addKeyframe(id, 'y', 0, 5, 'easeIn');
+    const kf = anim.addKeyframe({ animationId: id, propertyName: 'y' }, { time: 0, value: 5, easing: 'easeIn' });
     expect(kf).not.toBeNull();
     const listener = vi.fn();
     anim.subscribe(listener);
@@ -293,7 +293,7 @@ describe('hasKeyframeAt', () => {
     anim = new KeyframeAnimator();
     id = anim.createAnimation('test').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.5, value: 50, easing: 'linear' });
   });
 
   it('returns true for exact keyframe time', () => {
@@ -330,11 +330,11 @@ describe('getKeyframesInRange', () => {
     id = anim.createAnimation('test').id;
     anim.addProperty(id, 'x', 0);
     anim.addProperty(id, 'y', 0);
-    anim.addKeyframe(id, 'x', 0.0, 0, 'linear');
-    anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
-    anim.addKeyframe(id, 'x', 1.0, 100, 'linear');
-    anim.addKeyframe(id, 'y', 0.3, 30, 'linear');
-    anim.addKeyframe(id, 'y', 0.7, 70, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.0, value: 0, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.5, value: 50, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 100, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'y' }, { time: 0.3, value: 30, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'y' }, { time: 0.7, value: 70, easing: 'linear' });
   });
 
   it('returns all keyframes within range', () => {
@@ -387,9 +387,9 @@ describe('KeyframeAnimator — pasteKeyframes', () => {
     anim = new KeyframeAnimator();
     id = anim.createAnimation('paste-test').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0.0, 10, 'linear');
-    anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
-    anim.addKeyframe(id, 'x', 1.0, 100, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.0, value: 10, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.5, value: 50, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 100, easing: 'linear' });
   });
 
   it('pastes keyframes at target time with correct offset', () => {
@@ -427,9 +427,9 @@ describe('KeyframeAnimator — reverseKeyframes', () => {
     anim = new KeyframeAnimator();
     id = anim.createAnimation('rev-test').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0.0, 10, 'linear');
-    anim.addKeyframe(id, 'x', 0.5, 50, 'linear');
-    anim.addKeyframe(id, 'x', 1.0, 90, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.0, value: 10, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0.5, value: 50, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1.0, value: 90, easing: 'linear' });
   });
 
   it('reverses values while keeping times unchanged', () => {
@@ -453,7 +453,7 @@ describe('KeyframeAnimator — reverseKeyframes', () => {
   it('is a no-op when fewer than 2 keyframes exist', () => {
     const id2 = anim.createAnimation('single').id;
     anim.addProperty(id2, 'y', 0);
-    anim.addKeyframe(id2, 'y', 0.5, 42, 'linear');
+    anim.addKeyframe({ animationId: id2, propertyName: 'y' }, { time: 0.5, value: 42, easing: 'linear' });
     expect(() => anim.reverseKeyframes(id2, 'y')).not.toThrow();
     expect(anim.getValue(id2, 'y', 0.5)).toBeCloseTo(42, 1);
   });
@@ -530,7 +530,7 @@ describe('getValue equivalence after binary-search refactor', () => {
     const id = anim.createAnimation('t').id;
     anim.addProperty(id, 'x', 0);
     const times = [0, 0.5, 1.0, 2.0, 3.5, 4.0, 7.0, 10.0];
-    times.forEach((tm, i) => anim.addKeyframe(id, 'x', tm, i * 10, 'linear'));
+    times.forEach((tm, i) => anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: tm, value: i * 10, easing: 'linear' }));
 
     // Reference linear interpolation matching the old prev/next selection.
     const ref = (time: number): number => {
@@ -551,9 +551,9 @@ describe('getValue equivalence after binary-search refactor', () => {
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('t').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0, 0, 'linear');
-    anim.addKeyframe(id, 'x', 1, 100, 'linear');
-    anim.addKeyframe(id, 'x', 2, 50, 'linear');
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1, value: 100, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 2, value: 50, easing: 'linear' });
     expect(anim.getValue(id, 'x', 1)).toBeCloseTo(100, 6); // exactly on middle kf
     expect(anim.getValue(id, 'x', 0)).toBeCloseTo(0, 6);
     expect(anim.getValue(id, 'x', 2)).toBeCloseTo(50, 6);
@@ -576,8 +576,8 @@ describe('cubicBezier module cache — REGRESSION: bounded, not unbounded', () =
 
     for (let i = 0; i < 700; i++) {
       const outX = 0.0001 + i * 0.0009; // 700 distinct values -> 700 distinct cache keys
-      anim.addKeyframe(id, 'x', 0, 0, 'bezier', { outX, outY: 0.2 });
-      anim.addKeyframe(id, 'x', 1, 100, 'bezier', { inX: 0.5, inY: 0.5 });
+      anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'bezier', bezierHandles: { outX, outY: 0.2 } });
+      anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 1, value: 100, easing: 'bezier', bezierHandles: { inX: 0.5, inY: 0.5 } });
       anim.getValue(id, 'x', 0.5);
     }
 
@@ -594,8 +594,8 @@ describe('animation.duration — REGRESSION: stays in sync after update/delete',
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('t').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0, 0, 'linear');
-    const kf = anim.addKeyframe(id, 'x', 5, 100, 'linear')!;
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'linear' });
+    const kf = anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 5, value: 100, easing: 'linear' })!;
     expect(anim.getAnimation(id)!.duration).toBe(5);
 
     // Before fix: dragging this keyframe out to time=20 left duration at 5.
@@ -607,8 +607,8 @@ describe('animation.duration — REGRESSION: stays in sync after update/delete',
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('t').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0, 0, 'linear');
-    const kf = anim.addKeyframe(id, 'x', 10, 100, 'linear')!;
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'linear' });
+    const kf = anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 10, value: 100, easing: 'linear' })!;
     expect(anim.getAnimation(id)!.duration).toBe(10);
 
     anim.updateKeyframe(id, 'x', kf.id, { time: 3 });
@@ -619,9 +619,9 @@ describe('animation.duration — REGRESSION: stays in sync after update/delete',
     const anim = new KeyframeAnimator();
     const id = anim.createAnimation('t').id;
     anim.addProperty(id, 'x', 0);
-    anim.addKeyframe(id, 'x', 0, 0, 'linear');
-    anim.addKeyframe(id, 'x', 4, 50, 'linear');
-    const last = anim.addKeyframe(id, 'x', 12, 100, 'linear')!;
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 0, value: 0, easing: 'linear' });
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 4, value: 50, easing: 'linear' });
+    const last = anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 12, value: 100, easing: 'linear' })!;
     expect(anim.getAnimation(id)!.duration).toBe(12);
 
     // Before fix: deleting the last (ceiling-defining) keyframe left
@@ -635,8 +635,8 @@ describe('animation.duration — REGRESSION: stays in sync after update/delete',
     const id = anim.createAnimation('t').id;
     anim.addProperty(id, 'x', 0);
     anim.addProperty(id, 'y', 0);
-    anim.addKeyframe(id, 'x', 8, 100, 'linear');
-    const yKf = anim.addKeyframe(id, 'y', 15, 100, 'linear')!;
+    anim.addKeyframe({ animationId: id, propertyName: 'x' }, { time: 8, value: 100, easing: 'linear' });
+    const yKf = anim.addKeyframe({ animationId: id, propertyName: 'y' }, { time: 15, value: 100, easing: 'linear' })!;
     expect(anim.getAnimation(id)!.duration).toBe(15);
 
     anim.deleteKeyframe(id, 'y', yKf.id);

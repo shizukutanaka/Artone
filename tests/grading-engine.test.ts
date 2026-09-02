@@ -101,7 +101,7 @@ describe('ColorGradingEngine — createGrade', () => {
     const g1 = engine.createGrade('G1');
     const g2 = engine.createGrade('G2');
 
-    engine.setWheel(g1.id, 'node1', 'lift', 'r', 0.5);
+    engine.setWheel({ gradeId: g1.id, nodeId: 'node1' }, { wheel: 'lift', channel: 'r' }, 0.5);
 
     // g2's node1 lift.r must remain 0 (not 0.5)
     expect(g2.nodes.get('node1')!.wheels.lift.r).toBe(0);
@@ -109,7 +109,7 @@ describe('ColorGradingEngine — createGrade', () => {
 
   it('REGRESSION: setWheel does not mutate the DEFAULT_WHEELS constant (newly created grade unaffected)', () => {
     const g1 = engine.createGrade('G1');
-    engine.setWheel(g1.id, 'node1', 'gamma', 'b', -0.3);
+    engine.setWheel({ gradeId: g1.id, nodeId: 'node1' }, { wheel: 'gamma', channel: 'b' }, -0.3);
 
     // A grade created after the mutation must still have neutral defaults
     const g2 = engine.createGrade('G2');
@@ -142,29 +142,29 @@ describe('ColorGradingEngine — setWheel', () => {
 
   it('sets lift.r on the specified node', () => {
     const g = engine.createGrade('W');
-    engine.setWheel(g.id, 'node1', 'lift', 'r', 0.3);
+    engine.setWheel({ gradeId: g.id, nodeId: 'node1' }, { wheel: 'lift', channel: 'r' }, 0.3);
     expect(g.nodes.get('node1')!.wheels.lift.r).toBeCloseTo(0.3);
   });
 
   it('clamps values to [-1, 1] (above)', () => {
     const g = engine.createGrade('W');
-    engine.setWheel(g.id, 'node1', 'gain', 'a', 5);
+    engine.setWheel({ gradeId: g.id, nodeId: 'node1' }, { wheel: 'gain', channel: 'a' }, 5);
     expect(g.nodes.get('node1')!.wheels.gain.a).toBe(1);
   });
 
   it('clamps values to [-1, 1] (below)', () => {
     const g = engine.createGrade('W');
-    engine.setWheel(g.id, 'node1', 'offset', 'g', -5);
+    engine.setWheel({ gradeId: g.id, nodeId: 'node1' }, { wheel: 'offset', channel: 'g' }, -5);
     expect(g.nodes.get('node1')!.wheels.offset.g).toBe(-1);
   });
 
   it('does not throw for unknown gradeId', () => {
-    expect(() => engine.setWheel('ghost', 'node1', 'lift', 'r', 0.5)).not.toThrow();
+    expect(() => engine.setWheel({ gradeId: 'ghost', nodeId: 'node1' }, { wheel: 'lift', channel: 'r' }, 0.5)).not.toThrow();
   });
 
   it('does not throw for unknown nodeId', () => {
     const g = engine.createGrade('W');
-    expect(() => engine.setWheel(g.id, 'ghost', 'lift', 'r', 0.5)).not.toThrow();
+    expect(() => engine.setWheel({ gradeId: g.id, nodeId: 'ghost' }, { wheel: 'lift', channel: 'r' }, 0.5)).not.toThrow();
   });
 });
 
@@ -290,7 +290,7 @@ describe('ColorGradingEngine — exportGrade / importGrade', () => {
 
   it('round-trip preserves grade structure', () => {
     const g = engine.createGrade('RT');
-    engine.setWheel(g.id, 'node1', 'gain', 'r', 0.2);
+    engine.setWheel({ gradeId: g.id, nodeId: 'node1' }, { wheel: 'gain', channel: 'r' }, 0.2);
     const json = engine.exportGrade(g.id);
     const imported = engine.importGrade(json);
     // Nodes should be present — importGrade reconstructs from JSON array

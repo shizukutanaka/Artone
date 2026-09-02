@@ -33,6 +33,18 @@ export interface ColorWheels {
   hue: number;
 }
 
+/** グレード内のノードを指す (どちらも `string` なので組で運ぶ)。 */
+export interface GradeNodeRef {
+  gradeId: string;
+  nodeId: string;
+}
+
+/** カラーホイールの1成分。 */
+export interface WheelRef {
+  wheel: 'lift' | 'gamma' | 'gain' | 'offset';
+  channel: 'r' | 'g' | 'b' | 'a';
+}
+
 export interface RGBA {
   r: number;
   g: number;
@@ -569,18 +581,14 @@ export class ColorGradingEngine {
   // Wheel Adjustments
   // ============================================================
 
-  setWheel(
-    gradeId: string,
-    nodeId: string,
-    wheel: 'lift' | 'gamma' | 'gain' | 'offset',
-    channel: 'r' | 'g' | 'b' | 'a',
-    value: number
-  ): void {
+  setWheel(target: GradeNodeRef, wheel: WheelRef, value: number): void {
+    const { gradeId, nodeId } = target;
+    const { wheel: wheelName, channel } = wheel;
     const grade = this.grades.get(gradeId);
     const node = grade?.nodes.get(nodeId);
     if (!node) return;
     
-    node.wheels[wheel][channel] = Math.max(-1, Math.min(1, value));
+    node.wheels[wheelName][channel] = Math.max(-1, Math.min(1, value));
   }
 
   setContrast(gradeId: string, nodeId: string, contrast: number, pivot = 0.5): void {

@@ -145,6 +145,34 @@ export interface AIEffectParams {
 // AI Effects Engine
 // ============================================================
 
+/**
+ * `(x, y)` を中心とする半径 `r` の箱の平均を取る (境界外は無視)。
+ *
+ * `applyAlphaFeather` のループから抜き出した — 4重ループの中に `if` を
+ * 直接書くとネストが深くなりすぎる (`CLAUDE.md`「ネストはガード節で回避」)。
+ */
+function boxBlurAverage(
+  channel: { data: Float32Array; width: number; height: number },
+  at: { x: number; y: number },
+  r: number,
+): number {
+  const { data, width, height } = channel;
+  const { x, y } = at;
+  let sum = 0;
+  let count = 0;
+  for (let dy = -r; dy <= r; dy++) {
+    const ny = y + dy;
+    if (ny < 0 || ny >= height) continue;
+    for (let dx = -r; dx <= r; dx++) {
+      const nx = x + dx;
+      if (nx < 0 || nx >= width) continue;
+      sum += data[ny * width + nx];
+      count++;
+    }
+  }
+  return count > 0 ? sum / count : 0;
+}
+
 export class AIEffectsEngine {
   private models: Map<string, AIModel> = new Map();
   private workers: Map<string, Worker> = new Map();
@@ -162,8 +190,8 @@ export class AIEffectsEngine {
   // Reusable scratch buffer for boxBlur — resized only when face bounding box grows
   private _blurTempBuf: Uint8ClampedArray = new Uint8ClampedArray(0);
   // Cached foreground compositing canvas for removeBackground() — avoids per-frame alloc
-  private _fgCanvas: OffscreenCanvas | null = null;
-  private _fgCtx: OffscreenCanvasRenderingContext2D | null = null;
+  /** 前景合成用の描画面。canvas/ctx を組で持つ (#67 の DrawSurface パターン)。 */
+  private _fgSurface: DrawSurface | null = null;
   // Cached 64×64 canvas for computeHistogram() — reused across detectScenes() frames
   private _histCanvas: OffscreenCanvas | null = null;
   private _histCtx: OffscreenCanvasRenderingContext2D | null = null;
@@ -341,12 +369,9 @@ export class AIEffectsEngine {
     }
 
     // Draw foreground with alpha — lazy-grow cached canvas avoids per-frame alloc
-    if (!this._fgCanvas || this._fgCanvas.width !== width || this._fgCanvas.height !== height) {
-      this._fgCanvas = new OffscreenCanvas(width, height);
-      this._fgCtx = require2dContext(this._fgCanvas);
-    }
-    this._fgCtx!.putImageData(imageData, 0, 0);
-    this.ctx.drawImage(this._fgCanvas, 0, 0);
+    this._fgSurface = ensureSurface(this._fgSurface, width, height);
+    this._fgSurface.ctx.putImageData(imageData, 0, 0);
+    this.ctx.drawImage(this._fgSurface.canvas, 0, 0);
 
     return createImageBitmap(this.canvas);
   }
@@ -367,25 +392,12 @@ export class AIEffectsEngine {
       alphaChannel[i] = data[i * 4 + 3] / 255;
     }
 
-    // Simple box blur
-    
+    // Simple box blur (深さをガード節で抑えるため画素あたりの平均を別関数へ)
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        let sum = 0;
-        let count = 0;
-        
-        for (let dy = -r; dy <= r; dy++) {
-          for (let dx = -r; dx <= r; dx++) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-              sum += alphaChannel[ny * width + nx];
-              count++;
-            }
-          }
-        }
-        
-        blurred[y * width + x] = count > 0 ? sum / count : 0;
+        blurred[y * width + x] = boxBlurAverage(
+          { data: alphaChannel, width, height }, { x, y }, r,
+        );
       }
     }
 

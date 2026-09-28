@@ -8,6 +8,8 @@ Artone v3 の全変更を記録。
 ## [Unreleased]
 
 ### Fixed
+- **外部知見の採否を記録し、Mediabunny 1.60 への更新を実測で見送った** (docs)。公式リリースノートは 1.56 以降でトリム/音声の改善を挙げるが、1.60.0 で `tests/export-trim.spec.ts` (実ブラウザ) が **29 フレーム (期待 30)** で落ちた — 1フレーム落ちはデータ損失のため差し戻し、原因の切り分け手順を `docs/external-research-2026-09.md` に残した。Zenn は egress 遮断で本文を読めず、記事に基づく変更はしていない。`importExternalTexture` 化と `bitrateMode` 明示は検証手段/実測が無いため保留。
+
 - **`ai/` の前景合成面を `DrawSurface` 化し、箱ぼかしを抽出してネスト深度を解消** (ai)。`_fgCanvas`/`_fgCtx` を別々の `| null` で持ち `!` で潰していた箇所を、#67 の `DrawSurface` + `ensureSurface()` へ (寸法が同じなら再利用する挙動は不変)。`applyAlphaFeather` の4重ループは画素ごとの平均を `boxBlurAverage()` へ抽出し、ガード節でネストを抑えた。動作変更ゼロ (テスト 4,850 件不変・bench PASS)。lint 警告 73 → 70。
 
 - **タイムライン編集・トーンマッピング・テストヘルパの多引数を型へまとめた** (timeline/render/export/tests)。いずれも**同じ型の引数が並び、入れ替えても落ちない**箇所。`timeline/range-edit.ts` の `subClip(c, a, b, id)` は `a`/`b` がどちらも `number` で、入れ替えると**負の尺のクリップ**が静かに生まれるため範囲として受け取る形へ。`timeline/edit-snapping.ts` の `snapClipDrag(clipId, proposedStart, duration, ...)` はドラッグの記述としてまとめ、`timeline/auto-reframe.ts` の `clampedWindow(cx, cy, size, sourceWidth, sourceHeight)` は中心と元寸法を組に。`render/tone-mapping.ts` の `uchimura(x, P, a, m, l, c, b)` は**係数が6つ並ぶ**ため `UchimuraParams` へ (呼び出し側で何番目が何かを覚える必要がなくなる)。`export/timeline-render.ts` の `drawSample` も寸法を組で受け、渡すオブジェクトは描画ループの外で1回だけ作る。テストヘルパも同様に直した — `solid(r, g, b, a, w, h)` / `solidImageData(w, h, r, g, b, a)` / `solidFrame(w, h, r, g, b)` は**6つ並んだ数値**で、テスト自身が取り違えても落ちない (期待値だけが静かにずれる)。動作変更ゼロ (テスト 4,850 件で不変・bench `Gate: PASS`)。lint 警告 81 → 73。

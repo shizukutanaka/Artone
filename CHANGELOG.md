@@ -8,6 +8,8 @@ Artone v3 の全変更を記録。
 ## [Unreleased]
 
 ### Fixed
+- **`saveToDB` の `this.db!` と LUT サムネイルの `getContext('2d')!` を解消** (undo/color)。`HistoryManager.saveToDB()` は先頭で `this.db` を確認しつつ、Promise 内で `this.db!` を引き直していた。`await` を挟む間に `close()` が `this.db` を `null` にすると `!` が null を踏む → 接続をローカルに束ね、保存は開いていた接続で完結させた。`LUTManager.generateThumbnail()` の `getContext('2d')!` は、コンテキスト数上限・メモリ逼迫で**本当に null になりうる**ため、明示的な例外へ。動作変更ゼロ (テスト 4,850 件不変・bench PASS)。lint 警告 66 → 64。`nested-sequences.ts` の `clip.sequenceId!` は、欠落時に後続の分岐へ流れる挙動を変えうるため見送り。
+
 - **`merge!` が TypeError になる経路を解消し、`!` 4 件を型で置き換えた** (undo/ai/export)。`HistoryManager.execute()` は `lastCmd.canMergeWith?.(command)` が真なら `lastCmd.merge!(command)` を呼んでいたが、`Command` では `merge` は任意であり、**`canMergeWith` だけ実装して `merge` を欠くコマンドがあると TypeError で落ちる**。`merge` の有無を条件に含めて型を絞った。他は `ai/ai-effects-engine.ts` のヒストグラム面を `DrawSurface` 化、`queue.shift()!` (ai) / `pending.shift()!` (export-queue) を undefined ガードへ。動作変更ゼロ (テスト 4,850 件不変・bench PASS)。lint 警告 70 → 66。
 
 - **外部知見の採否を記録し、Mediabunny 1.60 への更新を実測で見送った** (docs)。公式リリースノートは 1.56 以降でトリム/音声の改善を挙げるが、1.60.0 で `tests/export-trim.spec.ts` (実ブラウザ) が **29 フレーム (期待 30)** で落ちた — 1フレーム落ちはデータ損失のため差し戻し、**二分探索で境界は 1.56.0 (任意区間のコピー変換が入った版) と特定**し、`docs/external-research-2026-09.md` に次の一手を残した。Zenn は egress 遮断で本文を読めず、記事に基づく変更はしていない。`importExternalTexture` 化と `bitrateMode` 明示は検証手段/実測が無いため保留。

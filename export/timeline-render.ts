@@ -175,10 +175,10 @@ export function timelineDuration(clips: ReadonlyArray<RenderClip>): number {
 function drawSample(
   ctx: OffscreenCanvasRenderingContext2D,
   sample: VideoSample,
-  width: number,
-  height: number,
+  size: { width: number; height: number },
   transform: Readonly<RenderTransform>,
 ): void {
+  const { width, height } = size;
   ctx.save();
   ctx.globalAlpha = Math.min(1, Math.max(0, transform.opacity));
   ctx.translate(width / 2 + transform.x, height / 2 + transform.y);
@@ -340,6 +340,8 @@ export async function renderTimeline(
   }
 
   const canvas = new OffscreenCanvas(width, height);
+  // 描画へ毎フレーム渡すのでループの外で1回だけ作る。
+  const canvasSize = { width, height };
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Export failed — 2D canvas context is unavailable in this environment.');
 
@@ -382,7 +384,7 @@ export async function renderTimeline(
       const next = await iterator.next();
       const sample = next.done ? null : next.value;
       if (!sample) continue; // 素材側にフレームが無い時刻 (末尾を越えた等)
-      drawSample(ctx, sample, width, height, clip.transform ?? IDENTITY);
+      drawSample(ctx, sample, canvasSize, clip.transform ?? IDENTITY);
       sample.close();
       drewAnything = true;
     }

@@ -86,6 +86,15 @@ export interface NormalizationResult {
 // Audio Engine
 // ============================================================
 
+/**
+ * 初期化済みの音声グラフ。`AudioContext` と master gain は必ず同時に作られる。
+ * 別々の `| null` フィールドとして扱うと、その前提が型から失われる。
+ */
+interface AudioGraph {
+  ctx: AudioContext;
+  masterGain: GainNode;
+}
+
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private tracks: Map<string, AudioTrackState> = new Map();
@@ -101,22 +110,36 @@ export class AudioEngine {
   }
 
   /** AudioContext と master ノードを同期的に確保する (init 済みなら no-op)。 */
-  private ensureContext(): AudioContext {
-    if (this.ctx) return this.ctx;
+  /**
+   * 音声グラフを (未生成なら) 用意し、**まとめて**返す。
+   *
+   * `AudioContext` と `masterGain` は必ず同時に作られるが、フィールドは
+   * どちらも `| null` なので、呼び出し側から見ると片方だけ存在しうる型に見える。
+   * 実際そのせいで `this.ctx!` / `this.masterGain!` が並んでいた。
+   * 組で返せば、その前提が型として保証される。
+   *
+   * 生成はトラック追加時などの**設定時**にしか走らない (AudioWorklet の
+   * 処理中ではない) ため、`audio/CLAUDE.md`「AudioWorklet 内で GC を発生させない」
+   * には抵触しない。
+   */
+  private ensureContext(): AudioGraph {
+    if (this.ctx && this.masterGain) return { ctx: this.ctx, masterGain: this.masterGain };
 
-    this.ctx = new AudioContext({ sampleRate: 48000 });
+    const ctx = new AudioContext({ sampleRate: 48000 });
+    const masterGain = ctx.createGain();
+    const masterAnalyser = ctx.createAnalyser();
+    masterAnalyser.fftSize = 2048;
 
-    this.masterGain = this.ctx.createGain();
-    this.masterAnalyser = this.ctx.createAnalyser();
-    this.masterAnalyser.fftSize = 2048;
+    masterGain.connect(masterAnalyser);
+    masterAnalyser.connect(ctx.destination);
 
-    this.masterGain.connect(this.masterAnalyser);
-    this.masterAnalyser.connect(this.ctx.destination);
+    this.ctx = ctx;
+    this.masterGain = masterGain;
+    this.masterAnalyser = masterAnalyser;
+    this.masterMeterBuf = new Float32Array(masterAnalyser.fftSize);
+    this.masterFreqBuf  = new Float32Array(masterAnalyser.frequencyBinCount);
 
-    this.masterMeterBuf = new Float32Array(this.masterAnalyser.fftSize);
-    this.masterFreqBuf  = new Float32Array(this.masterAnalyser.frequencyBinCount);
-
-    return this.ctx;
+    return { ctx, masterGain };
   }
 
   // ============================================================
@@ -124,18 +147,18 @@ export class AudioEngine {
   // ============================================================
 
   createTrack(name: string): AudioTrack {
-    this.ensureContext();
+    const { ctx, masterGain } = this.ensureContext();
 
     const id = crypto.randomUUID();
 
-    const gain = this.ctx!.createGain();
-    const pan = this.ctx!.createStereoPanner();
-    const analyser = this.ctx!.createAnalyser();
+    const gain = ctx.createGain();
+    const pan = ctx.createStereoPanner();
+    const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
 
     gain.connect(pan);
     pan.connect(analyser);
-    analyser.connect(this.masterGain!);
+    analyser.connect(masterGain);
 
     const track: AudioTrack = {
       id,

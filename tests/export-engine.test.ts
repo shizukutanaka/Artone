@@ -436,7 +436,7 @@ describe('REGRESSION: export() rejects fps=0 before muxer arithmetic (NaN stts b
     const job = engine.createJob('p', badConfig);
     const fakeRender = vi.fn(async () => ({ close: vi.fn() } as unknown as VideoFrame));
     await expect(
-      engine.export(job, fakeRender, null, 1)
+      engine.export({ job, renderFrame: fakeRender, audioBuffer: null, duration: 1 })
     ).rejects.toThrow(RangeError);
   });
 
@@ -449,7 +449,7 @@ describe('REGRESSION: export() rejects fps=0 before muxer arithmetic (NaN stts b
     };
     const job = engine.createJob('p', badConfig);
     await expect(
-      engine.export(job, vi.fn(), null, 1)
+      engine.export({ job, renderFrame: vi.fn(), audioBuffer: null, duration: 1 })
     ).rejects.toThrow(RangeError);
   });
 
@@ -463,7 +463,7 @@ describe('REGRESSION: export() rejects fps=0 before muxer arithmetic (NaN stts b
       hardwareAcceleration: false,
     };
     const job = engine.createJob('p', goodConfig);
-    const error = await engine.export(job, vi.fn(), null, 0).catch(e => e as Error);
+    const error = await engine.export({ job, renderFrame: vi.fn(), audioBuffer: null, duration: 0 }).catch(e => e as Error);
     // Must NOT be a RangeError from our new guard
     expect(error).not.toBeInstanceOf(RangeError);
   });

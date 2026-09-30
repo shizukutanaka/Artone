@@ -24,6 +24,7 @@
  * # AI generated (reviewed)
  */
 
+import type { PixelSource } from '../core/pixel-geometry';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Options for chroma keying. */
@@ -140,7 +141,7 @@ export function chromaKey(
 
     // Spill suppression on partially-keyed / near-key pixels
     if (spill > 0 && matte < 1) {
-      const suppressed = suppressSpill(rr, gg, bb, keyChannel, spill * (1 - matte));
+      const suppressed = suppressSpill([rr, gg, bb], keyChannel, spill * (1 - matte));
       rr = suppressed[0]; gg = suppressed[1]; bb = suppressed[2];
     }
 
@@ -170,10 +171,11 @@ function dominantChannel(key: [number, number, number]): 0 | 1 | 2 {
  * For a green screen, green fringe on edges is pulled down to (r+b)/2.
  */
 function suppressSpill(
-  r: number, g: number, b: number,
+  rgb: readonly [number, number, number],
   keyChannel: 0 | 1 | 2,
   amount: number,
 ): [number, number, number] {
+  const [r, g, b] = rgb;
   let nr = r, ng = g, nb = b;
   if (keyChannel === 1) {
     const limit = (r + b) / 2;
@@ -203,19 +205,19 @@ function suppressSpill(
  * @returns           New RGBA image with spill reduced (alpha preserved).
  */
 export function suppressSpillImage(
-  src:      Uint8ClampedArray | Uint8Array,
-  width:    number,
-  height:   number,
-  keyColor: [number, number, number] = [0, 255, 0],
-  amount =  1,
+  source: PixelSource,
+  options: { keyColor?: [number, number, number]; amount?: number } = {},
 ): Uint8ClampedArray {
+  const { data: src, width, height } = source;
+  const keyColor = options.keyColor ?? [0, 255, 0];
+  const amount = options.amount ?? 1;
   const a = clamp01(amount);
   const keyChannel = dominantChannel(keyColor);
   const out = new Uint8ClampedArray(src.length);
   const pixelCount = width * height;
   for (let i = 0; i < pixelCount; i++) {
     const off = i * 4;
-    const [r, g, b] = suppressSpill(src[off], src[off + 1], src[off + 2], keyChannel, a);
+    const [r, g, b] = suppressSpill([src[off], src[off + 1], src[off + 2]], keyChannel, a);
     out[off] = r; out[off + 1] = g; out[off + 2] = b; out[off + 3] = src[off + 3];
   }
   return out;

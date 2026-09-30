@@ -255,14 +255,14 @@ describe('buildLevelsLUT', () => {
 describe('applyChannelLUT', () => {
   it('identity LUT preserves image', () => {
     const img = gradient(8, 8);
-    const out = applyChannelLUT(img, 8, 8, identityLUT());
+    const out = applyChannelLUT({ data: img, width: 8, height: 8 }, { r: identityLUT() });
     expect(Array.from(out)).toEqual(Array.from(img));
   });
 
   it('preserves alpha channel', () => {
     const img = solid(4, 4, [100, 100, 100, 222]);
     const lut = buildLevelsLUT({ gamma: 2 });
-    const out = applyChannelLUT(img, 4, 4, lut);
+    const out = applyChannelLUT({ data: img, width: 4, height: 4 }, { r: lut });
     for (let i = 3; i < out.length; i += 4) expect(out[i]).toBe(222);
   });
 
@@ -271,7 +271,7 @@ describe('applyChannelLUT', () => {
     const lutR = buildLevelsLUT({ outBlack: 10, outWhite: 10 }); // → all 10
     const lutG = buildLevelsLUT({ outBlack: 20, outWhite: 20 }); // → all 20
     const lutB = buildLevelsLUT({ outBlack: 30, outWhite: 30 }); // → all 30
-    const out = applyChannelLUT(img, 2, 2, lutR, lutG, lutB);
+    const out = applyChannelLUT({ data: img, width: 2, height: 2 }, { r: lutR, g: lutG, b: lutB });
     expect(out[0]).toBe(10);
     expect(out[1]).toBe(20);
     expect(out[2]).toBe(30);
@@ -280,7 +280,7 @@ describe('applyChannelLUT', () => {
   it('does not mutate the input', () => {
     const img = solid(4, 4, [100, 100, 100, 255]);
     const copy = Float32Array.from(img);
-    applyChannelLUT(img, 4, 4, buildLevelsLUT({ gamma: 2 }));
+    applyChannelLUT({ data: img, width: 4, height: 4 }, { r: buildLevelsLUT({ gamma: 2 }) });
     expect(Array.from(img)).toEqual(Array.from(copy));
   });
 });

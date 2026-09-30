@@ -286,7 +286,11 @@ export function muxWebM(
     throw new Error('muxWebM: at least one video chunk is required');
   }
 
-  const hasAudio = !!(audioTrack && audioChunks && audioChunks.length > 0);
+  // 「音声があるか」を boolean で持つと配列やトラックを絞り込めず、使用箇所が
+  // `audioTrack!` / `audioChunks!` になる。**値そのもの**で表す。
+  const audio = audioTrack && audioChunks && audioChunks.length > 0
+    ? { track: audioTrack, chunks: audioChunks }
+    : null;
 
   // Duration: last video frame end time in ms
   const lastVideo = videoChunks[videoChunks.length - 1];
@@ -294,7 +298,7 @@ export function muxWebM(
 
   // Build Tracks element
   const trackEls: Uint8Array[] = [buildVideoTrackEntry(videoTrack)];
-  if (hasAudio) trackEls.push(buildAudioTrackEntry(audioTrack!, 2));
+  if (audio) trackEls.push(buildAudioTrackEntry(audio.track, 2));
   const tracksEl = el(ID.Tracks, concat(trackEls));
 
   // Collect all blocks, sort by presentation timestamp
@@ -304,8 +308,8 @@ export function muxWebM(
     isKeyframe: c.isKeyframe,
     data: c.data,
   }));
-  if (hasAudio) {
-    for (const a of audioChunks!) {
+  if (audio) {
+    for (const a of audio.chunks) {
       allBlocks.push({
         trackNum: 2,
         timestampMs: a.timestampUs / 1000,

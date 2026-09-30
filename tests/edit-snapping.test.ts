@@ -177,7 +177,7 @@ describe('snapClipDrag', () => {
 
   it('snaps start edge to a target', () => {
     // Clip 'x' (duration 5) dragged so start ≈ 9.9 → snaps start to 10
-    const r = snapClipDrag('x', 9.9, 5, targets, 0.2);
+    const r = snapClipDrag({ clipId: 'x', proposedStart: 9.9, duration: 5 }, targets, 0.2);
     expect(r.snapped).toBe(true);
     expect(r.edge).toBe('start');
     expect(r.startTime).toBe(10);
@@ -186,7 +186,7 @@ describe('snapClipDrag', () => {
 
   it('snaps end edge to a target', () => {
     // Clip 'x' (duration 5) with start 14.9 → end 19.9 → snaps end to 20
-    const r = snapClipDrag('x', 14.9, 5, targets, 0.2);
+    const r = snapClipDrag({ clipId: 'x', proposedStart: 14.9, duration: 5 }, targets, 0.2);
     expect(r.snapped).toBe(true);
     expect(r.edge).toBe('end');
     // end snapped to 20 → start = 20 - 5 = 15
@@ -196,7 +196,7 @@ describe('snapClipDrag', () => {
   it('chooses the edge with smaller delta', () => {
     // start 9.95 (delta 0.05 to 10), end 14.95... let's make end closer
     // duration 10: start 9.8 (delta 0.2 to 10), end 19.8 (delta 0.2 to 20) → tie → start
-    const r = snapClipDrag('x', 9.8, 10, targets, 0.3);
+    const r = snapClipDrag({ clipId: 'x', proposedStart: 9.8, duration: 10 }, targets, 0.3);
     expect(r.snapped).toBe(true);
     expect(r.edge).toBe('start'); // tie prefers start
   });
@@ -206,12 +206,12 @@ describe('snapClipDrag', () => {
       t(5, 'clip-start', { clipId: 'x' }),
       t(10, 'clip-end', { clipId: 'x' }),
     ];
-    const r = snapClipDrag('x', 5.05, 5, selfTargets, 0.2);
+    const r = snapClipDrag({ clipId: 'x', proposedStart: 5.05, duration: 5 }, selfTargets, 0.2);
     expect(r.snapped).toBe(false);
   });
 
   it('no snap when both edges far from targets', () => {
-    const r = snapClipDrag('x', 50, 5, targets, 0.2);
+    const r = snapClipDrag({ clipId: 'x', proposedStart: 50, duration: 5 }, targets, 0.2);
     expect(r.snapped).toBe(false);
     expect(r.startTime).toBe(50);
     expect(r.shift).toBe(0);
@@ -219,7 +219,7 @@ describe('snapClipDrag', () => {
   });
 
   it('shift moves whole clip consistently', () => {
-    const r = snapClipDrag('x', 9.9, 5, targets, 0.2);
+    const r = snapClipDrag({ clipId: 'x', proposedStart: 9.9, duration: 5 }, targets, 0.2);
     // After snap, start + shift relationship holds
     expect(r.startTime).toBeCloseTo(9.9 + r.shift, 6);
   });
@@ -306,7 +306,7 @@ describe('snapping integration', () => {
     const all = mergeTargets([grid, edges]);
 
     // Drag clip 'a' to start ≈ 9.8 → should snap to clip 'b' start at 10
-    const r = snapClipDrag('a', 9.8, 4, all, 0.5);
+    const r = snapClipDrag({ clipId: 'a', proposedStart: 9.8, duration: 4 }, all, 0.5);
     expect(r.snapped).toBe(true);
     expect(r.startTime).toBe(10);
   });

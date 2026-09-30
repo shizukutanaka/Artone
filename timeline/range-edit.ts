@@ -48,7 +48,15 @@ export interface RangeEditResult {
 const EPS = 1e-9;
 
 /** Build a sub-clip covering timeline range [a, b) of `c`, preserving media mapping. */
-function subClip(c: Clip, a: number, b: number, id: string, nameSuffix = ''): Clip {
+/**
+ * クリップの一部を切り出す。
+ *
+ * `a`/`b` はどちらも `number` で、入れ替えても落ちず**負の尺のクリップ**が
+ * 静かに生まれる。範囲として名前で受け取る。
+ */
+function subClip(c: Clip, span: { start: number; end: number }, id: string, nameSuffix = ''): Clip {
+  const a = span.start;
+  const b = span.end;
   return {
     ...c,
     id,
@@ -119,17 +127,17 @@ function cutRange(
     }
     // Range strictly inside clip → split into head + tail.
     if (cs < rs - EPS && ce > re + EPS) {
-      result.clips.push(subClip(c, cs, rs, c.id));
-      result.clips.push(shifted(subClip(c, re, ce, newId(), ' (2)')));
+      result.clips.push(subClip(c, { start: cs, end: rs }, c.id));
+      result.clips.push(shifted(subClip(c, { start: re, end: ce }, newId(), ' (2)')));
       continue;
     }
     // Overlap left edge → keep head [cs, rs).
     if (cs < rs - EPS) {
-      result.clips.push(subClip(c, cs, rs, c.id));
+      result.clips.push(subClip(c, { start: cs, end: rs }, c.id));
       continue;
     }
     // Overlap right edge → keep tail [re, ce).
-    result.clips.push(shifted(subClip(c, re, ce, c.id)));
+    result.clips.push(shifted(subClip(c, { start: re, end: ce }, c.id)));
   }
 
   return result;

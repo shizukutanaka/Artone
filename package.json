@@ -33,7 +33,7 @@
     "date-fns": "^4.4.0",
     "idb": "^8.0.0",
     "lodash-es": "^4.17.21",
-    "mediabunny": "1.54.0",
+    "mediabunny": "1.55.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "standardized-audio-context": "^25.3.76",

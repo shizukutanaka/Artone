@@ -20,6 +20,7 @@ import {
   type AudioChunkRef,
 } from './webm-muxer';
 import { muxMP4, buildAacAudioSpecificConfig } from './mp4-muxer';
+import { ensureSurface, type DrawSurface } from '../core/canvas-context';
 
 // ============================================================
 // Types
@@ -269,6 +270,35 @@ export const EXPORT_PRESETS: ExportPreset[] = [
 // Export Engine
 // ============================================================
 
+/**
+ * 1回の書き出し要求。位置引数5個で受けていたものをまとめた
+ * (`CLAUDE.md`「関数引数3以下」)。`audioBuffer` と `duration` はどちらも
+ * 省略できず、順番を間違えると**型が違うので**すぐ落ちるが、`renderFrame` と
+ * `onProgress` はどちらも関数で取り違えても静かに通ってしまう。名前で受ける。
+ */
+export interface ExportRequest {
+  job: ExportJob;
+  /** 指定フレーム番号の映像を返す。 */
+  renderFrame: (frameIndex: number) => Promise<VideoFrame>;
+  /** 音声。無ければ null。 */
+  audioBuffer: AudioBuffer | null;
+  /** 書き出す長さ (秒)。 */
+  duration: number;
+  onProgress?: ProgressCallback;
+}
+
+/**
+ * 書き出し設定の入口検証。
+ *
+ * fps/寸法が 0 のまま下流のマクサ算術へ流れると `sampleDelta` が NaN になり、
+ * **壊れた stts ボックスを持つファイルが出る** — 落ちずに壊れるので入口で止める。
+ */
+function assertRenderableConfig(config: ExportConfig): void {
+  if (!(config.fps > 0)) throw new RangeError(`ExportConfig.fps must be > 0, got ${config.fps}`);
+  if (!(config.width > 0)) throw new RangeError(`ExportConfig.width must be > 0, got ${config.width}`);
+  if (!(config.height > 0)) throw new RangeError(`ExportConfig.height must be > 0, got ${config.height}`);
+}
+
 export class ExportEngine {
   private jobs: Map<string, ExportJob> = new Map();
   private encoder: VideoEncoder | null = null;
@@ -281,8 +311,12 @@ export class ExportEngine {
   private abortController: AbortController | null = null;
   private listeners: Set<(job: ExportJob) => void> = new Set();
   // Cached canvas for videoFrameToImageData() — recreated only on resolution change.
-  private _gifCanvas: OffscreenCanvas | null = null;
-  private _gifCtx: OffscreenCanvasRenderingContext2D | null = null;
+  /**
+   * GIF 書き出し用の描画面。キャンバスとコンテキストを**組で**持つ。
+   * 別々の `| null` フィールドだと型が絞り込めず、使用箇所すべてが `!` になる
+   * (`core/canvas-context.ts` に集約した共通の型と手順を使う)。
+   */
+  private _gifSurface: DrawSurface | null = null;
 
   // ============================================================
   // Job Management
@@ -335,18 +369,9 @@ export class ExportEngine {
   // Export Pipeline
   // ============================================================
 
-  async export(
-    job: ExportJob,
-    renderFrame: (frameIndex: number) => Promise<VideoFrame>,
-    audioBuffer: AudioBuffer | null,
-    duration: number,
-    onProgress?: ProgressCallback
-  ): Promise<Blob> {
-    // Validate fps/dimensions at the entry point so downstream muxer arithmetic
-    // never receives 0 (which would produce NaN sampleDelta → corrupt stts box).
-    if (!(job.config.fps > 0)) throw new RangeError(`ExportConfig.fps must be > 0, got ${job.config.fps}`);
-    if (!(job.config.width > 0)) throw new RangeError(`ExportConfig.width must be > 0, got ${job.config.width}`);
-    if (!(job.config.height > 0)) throw new RangeError(`ExportConfig.height must be > 0, got ${job.config.height}`);
+  async export(request: ExportRequest): Promise<Blob> {
+    const { job, renderFrame, audioBuffer, duration, onProgress } = request;
+    assertRenderableConfig(job.config);
 
     this.abortController = new AbortController();
     job.startTime = Date.now();
@@ -447,7 +472,14 @@ export class ExportEngine {
     }
 
     return new Promise((resolve, reject) => {
-      this.encoder = new VideoEncoder({
+      // ローカルに束ねてからフィールドへ入れる。以降のクロージャは**この**
+      // エンコーダだけを見る。
+      //
+      // `this.encoder!` で毎回引き直していた頃は、書き出し中に `finally` 節
+      // (キャンセル/失敗時) が `this.encoder = null` を実行すると、次のフレームで
+      // **null に対する `!`** が TypeError で落ちていた — 中断は中断として
+      // 終わるべきで、原因から遠い場所での例外にすべきではない。
+      const encoder = new VideoEncoder({
         output: (chunk) => {
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
@@ -461,7 +493,8 @@ export class ExportEngine {
         error: reject
       });
 
-      this.encoder.configure({
+      this.encoder = encoder;
+      encoder.configure({
         codec: config.codec,
         width: config.width,
         height: config.height,
@@ -482,11 +515,11 @@ export class ExportEngine {
 
           // Back-pressure: wait if the encoder queue is saturated, otherwise
           // long exports enqueue faster than encoding and exhaust GPU memory.
-          await awaitEncoderQueueBelow(this.encoder!);
+          await awaitEncoderQueueBelow(encoder);
 
           const frame = await renderFrame(i);
           try {
-            this.encoder!.encode(frame, { keyFrame: i % keyFrameInterval === 0 });
+            encoder.encode(frame, { keyFrame: i % keyFrameInterval === 0 });
           } finally {
             // Ensure VideoFrame GPU resources are always released, even when
             // encode() throws (e.g. encoder transitioned to 'closed' on error).
@@ -502,7 +535,7 @@ export class ExportEngine {
           job.estimatedTimeRemaining = avgTimePerFrame * (job.totalFrames - i - 1);
         }
 
-        await this.encoder!.flush();
+        await encoder.flush();
         resolve(chunks);
       };
 
@@ -550,7 +583,8 @@ export class ExportEngine {
       // itself (matches the same chunk.duration ?? fallback pattern the
       // video path already uses).
       const pendingFrameLengths: number[] = [];
-      this.audioEncoder = new AudioEncoder({
+      // 映像側と同じ理由でローカルに束ねる (中断時に null を `!` で踏まない)。
+      const audioEncoder = new AudioEncoder({
         output: (chunk) => {
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
@@ -561,7 +595,8 @@ export class ExportEngine {
         error: reject
       });
 
-      this.audioEncoder.configure({
+      this.audioEncoder = audioEncoder;
+      audioEncoder.configure({
         codec: 'mp4a.40.2',
         sampleRate,
         numberOfChannels: channels,
@@ -579,7 +614,7 @@ export class ExportEngine {
         const audioBuf = new Float32Array(frameSize * channels);
         for (let f = 0; f < totalFrames; f++) {
           // Back-pressure (see awaitEncoderQueueBelow rationale).
-          await awaitEncoderQueueBelow(this.audioEncoder!);
+          await awaitEncoderQueueBelow(audioEncoder);
           const offset = f * frameSize;
           const length = Math.min(frameSize, buffer.length - offset);
           pendingFrameLengths.push(length);
@@ -605,13 +640,13 @@ export class ExportEngine {
           });
 
           try {
-            this.audioEncoder!.encode(audioData);
+            audioEncoder.encode(audioData);
           } finally {
             audioData.close();
           }
         }
 
-        await this.audioEncoder!.flush();
+        await audioEncoder.flush();
         resolve(chunks);
       };
 
@@ -635,7 +670,9 @@ export class ExportEngine {
         width: config.width,
         height: config.height,
       };
-      const hasAudio = audioChunks && audioChunks.length > 0;
+      // 「音声がある」を**値そのもの**で表す。`hasAudio` は boolean なので
+      // `audioChunks` の絞り込みには使えず、以前は `audioChunks!` が必要だった。
+      const audioForMux = audioChunks && audioChunks.length > 0 ? audioChunks : undefined;
       // REGRESSION fix: WebM's A_AAC track requires CodecPrivate (the AAC
       // AudioSpecificConfig) per the Matroska codec spec, since WebCodecs'
       // AAC output is raw (no ADTS header) and a decoder has no other way
@@ -643,7 +680,7 @@ export class ExportEngine {
       // export with audio produced an undecodable/silent audio track while
       // reporting success. Reuses the same ASC builder mp4-muxer.ts already
       // uses for MP4's esds box.
-      const audioTrack = hasAudio ? {
+      const audioTrack = audioForMux ? {
         codecId: toWebMAudioCodecId('mp4a.40.2'),
         sampleRate: this.lastAudioSampleRate,
         channels: this.lastAudioChannels,
@@ -653,22 +690,18 @@ export class ExportEngine {
         videoTrack,
         videoChunks,
         audioTrack,
-        hasAudio ? audioChunks! : undefined,
+        audioForMux,
       );
       return new Blob([webmBytes.buffer as ArrayBuffer], { type: 'video/webm' });
     }
 
     // MP4: full ISOBMFF container with moov + mdat (H.264 includes avcC/AVCC conversion)
     const mp4Track = { codec: config.codec, width: config.width, height: config.height, fps: config.fps };
-    const mp4AudioTrack = (audioChunks && audioChunks.length > 0)
+    const mp4Audio = audioChunks && audioChunks.length > 0 ? audioChunks : undefined;
+    const mp4AudioTrack = mp4Audio
       ? { sampleRate: this.lastAudioSampleRate, channels: this.lastAudioChannels }
       : undefined;
-    const mp4Bytes = muxMP4(
-      mp4Track,
-      videoChunks,
-      mp4AudioTrack,
-      mp4AudioTrack ? audioChunks! : undefined,
-    );
+    const mp4Bytes = muxMP4(mp4Track, videoChunks, mp4AudioTrack, mp4Audio);
     return new Blob([mp4Bytes.buffer as ArrayBuffer], { type: 'video/mp4' });
   }
 
@@ -724,15 +757,12 @@ export class ExportEngine {
     const w = frame.displayWidth, h = frame.displayHeight;
     // Reuse canvas when dimensions are unchanged (common for all frames in a clip).
     // Recreate only on resolution change to avoid per-frame OffscreenCanvas alloc.
-    if (!this._gifCanvas || this._gifCanvas.width !== w || this._gifCanvas.height !== h) {
-      this._gifCanvas = new OffscreenCanvas(w, h);
-      // willReadFrequently: every GIF frame is read back via getImageData.
-      const ctx = this._gifCanvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) throw new Error('Failed to obtain 2D context from OffscreenCanvas');
-      this._gifCtx = ctx;
-    }
-    this._gifCtx!.drawImage(frame as unknown as CanvasImageSource, 0, 0);
-    return this._gifCtx!.getImageData(0, 0, w, h);
+    // willReadFrequently: every GIF frame is read back via getImageData.
+    // 寸法が同じなら再利用し、変わった時だけ作り直す (フレームごとの確保を避ける)。
+    this._gifSurface = ensureSurface(this._gifSurface, w, h, { willReadFrequently: true });
+    const { ctx } = this._gifSurface;
+    ctx.drawImage(frame as unknown as CanvasImageSource, 0, 0);
+    return ctx.getImageData(0, 0, w, h);
   }
 
   // ============================================================
@@ -747,12 +777,12 @@ export class ExportEngine {
     const job = this.createJob('quick', preset.config);
     const duration = frames.length / preset.config.fps;
 
-    return this.export(
+    return this.export({
       job,
-      async (i) => frames[Math.min(i, frames.length - 1)],
-      audioBuffer || null,
-      duration
-    );
+      renderFrame: async (i: number) => frames[Math.min(i, frames.length - 1)],
+      audioBuffer: audioBuffer || null,
+      duration,
+    });
   }
 
   // ============================================================

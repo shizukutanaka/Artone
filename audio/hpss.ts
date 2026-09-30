@@ -172,14 +172,27 @@ function stft(
  * @param hopSize   Hop size.
  * @param window    Hann window (synthesis).
  */
+/** 複素スペクトログラム (フレーム × ビン)。実部と虚部は常に対で扱う。 */
+interface ComplexSpectrogram {
+  re: Float64Array[];
+  im: Float64Array[];
+}
+
+/** STFT の窓とホップ。3つとも `number`/配列で、取り違えても落ちない。 */
+interface StftConfig {
+  winSize: number;
+  hopSize: number;
+  window: Float64Array;
+}
+
 function istft(
-  maskedRe: Float64Array[],
-  maskedIm: Float64Array[],
+  spectrum: ComplexSpectrogram,
   nSamples: number,
-  winSize:  number,
-  hopSize:  number,
-  window:   Float64Array,
+  config: StftConfig,
 ): Float32Array {
+  const maskedRe = spectrum.re;
+  const maskedIm = spectrum.im;
+  const { winSize, hopSize, window } = config;
   const nFrames = maskedRe.length;
   const output  = new Float64Array(nSamples + winSize);
   const normSum = new Float64Array(nSamples + winSize);
@@ -342,12 +355,14 @@ function medianFilterFreq(mag: Float64Array[], kernLen: number): Float64Array[] 
  * M_P[f,b] = P[f,b]^p / (H[f,b]^p + P[f,b]^p + ε)
  */
 function wienerMasks(
-  H:   Float64Array[],
-  P:   Float64Array[],
-  re:  Float64Array[],
-  im:  Float64Array[],
-  p:   number,
+  components: { harmonic: Float64Array[]; percussive: Float64Array[] },
+  spectrum: ComplexSpectrogram,
+  p: number,
 ): { hRe: Float64Array[]; hIm: Float64Array[]; pRe: Float64Array[]; pIm: Float64Array[] } {
+  const H = components.harmonic;
+  const P = components.percussive;
+  const re = spectrum.re;
+  const im = spectrum.im;
   const nFrames = H.length;
   const nBins   = nFrames > 0 ? H[0].length : 0;
   // Four flat allocations + subarray views instead of 4×nFrames separate Float64Array(nBins) calls.
@@ -420,11 +435,12 @@ export function separateHPSS(signal: Float32Array, opts: HPSSOptions = {}): HPSS
   const P = medianFilterFreq(spec.mag, percFilterLen);   // vertical   → percussive
 
   // 3. Wiener masks → masked spectrograms
-  const { hRe, hIm, pRe, pIm } = wienerMasks(H, P, spec.re, spec.im, maskPower);
+  const { hRe, hIm, pRe, pIm } = wienerMasks({ harmonic: H, percussive: P }, spec, maskPower);
 
   // 4. ISTFT
-  const harmonic   = istft(hRe, hIm, signal.length, winSize, hopSize, window);
-  const percussive = istft(pRe, pIm, signal.length, winSize, hopSize, window);
+  const stftConfig = { winSize, hopSize, window };
+  const harmonic   = istft({ re: hRe, im: hIm }, signal.length, stftConfig);
+  const percussive = istft({ re: pRe, im: pIm }, signal.length, stftConfig);
 
   // 5. Residual
   const residual = new Float32Array(signal.length);

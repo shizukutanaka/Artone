@@ -129,17 +129,18 @@ export class FrameCache {
     while (this.hot.size > this.config.maxHotFrames) {
       const oldest = this.findOldest(this.hot);
       if (oldest === null) break;
-      const frame = this.hot.get(oldest)!;
-      this.hot.delete(oldest);
-      this.warm.set(oldest, frame);
+      const [key, frame] = oldest;
+      this.hot.delete(key);
+      this.warm.set(key, frame);
     }
 
     // Tier 2 溢れ → 破棄 (VideoFrame は close でメモリ解放必須)
     while (this.warm.size > this.config.maxWarmFrames) {
       const oldest = this.findOldest(this.warm);
       if (oldest === null) break;
-      this.releaseFrame(this.warm.get(oldest)!);
-      this.warm.delete(oldest);
+      const [key, frame] = oldest;
+      this.releaseFrame(frame);
+      this.warm.delete(key);
     }
 
     // メモリ上限超過 → warm から evict。warm が尽きたら hot を warm に降格して
@@ -149,29 +150,37 @@ export class FrameCache {
         // hot の最古を warm へ降格 (Tier 1 → Tier 2)
         const oldestHot = this.findOldest(this.hot);
         if (oldestHot === null) break;
-        const frame = this.hot.get(oldestHot)!;
-        this.hot.delete(oldestHot);
-        this.warm.set(oldestHot, frame);
+        const [hotKey, hotFrame] = oldestHot;
+        this.hot.delete(hotKey);
+        this.warm.set(hotKey, hotFrame);
       }
       const oldest = this.findOldest(this.warm);
       if (oldest === null) break;
-      this.releaseFrame(this.warm.get(oldest)!);
-      this.warm.delete(oldest);
+      const [key, frame] = oldest;
+      this.releaseFrame(frame);
+      this.warm.delete(key);
     }
   }
 
   /**
-   * Return the least-recently-used key (the one to evict/demote first), or null
-   * if the map is empty.
+   * Return the least-recently-used **entry** (the one to evict/demote first),
+   * or null if the map is empty.
    *
    * The cache maintains every tier Map in access order — put() and warm→hot
    * promotion append to the end, get() re-appends a hot hit, and demotions move
-   * the current oldest — so the LRU entry is always the first key. Reading it is
+   * the current oldest — so the LRU entry is always the first one. Reading it is
    * O(1) via the Map iterator instead of the previous O(n) timestamp scan, which
    * ran inside the eviction while-loops and made bulk eviction O(n²).
+   *
+   * **キーではなくエントリを返す**のが要点。キーだけを返すと呼び出し側が
+   * `map.get(key)!` で引き直すことになり、①同じ Map を2度引く ②`!` が
+   * 「このキーは必ずある」という**コメントでしか保証されない前提**になる。
+   * `entries()` から取れば値は型として存在し、GPU リソースの解放漏れに
+   * 直結する `releaseFrame` の対象を取り違えようがない (render/CLAUDE.md
+   * 「すべての GPUBuffer / GPUTexture は destroy() 必須」)。
    */
-  private findOldest(map: Map<number, CachedFrame>): number | null {
-    const first = map.keys().next();
+  private findOldest(map: Map<number, CachedFrame>): [number, CachedFrame] | null {
+    const first = map.entries().next();
     return first.done ? null : first.value;
   }
 

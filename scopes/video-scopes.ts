@@ -1,3 +1,4 @@
+import { require2dContext, ensureSurface, type DrawSurface } from '../core/canvas-context';
 import { color } from '../app/design-system';
 /**
  * Artone v3 — Video Scopes
@@ -56,6 +57,20 @@ export interface ScopeAnalysis {
 // Waveform Scope
 // ============================================================
 
+/** スコープ円の中心と半径 (3つとも `number` なので組で運ぶ)。 */
+interface ScopeGeometry {
+  cx: number;
+  cy: number;
+  radius: number;
+}
+
+/** 肌色セクタ内の点の色 (SCOPE_SKIN #e0a080)。 */
+const SKIN_DOT = [0xe0, 0xa0, 0x80] as const;
+/** 肌色セクタ外の点の色 (color.surface4 #252525)。 */
+const NON_SKIN_DOT = [0x25, 0x25, 0x25] as const;
+/** Hue vs Sat モードの点の色。 */
+const WHITE_DOT = [0xff, 0xff, 0xff] as const;
+
 export class WaveformScope {
   private canvas: OffscreenCanvas;
   private ctx: OffscreenCanvasRenderingContext2D;
@@ -63,8 +78,7 @@ export class WaveformScope {
   private mode: WaveformMode = 'luma';
   // Cached temp canvas for VideoFrame→ImageData extraction. Reused across
   // frames; recreated only when frame dimensions change (avoids per-frame alloc).
-  private _tempCanvas: OffscreenCanvas | null = null;
-  private _tempCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _tempSurface: DrawSurface | null = null;
   // Pre-allocated density maps: flat [scopeX * 256 + brightness] = pixel count.
   // Replaces per-frame Map + dynamic array allocation (~thousands of GC objects
   // at 60fps).  Size = config.width × 256 (fixed at construction time).
@@ -93,7 +107,7 @@ export class WaveformScope {
     };
 
     this.canvas = new OffscreenCanvas(this.config.width, this.config.height);
-    this.ctx = this.canvas.getContext('2d')!;
+    this.ctx = require2dContext(this.canvas);
 
     const buckets = this.config.width * 256;
     this.waveR = new Uint32Array(buckets);
@@ -101,7 +115,7 @@ export class WaveformScope {
     this.waveB = new Uint32Array(buckets);
     this.waveY = new Uint32Array(buckets);
     this.dotCanvas = new OffscreenCanvas(this.config.width, this.config.height);
-    this.dotCtx = this.dotCanvas.getContext('2d')!;
+    this.dotCtx = require2dContext(this.dotCanvas);
     this.waveImageData = new ImageData(this.config.width, this.config.height);
   }
 
@@ -115,14 +129,11 @@ export class WaveformScope {
       const w = frame.displayWidth, h = frame.displayHeight;
       // Reuse temp canvas when dimensions are unchanged (typical at 60fps).
       // Recreate only on resolution change to avoid per-frame OffscreenCanvas alloc.
-      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
-        this._tempCanvas = new OffscreenCanvas(w, h);
-        // willReadFrequently: keeps canvas CPU-backed so getImageData() avoids
-        // GPU→CPU readback stall (Qiita: canvas パフォーマンス向上).
-        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      }
-      this._tempCtx!.drawImage(frame, 0, 0);
-      return this._tempCtx!.getImageData(0, 0, w, h);
+      // willReadFrequently: keeps canvas CPU-backed so getImageData() avoids
+      // GPU→CPU readback stall (Qiita: canvas パフォーマンス向上).
+      this._tempSurface = ensureSurface(this._tempSurface, w, h, { willReadFrequently: true });
+      this._tempSurface.ctx.drawImage(frame, 0, 0);
+      return this._tempSurface.ctx.getImageData(0, 0, w, h);
     }
     return frame;
   }
@@ -313,8 +324,7 @@ export class Vectorscope {
   private readonly dotCtx: OffscreenCanvasRenderingContext2D;
   private readonly dotImageData: ImageData;
   // Cached temp canvas for VideoFrame→ImageData extraction.
-  private _tempCanvas: OffscreenCanvas | null = null;
-  private _tempCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _tempSurface: DrawSurface | null = null;
 
   constructor(config: Partial<ScopeConfig> = {}) {
     this.config = {
@@ -329,7 +339,7 @@ export class Vectorscope {
     };
 
     this.canvas = new OffscreenCanvas(this.config.width, this.config.height);
-    this.ctx = this.canvas.getContext('2d')!;
+    this.ctx = require2dContext(this.canvas);
 
     const pixels = this.config.width * this.config.height;
     this.scopeDensity = new Uint32Array(pixels);
@@ -338,7 +348,7 @@ export class Vectorscope {
     this.scopeBSum    = new Uint32Array(pixels);
     this.skinDensity  = new Uint32Array(pixels);
     this.dotCanvas    = new OffscreenCanvas(this.config.width, this.config.height);
-    this.dotCtx       = this.dotCanvas.getContext('2d')!;
+    this.dotCtx       = require2dContext(this.dotCanvas);
     this.dotImageData = new ImageData(this.config.width, this.config.height);
   }
 
@@ -352,6 +362,8 @@ export class Vectorscope {
     const centerY = height / 2;
     // Subtract padding; clamp to ≥1 so ctx.arc() never receives a negative radius.
     const radius = Math.max(1, Math.min(width, height) / 2 - 20);
+    // 描画モードへ渡す形。3つとも number なので組で運ぶ。
+    const geometry: ScopeGeometry = { cx: centerX, cy: centerY, radius };
     
     // Clear
     this.ctx.fillStyle = this.config.backgroundColor;
@@ -366,13 +378,10 @@ export class Vectorscope {
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
       const w = frame.displayWidth, h = frame.displayHeight;
-      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
-        this._tempCanvas = new OffscreenCanvas(w, h);
-        // willReadFrequently keeps canvas CPU-backed; avoids GPU→CPU readback stall.
-        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      }
-      this._tempCtx!.drawImage(frame, 0, 0);
-      imageData = this._tempCtx!.getImageData(0, 0, w, h);
+      // willReadFrequently keeps canvas CPU-backed; avoids GPU→CPU readback stall.
+      this._tempSurface = ensureSurface(this._tempSurface, w, h, { willReadFrequently: true });
+      this._tempSurface.ctx.drawImage(frame, 0, 0);
+      imageData = this._tempSurface.ctx.getImageData(0, 0, w, h);
     } else {
       imageData = frame;
     }
@@ -383,14 +392,42 @@ export class Vectorscope {
     const sampleStep = Math.max(1, Math.floor(frameWidth * frameHeight / 50000));
 
     if (this.mode === 'standard') {
-      this.renderStandardMode(data, centerX, centerY, radius, sampleStep);
+      this.renderStandardMode(data, geometry, sampleStep);
     } else if (this.mode === 'skin-tone') {
-      this.renderSkinToneMode(data, centerX, centerY, radius, sampleStep);
+      this.renderSkinToneMode(data, geometry, sampleStep);
     } else {
-      this.renderHueVsSatMode(data, centerX, centerY, radius, sampleStep);
+      this.renderHueVsSatMode(data, geometry, sampleStep);
     }
 
     return this.canvas.transferToImageBitmap();
+  }
+
+  /**
+   * ベクトルスコープの点 (2×2 画素) を書き込む。
+   *
+   * 3つの描画モードが**同じ 2重ループを写経**しており、いずれも入れ子が5段に
+   * なっていた (`CLAUDE.md`「ネストはガード節で回避」)。書き込む色だけが違うので
+   * 1箇所に集約する。`fillRect(x, y, 2, 2)` と同じ見た目を保つ。
+   *
+   * @param index  スコープ座標の一次元索引。
+   * @param rgb    書き込む色。
+   * @param alpha  不透明度 (0..255)。
+   */
+  private writeDot(index: number, rgb: readonly [number, number, number], alpha: number): void {
+    const { width, height } = this.config;
+    const dotPx = this.dotImageData.data;
+    const px = index % width, py = (index / width) | 0;
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        const nx = px + dx, ny = py + dy;
+        if (nx >= width || ny >= height) continue;
+        const pidx = (ny * width + nx) * 4;
+        dotPx[pidx]     = rgb[0];
+        dotPx[pidx + 1] = rgb[1];
+        dotPx[pidx + 2] = rgb[2];
+        dotPx[pidx + 3] = alpha;
+      }
+    }
   }
 
   /**
@@ -401,9 +438,10 @@ export class Vectorscope {
    */
   private renderStandardMode(
     data: Uint8ClampedArray,
-    cx: number, cy: number, radius: number,
+    geometry: ScopeGeometry,
     sampleStep: number,
   ): void {
+    const { cx, cy, radius } = geometry;
     const { width, height, scale, brightness } = this.config;
     const { scopeDensity, scopeRSum, scopeGSum, scopeBSum } = this;
     scopeDensity.fill(0); scopeRSum.fill(0); scopeGSum.fill(0); scopeBSum.fill(0);
@@ -443,20 +481,7 @@ export class Vectorscope {
         const avgR = ((scopeRSum[i] / cnt) + 0.5) | 0;
         const avgG = ((scopeGSum[i] / cnt) + 0.5) | 0;
         const avgB = ((scopeBSum[i] / cnt) + 0.5) | 0;
-        // Write 2×2 square (matches original fillRect(x, y, 2, 2))
-        const px = i % width, py = (i / width) | 0;
-        for (let dy = 0; dy < 2; dy++) {
-          for (let dx = 0; dx < 2; dx++) {
-            const nx = px + dx, ny = py + dy;
-            if (nx < width && ny < height) {
-              const pidx = (ny * width + nx) * 4;
-              dotPx[pidx]     = avgR;
-              dotPx[pidx + 1] = avgG;
-              dotPx[pidx + 2] = avgB;
-              dotPx[pidx + 3] = alpha;
-            }
-          }
-        }
+        this.writeDot(i, [avgR, avgG, avgB], alpha);
       }
     }
     this.dotCtx.putImageData(this.dotImageData, 0, 0);
@@ -482,9 +507,10 @@ export class Vectorscope {
    */
   private renderSkinToneMode(
     data: Uint8ClampedArray,
-    cx: number, cy: number, radius: number,
+    geometry: ScopeGeometry,
     sampleStep: number,
   ): void {
+    const { cx, cy, radius } = geometry;
     const { width, height, scale, brightness } = this.config;
     const COS110 = -0.3420, SIN110 = 0.9397;
     const COS150 = -0.8660, SIN150 = 0.5;
@@ -523,22 +549,8 @@ export class Vectorscope {
         if (cnt === 0) continue;
         const alpha = Math.min(255, ((cnt / maxDensity) * alphaMul + 0.5) | 0);
         const isSkin = skinDensity[i] > 0;
-        // Write 2×2 square (matches original fillRect(x,y,2,2) dot size)
-        const px = i % width, py = (i / width) | 0;
-        for (let dy = 0; dy < 2; dy++) {
-          for (let dx = 0; dx < 2; dx++) {
-            const nx = px + dx, ny = py + dy;
-            if (nx < width && ny < height) {
-              const pidx = (ny * width + nx) * 4;
-              // SCOPE_SKIN #e0a080: R=0xe0, G=0xa0, B=0x80
-              // color.surface4 #252525: R=G=B=0x25
-              dotPx[pidx]     = isSkin ? 0xe0 : 0x25;
-              dotPx[pidx + 1] = isSkin ? 0xa0 : 0x25;
-              dotPx[pidx + 2] = isSkin ? 0x80 : 0x25;
-              dotPx[pidx + 3] = alpha;
-            }
-          }
-        }
+        // SCOPE_SKIN #e0a080 / color.surface4 #252525
+        this.writeDot(i, isSkin ? SKIN_DOT : NON_SKIN_DOT, alpha);
       }
     }
     this.dotCtx.putImageData(this.dotImageData, 0, 0);
@@ -552,9 +564,10 @@ export class Vectorscope {
    */
   private renderHueVsSatMode(
     data: Uint8ClampedArray,
-    cx: number, cy: number, radius: number,
+    geometry: ScopeGeometry,
     sampleStep: number,
   ): void {
+    const { cx, cy, radius } = geometry;
     const { width, height, scale, brightness } = this.config;
     const rScale = radius * scale / 128;
 
@@ -587,17 +600,7 @@ export class Vectorscope {
         const cnt = scopeDensity[i];
         if (cnt === 0) continue;
         const alpha = Math.min(255, ((cnt / maxDensity) * alphaMul + 0.5) | 0);
-        const px = i % width, py = (i / width) | 0;
-        for (let dy = 0; dy < 2; dy++) {
-          for (let dx = 0; dx < 2; dx++) {
-            const nx = px + dx, ny = py + dy;
-            if (nx < width && ny < height) {
-              const pidx = (ny * width + nx) * 4;
-              dotPx[pidx] = 0xff; dotPx[pidx + 1] = 0xff; dotPx[pidx + 2] = 0xff;
-              dotPx[pidx + 3] = alpha;
-            }
-          }
-        }
+        this.writeDot(i, WHITE_DOT, alpha);
       }
     }
     this.dotCtx.putImageData(this.dotImageData, 0, 0);
@@ -698,8 +701,7 @@ export class HistogramScope {
   private readonly histB = new Uint32Array(256);
   private readonly histY = new Uint32Array(256);
   // Cached temp canvas shared by analyze() and getStats() for VideoFrame extraction.
-  private _tempCanvas: OffscreenCanvas | null = null;
-  private _tempCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _tempSurface: DrawSurface | null = null;
 
   constructor(config: Partial<ScopeConfig> = {}) {
     this.config = {
@@ -714,7 +716,7 @@ export class HistogramScope {
     };
     
     this.canvas = new OffscreenCanvas(this.config.width, this.config.height);
-    this.ctx = this.canvas.getContext('2d')!;
+    this.ctx = require2dContext(this.canvas);
   }
 
   setShowRGB(show: boolean): void {
@@ -732,13 +734,10 @@ export class HistogramScope {
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
       const w = frame.displayWidth, h = frame.displayHeight;
-      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
-        this._tempCanvas = new OffscreenCanvas(w, h);
-        // willReadFrequently keeps canvas CPU-backed; avoids GPU→CPU readback stall.
-        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      }
-      this._tempCtx!.drawImage(frame, 0, 0);
-      imageData = this._tempCtx!.getImageData(0, 0, w, h);
+      // willReadFrequently keeps canvas CPU-backed; avoids GPU→CPU readback stall.
+      this._tempSurface = ensureSurface(this._tempSurface, w, h, { willReadFrequently: true });
+      this._tempSurface.ctx.drawImage(frame, 0, 0);
+      imageData = this._tempSurface.ctx.getImageData(0, 0, w, h);
     } else {
       imageData = frame;
     }
@@ -886,12 +885,9 @@ export class HistogramScope {
     let imageData: ImageData;
     if (frame instanceof VideoFrame) {
       const w = frame.displayWidth, h = frame.displayHeight;
-      if (!this._tempCanvas || this._tempCanvas.width !== w || this._tempCanvas.height !== h) {
-        this._tempCanvas = new OffscreenCanvas(w, h);
-        this._tempCtx = this._tempCanvas.getContext('2d', { willReadFrequently: true })!;
-      }
-      this._tempCtx!.drawImage(frame, 0, 0);
-      imageData = this._tempCtx!.getImageData(0, 0, w, h);
+      this._tempSurface = ensureSurface(this._tempSurface, w, h, { willReadFrequently: true });
+      this._tempSurface.ctx.drawImage(frame, 0, 0);
+      imageData = this._tempSurface.ctx.getImageData(0, 0, w, h);
     } else {
       imageData = frame;
     }

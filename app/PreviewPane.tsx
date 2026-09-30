@@ -125,21 +125,25 @@ export const PreviewPane = React.memo(function PreviewPane({
   if (kind === 'loading') {
     return <div style={FRAME_STYLE} data-preview="loading">{t('preview.loading')}</div>;
   }
-  if (kind === 'empty') {
+  // `!item` を条件に含めるのは型のためだけではない。`selectPreviewKind` は
+  // item が無ければ 'empty' を返すので**意味は同じ**だが、この形にしないと
+  // 以降で `item!` が必要になり、「kind がこの値なら item はある」という
+  // 対応関係が**コメントでしか保証されない**状態になる。ここで絞り込む。
+  if (kind === 'empty' || !item) {
     return <div style={FRAME_STYLE} data-preview="empty">{t('preview.empty')}</div>;
   }
   if (kind === 'image') {
     return (
       <div style={FRAME_STYLE} data-preview="image">
-        <img src={item!.url} alt={item!.name} style={MEDIA_STYLE} />
+        <img src={item.url} alt={item.name} style={MEDIA_STYLE} />
       </div>
     );
   }
   if (kind === 'audio') {
     return (
       <div style={{ ...FRAME_STYLE, flexDirection: 'column', gap: 8 }} data-preview="audio">
-        <div style={{ ...ds.text('body') }}>{item!.name}</div>
-        <audio src={item!.url} controls style={{ width: '80%' }} />
+        <div style={{ ...ds.text('body') }}>{item.name}</div>
+        <audio src={item.url} controls style={{ width: '80%' }} />
       </div>
     );
   }
@@ -150,7 +154,7 @@ export const PreviewPane = React.memo(function PreviewPane({
         ユーザーは音を確認したいのが普通で、自動再生もしないため
         ブラウザの自動再生ポリシーには抵触しない。
       */}
-      <video ref={videoRef} src={item!.url} controls playsInline style={MEDIA_STYLE} data-testid="preview-video" />
+      <video ref={videoRef} src={item.url} controls playsInline style={MEDIA_STYLE} data-testid="preview-video" />
     </div>
   );
 });

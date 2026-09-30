@@ -172,8 +172,21 @@ export class WebGLFallbackRenderer {
     return true;
   }
 
+  /**
+   * 初期化済みの WebGL2 コンテキストを返す。無ければ理由付きで落とす。
+   *
+   * `this.gl!` のままだと、コンテキスト喪失や `dispose()` の後に呼ばれた時
+   * **null に対する GL 呼び出し**として原因から遠い場所で落ちる。このクラスは
+   * `contextLost` を明示的に扱っており (`render/CLAUDE.md` のフォールバック要件)、
+   * null は実際に起こる状態である。
+   */
+  private requireGL(): WebGL2RenderingContext {
+    if (!this.gl) throw new Error('WebGL2 context is not initialized (lost or disposed)');
+    return this.gl;
+  }
+
   private createShader(type: number, source: string): WebGLShader | null {
-    const gl = this.gl!;
+    const gl = this.requireGL();
     const shader = gl.createShader(type);
     if (!shader) return null;
     gl.shaderSource(shader, source);
@@ -187,7 +200,7 @@ export class WebGLFallbackRenderer {
   }
 
   private createProgram(vsSource: string, fsSource: string): WebGLProgram | null {
-    const gl = this.gl!;
+    const gl = this.requireGL();
     const vs = this.createShader(gl.VERTEX_SHADER, vsSource);
     const fs = this.createShader(gl.FRAGMENT_SHADER, fsSource);
     if (!vs || !fs) {
@@ -220,7 +233,7 @@ export class WebGLFallbackRenderer {
   }
 
   private setupGeometry(): void {
-    const gl = this.gl!;
+    const gl = this.requireGL();
     // フルスクリーンクワッド
     const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
     const texCoords = new Float32Array([0, 1, 1, 1, 0, 0, 1, 0]);
@@ -280,7 +293,11 @@ export class WebGLFallbackRenderer {
 
     const start = performance.now();
 
-    gl.viewport(0, 0, this.canvas!.width, this.canvas!.height);
+    // `canvas` は dispose / コンテキスト喪失で null になる。上のガードで
+    // `gl` は確認済みだが canvas は別フィールドなので個別に見る。
+    const canvas = this.canvas;
+    if (!canvas) return;
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(program);

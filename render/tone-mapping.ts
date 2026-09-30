@@ -137,10 +137,24 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
  * @param c - トー強度 (デフォルト 1.33)
  * @param b - ペデスタル (デフォルト 0.0)
  */
-export function uchimura(
-  x: number,
-  P = 1.0, a = 1.0, m = 0.22, l = 0.4, c = 1.33, b = 0.0,
-): number {
+/** Uchimura トーンマッピングの係数 (既定値は原論文の推奨値)。 */
+export interface UchimuraParams {
+  /** 最大表示輝度。 */
+  P?: number;
+  /** コントラスト。 */
+  a?: number;
+  /** 線形部の開始点。 */
+  m?: number;
+  /** 線形部の長さ。 */
+  l?: number;
+  /** 黒の締まり。 */
+  c?: number;
+  /** 黒レベル。 */
+  b?: number;
+}
+
+export function uchimura(x: number, params: UchimuraParams = {}): number {
+  const { P = 1.0, a = 1.0, m = 0.22, l = 0.4, c = 1.33, b = 0.0 } = params;
   const l0 = ((P - m) * l) / a;
   const S0 = m + l0;
   const S1 = m + a * l0;

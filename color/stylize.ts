@@ -20,6 +20,7 @@
  * # AI generated (reviewed)
  */
 
+import type { PixelSource } from '../core/pixel-geometry';
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Clamp to 8-bit. */
@@ -142,12 +143,12 @@ export type DeinterlaceMethod = 'bob' | 'blend';
  * @returns       New progressive RGBA image (alpha preserved).
  */
 export function deinterlace(
-  src:    Uint8ClampedArray | Uint8Array,
-  width:  number,
-  height: number,
-  method: DeinterlaceMethod = 'bob',
-  order:  FieldOrder = 'tff',
+  source: PixelSource,
+  options: { method?: DeinterlaceMethod; order?: FieldOrder } = {},
 ): Uint8ClampedArray {
+  const { data: src, width, height } = source;
+  const method = options.method ?? 'bob';
+  const order = options.order ?? 'tff';
   const out = new Uint8ClampedArray(src.length);
 
   if (method === 'blend') {

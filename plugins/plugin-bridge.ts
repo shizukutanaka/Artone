@@ -9,6 +9,7 @@
  * - プリセット管理
  * - プラグインチェーン
  */
+import { escapeHtml } from '../core/html-escape';
 
 // ==================== Types ====================
 
@@ -86,6 +87,19 @@ interface ProcessBuffer {
 
 // ==================== Plugin Bridge ====================
 
+/**
+ * 直前に組み立てたマークアップから要素を引く。無ければ落とす。
+ *
+ * `querySelector(...)!` は「テンプレートを書き換えたのに参照側を直し忘れた」
+ * 場合に **null に対する操作**として遠い場所で落ちる。ここで何が見つからな
+ * かったかを言って落としたほうが原因に近い。
+ */
+function requireElement<T extends Element>(root: ParentNode, selector: string): T {
+  const el = root.querySelector<T>(selector);
+  if (!el) throw new Error(`Plugin UI element not found: ${selector}`);
+  return el;
+}
+
 export class PluginBridge {
   private audioContext: AudioContext;
   private descriptors: Map<string, PluginDescriptor> = new Map();
@@ -97,12 +111,6 @@ export class PluginBridge {
 
   private readonly BLOCK_SIZE = 128;
 
-  /** Escape HTML special characters to prevent XSS when injecting plugin metadata into innerHTML. */
-  private static escapeHtml(s: string): string {
-    return s.replace(/[&<>"']/g, (c) => (
-      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!
-    ));
-  }
   
   constructor(audioContext: AudioContext) {
     this.audioContext = audioContext;
@@ -280,8 +288,11 @@ export class PluginBridge {
 
     // Update WASM instance — O(1) index lookup via pre-built map
     const exports = instance.wasmInstance.exports as { setParameter?: (id: number, value: number) => void };
-    if (exports.setParameter) {
-      const paramIndex = instance.paramIndexById.get(parameterId)!;
+    const paramIndex = instance.paramIndexById.get(parameterId);
+    // `parameterId` はプラグイン側から渡りうる値なので、索引に無いことがある。
+    // `!` で潰すと `undefined` がそのまま WASM の setParameter へ入る
+    // (plugins/CLAUDE.md: ここはセキュリティ境界)。無ければ WASM へは送らない。
+    if (exports.setParameter && paramIndex !== undefined) {
       exports.setParameter(paramIndex, clampedValue);
     }
     
@@ -571,7 +582,7 @@ export class PluginBridge {
   }
   
   private createGenericUI(instance: PluginInstance, signal?: AbortSignal): HTMLElement {
-    const esc = PluginBridge.escapeHtml;
+    const esc = escapeHtml;
     const container = document.createElement('div');
     container.className = 'plugin-ui';
     container.innerHTML = `
@@ -644,7 +655,7 @@ export class PluginBridge {
     `;
     
     // Create parameter knobs
-    const paramsContainer = container.querySelector('.plugin-params')!;
+    const paramsContainer = requireElement(container, '.plugin-params');
     for (const param of instance.descriptor.parameters) {
       if (param.flags.hidden) continue;
       
@@ -663,7 +674,7 @@ export class PluginBridge {
       `;
       
       // Knob interaction
-      const knob = paramEl.querySelector('.plugin-param-knob')!;
+      const knob = requireElement<HTMLElement>(paramEl, '.plugin-param-knob');
       let isDragging = false;
       let startY = 0;
       let startValue = 0;
@@ -700,7 +711,7 @@ export class PluginBridge {
     }
     
     // Bypass button
-    const bypassBtn = container.querySelector('.plugin-bypass')!;
+    const bypassBtn = requireElement(container, '.plugin-bypass');
     bypassBtn.addEventListener('click', () => {
       const newState = !instance.bypassed;
       this.setBypass(instance.id, newState);
@@ -733,7 +744,7 @@ export class PluginBridge {
     const pointer = paramEl.querySelector('.knob-pointer') as SVGLineElement;
     pointer.setAttribute('transform', `rotate(${angle} 30 30)`);
     
-    const valueEl = paramEl.querySelector('.plugin-param-value')!;
+    const valueEl = requireElement(paramEl, '.plugin-param-value');
     valueEl.textContent = this.formatValue(value, param);
   }
   

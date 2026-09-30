@@ -666,9 +666,18 @@ describe('standardBenchmarks — execution via BenchmarkRunner', () => {
     const runnable = standardBenchmarks.filter(
       (s) => !s.name.includes('putImageData') && !s.name.includes('canvas')
     );
-    runner.registerAll(runnable);
+    // REGRESSION fix: 反復回数を絞る。
+    //
+    // このテストが確かめるのは「各 spec が**実行でき**、まともな結果を返す」
+    // ことであって、性能そのものではない (性能は `npm run bench` のゲート)。
+    // ところが既定の反復回数で本番同様に測っており、単体実行で約34秒 —
+    // **30秒のタイムアウトを自分で超えていた**。全スイート実行時だけ落ちるのは
+    // 並列実行で遅くなるためで、「たまに落ちる」のではなく**速いときだけ通る**
+    // テストだった。実行可能性の確認に必要な回数まで減らす。
+    const quick = runnable.map((s) => ({ ...s, warmup: 1, iterations: 1 }));
+    runner.registerAll(quick);
     const results = await runner.runAll();
-    expect(results.length).toBe(runnable.length);
+    expect(results.length).toBe(quick.length);
     for (const r of results) {
       expect(r.meanMs).toBeGreaterThanOrEqual(0);
       expect(r.opsPerSec).toBeGreaterThan(0);

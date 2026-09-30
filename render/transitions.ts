@@ -26,14 +26,36 @@
 /** Direction for wipe / slide / push. */
 export type TransitionDirection = 'left' | 'right' | 'up' | 'down';
 
+/**
+ * トランジションの入力一式。
+ *
+ * `a` と `b` は**同じ型** (`Uint8ClampedArray | Uint8Array`) なので、位置引数で
+ * 渡していた頃は**取り違えをコンパイラが検出できなかった** — 入れ替えても落ちず、
+ * 「トランジションが逆再生される」という形で出力にだけ現れる。名前で受け取ると
+ * 呼び出し側で取り違えが見える。`width`/`height` も同様。
+ */
+export interface TransitionInput {
+  /** Outgoing frame. */
+  a: Uint8ClampedArray | Uint8Array;
+  /** Incoming frame. */
+  b: Uint8ClampedArray | Uint8Array;
+  width: number;
+  height: number;
+  /** Progress in [0, 1]. */
+  t: number;
+}
+
+/**
+ * 出力バッファの再利用口。レンダリングループ内で確保しないための仕組みで、
+ * `render/CLAUDE.md`「レンダリングループ内で resource 作成禁止」に対応する。
+ */
+export interface TransitionOutput {
+  /** 再利用する出力バッファ (省略時は確保する)。 */
+  outBuf?: Uint8ClampedArray;
+}
+
 /** A transition that combines two frames at progress t. */
-export type TransitionFn = (
-  a:      Uint8ClampedArray | Uint8Array,
-  b:      Uint8ClampedArray | Uint8Array,
-  width:  number,
-  height: number,
-  t:      number,
-) => Uint8ClampedArray;
+export type TransitionFn = (input: TransitionInput) => Uint8ClampedArray;
 
 /** Easing function mapping t∈[0,1] → eased t∈[0,1]. */
 export type EaseFn = (t: number) => number;
@@ -96,11 +118,11 @@ function mkFrame(width: number, height: number, buf?: Uint8ClampedArray): Uint8C
  * @returns       Blended frame.
  */
 export function crossDissolve(
-  a: Uint8ClampedArray | Uint8Array,
-  b: Uint8ClampedArray | Uint8Array,
-  width: number, height: number, t: number,
-  outBuf?: Uint8ClampedArray,
+  input: TransitionInput,
+  options: TransitionOutput = {},
 ): Uint8ClampedArray {
+  const { a, b, width, height, t } = input;
+  const outBuf = options.outBuf;
   const tt = clamp01(t);
   const it = 1 - tt;
   const out = mkFrame(width, height, outBuf);
@@ -128,12 +150,12 @@ export function crossDissolve(
  * @returns       Blended frame.
  */
 export function dipToColor(
-  a: Uint8ClampedArray | Uint8Array,
-  b: Uint8ClampedArray | Uint8Array,
-  width: number, height: number, t: number,
-  color: [number, number, number] = [0, 0, 0],
-  outBuf?: Uint8ClampedArray,
+  input: TransitionInput,
+  options: TransitionOutput & { color?: [number, number, number] } = {},
 ): Uint8ClampedArray {
+  const { a, b, width, height, t } = input;
+  const color = options.color ?? [0, 0, 0];
+  const outBuf = options.outBuf;
   const tt = clamp01(t);
   const out = mkFrame(width, height, outBuf);
   const n = width * height;
@@ -180,13 +202,13 @@ export function dipToColor(
  * @returns          Wiped frame.
  */
 export function wipe(
-  a: Uint8ClampedArray | Uint8Array,
-  b: Uint8ClampedArray | Uint8Array,
-  width: number, height: number, t: number,
-  direction: TransitionDirection = 'left',
-  softness = 0,
-  outBuf?: Uint8ClampedArray,
+  input: TransitionInput,
+  options: TransitionOutput & { direction?: TransitionDirection; softness?: number } = {},
 ): Uint8ClampedArray {
+  const { a, b, width, height, t } = input;
+  const direction = options.direction ?? 'left';
+  const softness = options.softness ?? 0;
+  const outBuf = options.outBuf;
   const tt = clamp01(t);
   const out = mkFrame(width, height, outBuf);
   const soft = Math.max(0, softness);
@@ -240,12 +262,12 @@ export function wipe(
  * @returns          Composited frame.
  */
 export function slide(
-  a: Uint8ClampedArray | Uint8Array,
-  b: Uint8ClampedArray | Uint8Array,
-  width: number, height: number, t: number,
-  direction: TransitionDirection = 'left',
-  outBuf?: Uint8ClampedArray,
+  input: TransitionInput,
+  options: TransitionOutput & { direction?: TransitionDirection } = {},
 ): Uint8ClampedArray {
+  const { a, b, width, height, t } = input;
+  const direction = options.direction ?? 'left';
+  const outBuf = options.outBuf;
   const tt = clamp01(t);
   const out = mkFrame(width, height, outBuf);
   // Offset of B in pixels
@@ -284,12 +306,12 @@ export function slide(
  * @returns          Composited frame.
  */
 export function push(
-  a: Uint8ClampedArray | Uint8Array,
-  b: Uint8ClampedArray | Uint8Array,
-  width: number, height: number, t: number,
-  direction: TransitionDirection = 'left',
-  outBuf?: Uint8ClampedArray,
+  input: TransitionInput,
+  options: TransitionOutput & { direction?: TransitionDirection } = {},
 ): Uint8ClampedArray {
+  const { a, b, width, height, t } = input;
+  const direction = options.direction ?? 'left';
+  const outBuf = options.outBuf;
   const tt = clamp01(t);
   const out = mkFrame(width, height, outBuf);
 
@@ -339,11 +361,11 @@ export function push(
  * @returns       Composited frame.
  */
 export function radialWipe(
-  a: Uint8ClampedArray | Uint8Array,
-  b: Uint8ClampedArray | Uint8Array,
-  width: number, height: number, t: number,
-  outBuf?: Uint8ClampedArray,
+  input: TransitionInput,
+  options: TransitionOutput = {},
 ): Uint8ClampedArray {
+  const { a, b, width, height, t } = input;
+  const outBuf = options.outBuf;
   const tt = clamp01(t);
   const out = mkFrame(width, height, outBuf);
   const cx = (width - 1) / 2;
@@ -374,12 +396,12 @@ export function radialWipe(
  * @returns         Composited frame.
  */
 export function irisWipe(
-  a: Uint8ClampedArray | Uint8Array,
-  b: Uint8ClampedArray | Uint8Array,
-  width: number, height: number, t: number,
-  softness = 0,
-  outBuf?: Uint8ClampedArray,
+  input: TransitionInput,
+  options: TransitionOutput & { softness?: number } = {},
 ): Uint8ClampedArray {
+  const { a, b, width, height, t } = input;
+  const softness = options.softness ?? 0;
+  const outBuf = options.outBuf;
   const tt = clamp01(t);
   const out = mkFrame(width, height, outBuf);
   const cx = (width - 1) / 2;
@@ -440,23 +462,25 @@ const _WHITE: [number, number, number] = [255, 255, 255];
  */
 export function getTransition(kind: TransitionKind, ease: EaseFn = easeLinear): TransitionFn {
   let outBuf: Uint8ClampedArray | undefined;
-  return (a, b, w, h, t) => {
-    const e = ease(clamp01(t));
+  return (input) => {
+    // イージングは進捗にだけ効く。フレームと寸法はそのまま渡す。
+    const eased: TransitionInput = { ...input, t: ease(clamp01(input.t)) };
     switch (kind) {
-      case 'cross-dissolve': outBuf = crossDissolve(a, b, w, h, e, outBuf); break;
-      case 'dip-to-black':   outBuf = dipToColor(a, b, w, h, e, _BLACK, outBuf); break;
-      case 'dip-to-white':   outBuf = dipToColor(a, b, w, h, e, _WHITE, outBuf); break;
-      case 'wipe-left':      outBuf = wipe(a, b, w, h, e, 'left',  0, outBuf); break;
-      case 'wipe-right':     outBuf = wipe(a, b, w, h, e, 'right', 0, outBuf); break;
-      case 'wipe-up':        outBuf = wipe(a, b, w, h, e, 'up',    0, outBuf); break;
-      case 'wipe-down':      outBuf = wipe(a, b, w, h, e, 'down',  0, outBuf); break;
-      case 'slide-left':     outBuf = slide(a, b, w, h, e, 'left',  outBuf); break;
-      case 'slide-right':    outBuf = slide(a, b, w, h, e, 'right', outBuf); break;
-      case 'push-left':      outBuf = push(a, b, w, h, e, 'left',  outBuf); break;
-      case 'push-right':     outBuf = push(a, b, w, h, e, 'right', outBuf); break;
-      case 'radial':         outBuf = radialWipe(a, b, w, h, e, outBuf); break;
-      case 'iris':           outBuf = irisWipe(a, b, w, h, e, 0, outBuf); break;
+      case 'cross-dissolve': outBuf = crossDissolve(eased, { outBuf }); break;
+      case 'dip-to-black':   outBuf = dipToColor(eased, { color: _BLACK, outBuf }); break;
+      case 'dip-to-white':   outBuf = dipToColor(eased, { color: _WHITE, outBuf }); break;
+      case 'wipe-left':      outBuf = wipe(eased, { direction: 'left',  outBuf }); break;
+      case 'wipe-right':     outBuf = wipe(eased, { direction: 'right', outBuf }); break;
+      case 'wipe-up':        outBuf = wipe(eased, { direction: 'up',    outBuf }); break;
+      case 'wipe-down':      outBuf = wipe(eased, { direction: 'down',  outBuf }); break;
+      case 'slide-left':     outBuf = slide(eased, { direction: 'left',  outBuf }); break;
+      case 'slide-right':    outBuf = slide(eased, { direction: 'right', outBuf }); break;
+      case 'push-left':      outBuf = push(eased, { direction: 'left',  outBuf }); break;
+      case 'push-right':     outBuf = push(eased, { direction: 'right', outBuf }); break;
+      case 'radial':         outBuf = radialWipe(eased, { outBuf }); break;
+      case 'iris':           outBuf = irisWipe(eased, { outBuf }); break;
     }
-    return outBuf!;
+    // switch は TransitionKind を網羅しており、どの分岐も outBuf を代入する。
+    return outBuf;
   };
 }

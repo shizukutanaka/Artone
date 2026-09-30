@@ -13,6 +13,7 @@
  */
 import { color } from '../app/design-system';
 import { createLogger } from '../app/logger';
+import { escapeHtml } from '../core/html-escape';
 
 const log = createLogger('HistoryManager');
 
@@ -22,7 +23,12 @@ const log = createLogger('HistoryManager');
 
 /** CommandFactory が扱うクリップの最小型 (循環依存回避) */
 export interface ClipLike {
-  id?: string;
+  /**
+   * 必須。id の無いクリップは削除も参照も復元もできず、
+   * `removeClip(id)` や `path: ['clips', id]` の実引数として成立しない
+   * (以前は `id?` だったため、その全使用箇所が `!` で潰されていた)。
+   */
+  id: string;
   trackId?: string;
   startFrame?: number;
   duration?: number;
@@ -107,16 +113,55 @@ export interface HistoryConfig {
 // Command Factory
 // ============================================================
 
+/**
+ * クリップの読み書き口。全 CommandFactory が同じ組で受け取るため1つにまとめる。
+ *
+ * 分けて渡すと引数が2つ増えるうえ、`get`/`set` の取り違えが型で防げない。
+ */
+export interface ClipAccess {
+  get: () => ClipLike;
+  set: (clip: ClipLike) => void;
+}
+
+/** クリップ移動の記述。 */
+export interface ClipMoveEdit {
+  clipId: string;
+  fromTrack: string;
+  toTrack: string;
+  fromFrame: number;
+  toFrame: number;
+}
+
+/** クリップトリムの記述。 */
+export interface ClipTrimEdit {
+  clipId: string;
+  edge: 'start' | 'end';
+  fromFrame: number;
+  toFrame: number;
+}
+
+/** エフェクトのパラメータ変更の記述。 */
+export interface EffectUpdateEdit {
+  clipId: string;
+  effectId: string;
+  paramName: string;
+  fromValue: unknown;
+  toValue: unknown;
+}
+
+/** カラーグレード変更の記述。 */
+export interface ColorGradeEdit {
+  clipId: string;
+  gradeType: string;
+  fromGrade: GradeLike;
+  toGrade: GradeLike;
+}
+
 export class CommandFactory {
-  static clipMove(
-    clipId: string,
-    fromTrack: string,
-    toTrack: string,
-    fromFrame: number,
-    toFrame: number,
-    getClip: () => ClipLike,
-    setClip: (clip: ClipLike) => void
-  ): Command {
+  static clipMove(edit: ClipMoveEdit, access: ClipAccess): Command {
+    const { clipId, fromTrack, toTrack, fromFrame, toFrame } = edit;
+    const getClip = access.get;
+    const setClip = access.set;
     let savedClip: ClipLike;
     
     return {
@@ -160,26 +205,17 @@ export class CommandFactory {
         const otherDelta = other.getDelta();
         const after = otherDelta.after as { trackId: string; startFrame: number };
         return CommandFactory.clipMove(
-          clipId,
-          fromTrack,
-          after.trackId,
-          fromFrame,
-          after.startFrame,
-          getClip,
-          setClip
+          { clipId, fromTrack, toTrack: after.trackId, fromFrame, toFrame: after.startFrame },
+          access,
         );
       }
     };
   }
 
-  static clipTrim(
-    clipId: string,
-    edge: 'start' | 'end',
-    fromFrame: number,
-    toFrame: number,
-    getClip: () => ClipLike,
-    setClip: (clip: ClipLike) => void
-  ): Command {
+  static clipTrim(edit: ClipTrimEdit, access: ClipAccess): Command {
+    const { clipId, edge, fromFrame, toFrame } = edit;
+    const getClip = access.get;
+    const setClip = access.set;
     // Snapshot captured in execute() and used for undo — same pattern as
     // clipMove. Delta-based undo on live state was wrong when another command
     // modified the same clip between execute and undo.
@@ -236,7 +272,7 @@ export class CommandFactory {
       description: `Delete clip ${clip.id}`,
       
       execute() {
-        removeClip(savedClip.id!);
+        removeClip(savedClip.id);
       },
 
       undo() {
@@ -244,14 +280,14 @@ export class CommandFactory {
       },
 
       redo() {
-        removeClip(savedClip.id!);
+        removeClip(savedClip.id);
       },
 
       getDelta(): CommandDelta {
         return {
           before: savedClip,
           after: null,
-          path: ['clips', savedClip.id!]
+          path: ['clips', savedClip.id]
         };
       }
     };
@@ -275,7 +311,7 @@ export class CommandFactory {
       },
       
       undo() {
-        removeClip(savedClip.id!);
+        removeClip(savedClip.id);
       },
 
       redo() {
@@ -286,7 +322,7 @@ export class CommandFactory {
         return {
           before: null,
           after: savedClip,
-          path: ['clips', savedClip.id!]
+          path: ['clips', savedClip.id]
         };
       }
     };
@@ -327,21 +363,16 @@ export class CommandFactory {
         return {
           before: null,
           after: savedEffect,
-          path: ['clips', clipId, 'effects', savedEffect.id!]
+          path: ['clips', clipId, 'effects', savedEffect.id]
         };
       }
     };
   }
 
-  static effectUpdate(
-    clipId: string,
-    effectId: string,
-    paramName: string,
-    fromValue: unknown,
-    toValue: unknown,
-    getClip: () => ClipLike,
-    setClip: (clip: ClipLike) => void
-  ): Command {
+  static effectUpdate(edit: EffectUpdateEdit, access: ClipAccess): Command {
+    const { clipId, effectId, paramName, fromValue, toValue } = edit;
+    const getClip = access.get;
+    const setClip = access.set;
     return {
       id: `effect_update_${Date.now()}`,
       type: 'effect.update',
@@ -384,22 +415,17 @@ export class CommandFactory {
       
       merge(other: Command) {
         return CommandFactory.effectUpdate(
-          clipId, effectId, paramName,
-          fromValue, other.getDelta().after,
-          getClip, setClip
+          { clipId, effectId, paramName, fromValue, toValue: other.getDelta().after },
+          access,
         );
       }
     };
   }
 
-  static colorGrade(
-    clipId: string,
-    gradeType: string,
-    fromGrade: GradeLike,
-    toGrade: GradeLike,
-    getClip: () => ClipLike,
-    setClip: (clip: ClipLike) => void
-  ): Command {
+  static colorGrade(edit: ColorGradeEdit, access: ClipAccess): Command {
+    const { clipId, gradeType, fromGrade, toGrade } = edit;
+    const getClip = access.get;
+    const setClip = access.set;
     return {
       id: `color_grade_${Date.now()}`,
       type: 'color.grade',
@@ -438,9 +464,8 @@ export class CommandFactory {
 
       merge(other: Command): Command {
         return CommandFactory.colorGrade(
-          clipId, gradeType,
-          fromGrade, other.getDelta().after as GradeLike,
-          getClip, setClip,
+          { clipId, gradeType, fromGrade, toGrade: other.getDelta().after as GradeLike },
+          access,
         );
       }
     };
@@ -450,9 +475,10 @@ export class CommandFactory {
     clipId: string,
     property: string,
     keyframe: Record<string, unknown>,
-    getClip: () => ClipLike,
-    setClip: (clip: ClipLike) => void
+    access: ClipAccess,
   ): Command {
+    const getClip = access.get;
+    const setClip = access.set;
     // Guarantee an id: undo below identifies this exact keyframe by id, and
     // an id-less keyframe would make undo strip every OTHER id-less keyframe
     // on this property too (all of them match `id !== undefined`).
@@ -498,9 +524,10 @@ export class CommandFactory {
     clipId: string,
     fromVolume: number,
     toVolume: number,
-    getClip: () => ClipLike,
-    setClip: (clip: ClipLike) => void
+    access: ClipAccess,
   ): Command {
+    const getClip = access.get;
+    const setClip = access.set;
     return {
       id: `audio_volume_${Date.now()}`,
       type: 'audio.volume',
@@ -539,7 +566,7 @@ export class CommandFactory {
         return CommandFactory.audioVolume(
           clipId,
           fromVolume, other.getDelta().after as number,
-          getClip, setClip,
+          access,
         );
       }
     };
@@ -662,7 +689,10 @@ export class HistoryManager {
 
   // ----- 永続化 -----
   private async saveToDB(): Promise<void> {
-    if (!this.db) return;
+    // ローカルに束ねる: await を挟む間に close() が this.db を null にしても、
+    // この保存は開いていた接続に対して完結する (null への `!` を踏まない)。
+    const db = this.db;
+    if (!db) return;
 
     const state: HistoryState = {
       position: this.position,
@@ -678,7 +708,7 @@ export class HistoryManager {
     };
 
     return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction('history', 'readwrite');
+      const tx = db.transaction('history', 'readwrite');
       const store = tx.objectStore('history');
       store.put({ id: this.config.persistKey, state });
       // Resolve/reject when the transaction settles — not when the request settles —
@@ -723,8 +753,10 @@ export class HistoryManager {
     // マージ可能チェック
     if (this.position >= 0) {
       const lastCmd = this.commands[this.position];
-      if (lastCmd.canMergeWith?.(command)) {
-        const merged = lastCmd.merge!(command);
+      // merge の有無も条件に含める: canMergeWith だけ実装して merge を欠く
+      // コマンドで `merge!` が TypeError になるのを型で防ぐ。
+      if (lastCmd.merge && lastCmd.canMergeWith?.(command)) {
+        const merged = lastCmd.merge(command);
         // REGRESSION fix: the normal (non-merge) path below clears any
         // stale redo-tail commands (left over from a prior undo()) before
         // recording the new command. This merge path replaced
@@ -1130,11 +1162,6 @@ export function mountHistoryPanel(
   return () => container.removeEventListener('click', onClick);
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!
-  ));
-}
 
 function getTypeColor(type: string): string {
   const colors: Record<string, string> = {

@@ -364,7 +364,9 @@ export class LUTManager {
     canvas.width = 128;
     canvas.height = 128;
     // willReadFrequently: the rendered image is read back via getImageData.
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    // getContext は本当に null を返しうる (コンテキスト数上限・メモリ逼迫)。
+    if (!ctx) throw new Error('2D canvas context is unavailable for LUT thumbnail');
 
     // Create gradient test image directly via ImageData — avoids 16 384 template-string
     // allocations + fillRect calls followed by getImageData (which was a round-trip

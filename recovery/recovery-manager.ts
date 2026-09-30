@@ -13,6 +13,7 @@
  */
 import { safeStorageGet, safeStorageSet, safeStorageRemove } from '../app/utils';
 import { createLogger } from '../app/logger';
+import { escapeHtml } from '../core/html-escape';
 
 // ============================================================
 // Types
@@ -524,12 +525,7 @@ export class RecoveryManager {
 // Recovery Dialog UI
 // ============================================================
 
-/** Escape HTML special characters to prevent XSS when injecting into innerHTML. */
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!
-  ));
-}
+
 
 export function RecoveryDialogUI(props: {
   snapshots: RecoverySnapshot[];

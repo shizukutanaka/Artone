@@ -152,9 +152,9 @@ describe('HistoryManager — command merging', () => {
     const hm = makeManager();
     const cell = clipCell({ id: 'c1', trackId: 'track-A', startFrame: 0 });
 
-    const cmd1 = CommandFactory.clipMove('c1', 'track-A', 'track-A', 0, 10, cell.get, cell.set);
+    const cmd1 = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'track-A', toTrack: 'track-A', fromFrame: 0, toFrame: 10 }, { get: cell.get, set: cell.set });
     cmd1.timestamp = 1000;
-    const cmd2 = CommandFactory.clipMove('c1', 'track-A', 'track-A', 10, 20, cell.get, cell.set);
+    const cmd2 = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'track-A', toTrack: 'track-A', fromFrame: 10, toFrame: 20 }, { get: cell.get, set: cell.set });
     cmd2.timestamp = 1100; // within 500 ms window
 
     hm.execute(cmd1); // A→10
@@ -172,9 +172,9 @@ describe('HistoryManager — command merging', () => {
     const hm = makeManager();
     const cell = clipCell({ id: 'c1', trackId: 'track-A', startFrame: 0 });
 
-    const cmd1 = CommandFactory.clipMove('c1', 'track-A', 'track-A', 0, 10, cell.get, cell.set);
+    const cmd1 = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'track-A', toTrack: 'track-A', fromFrame: 0, toFrame: 10 }, { get: cell.get, set: cell.set });
     cmd1.timestamp = 1000;
-    const cmd2 = CommandFactory.clipMove('c1', 'track-A', 'track-A', 10, 20, cell.get, cell.set);
+    const cmd2 = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'track-A', toTrack: 'track-A', fromFrame: 10, toFrame: 20 }, { get: cell.get, set: cell.set });
     cmd2.timestamp = 2000; // > 500 ms window
 
     hm.execute(cmd1);
@@ -194,7 +194,7 @@ describe('HistoryManager — command merging', () => {
     const cell = clipCell({ id: 'c1', trackId: 'track-A', startFrame: 0 });
     const other = { value: 0 };
 
-    const cmd1 = CommandFactory.clipMove('c1', 'track-A', 'track-A', 0, 10, cell.get, cell.set);
+    const cmd1 = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'track-A', toTrack: 'track-A', fromFrame: 0, toFrame: 10 }, { get: cell.get, set: cell.set });
     cmd1.timestamp = 1000;
     hm.execute(cmd1); // A: 0 -> 10
 
@@ -203,7 +203,7 @@ describe('HistoryManager — command merging', () => {
 
     hm.undo(); // back to position 0 (cmd2 now sits as a stale "future" entry)
 
-    const cmd3 = CommandFactory.clipMove('c1', 'track-A', 'track-A', 10, 30, cell.get, cell.set);
+    const cmd3 = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'track-A', toTrack: 'track-A', fromFrame: 10, toFrame: 30 }, { get: cell.get, set: cell.set });
     cmd3.timestamp = 1100; // within cmd1's 500ms merge window -> merges with cmd1
     hm.execute(cmd3);
 
@@ -474,7 +474,7 @@ describe('HistoryManager — clear', () => {
 describe('CommandFactory.clipMove', () => {
   it('execute moves the clip', () => {
     const cell = clipCell({ id: 'c1', trackId: 'A', startFrame: 0 });
-    const cmd = CommandFactory.clipMove('c1', 'A', 'B', 0, 10, cell.get, cell.set);
+    const cmd = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'A', toTrack: 'B', fromFrame: 0, toFrame: 10 }, { get: cell.get, set: cell.set });
     cmd.execute();
     expect(cell.clip.trackId).toBe('B');
     expect(cell.clip.startFrame).toBe(10);
@@ -482,7 +482,7 @@ describe('CommandFactory.clipMove', () => {
 
   it('undo restores original position', () => {
     const cell = clipCell({ id: 'c1', trackId: 'A', startFrame: 0 });
-    const cmd = CommandFactory.clipMove('c1', 'A', 'B', 0, 10, cell.get, cell.set);
+    const cmd = CommandFactory.clipMove({ clipId: 'c1', fromTrack: 'A', toTrack: 'B', fromFrame: 0, toFrame: 10 }, { get: cell.get, set: cell.set });
     cmd.execute();
     cmd.undo();
     expect(cell.clip.trackId).toBe('A');
@@ -549,7 +549,7 @@ describe('CommandFactory.keyframeAdd', () => {
       id: 'c1',
       keyframes: { opacity: [{ frame: 0, value: 1 }] }, // pre-existing id-less keyframe
     });
-    const cmd = CommandFactory.keyframeAdd('c1', 'opacity', { frame: 10, value: 0.5 }, get, set);
+    const cmd = CommandFactory.keyframeAdd('c1', 'opacity', { frame: 10, value: 0.5 }, { get: get, set: set });
 
     cmd.execute();
     expect((get().keyframes as Record<string, unknown[]>).opacity).toHaveLength(2);

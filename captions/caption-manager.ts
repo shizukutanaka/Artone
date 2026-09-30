@@ -12,6 +12,7 @@
  */
 
 import { normalizeCues, type ReadabilityOptions } from './readability';
+import { ensureSurface, type DrawSurface } from '../core/canvas-context';
 
 // ============================================================
 // Line-break segmentation (CJK-aware)
@@ -245,13 +246,29 @@ export const CAPTION_PRESETS: CaptionPreset[] = [
 // Caption Manager
 // ============================================================
 
+/**
+ * 追加する字幕の中身。`startTime` と `endTime` はどちらも `number` で、
+ * 位置引数だと**入れ替えても落ちず**、負の長さの字幕が静かに生まれる。
+ */
+export interface CaptionSpec {
+  startTime: number;
+  endTime: number;
+  text: string;
+}
+
+/** 字幕の見た目 (省略時は既定)。 */
+export interface CaptionLook {
+  style?: Partial<CaptionStyle>;
+  position?: Partial<CaptionPosition>;
+}
+
 export class CaptionManager {
   private tracks: Map<string, CaptionTrack> = new Map();
   private activeTrackId: string | null = null;
   private listeners: Set<() => void> = new Set();
   // Cached canvas for burnInCaptions() — recreated only when frame dimensions change.
-  private _burnCanvas: OffscreenCanvas | null = null;
-  private _burnCtx: OffscreenCanvasRenderingContext2D | null = null;
+  // キャンバスとコンテキストは対で扱う (core/canvas-context.ts に集約)。
+  private _burnSurface: DrawSurface | null = null;
   // Per-track maximum observed caption duration (seconds). Only grows — a conservative
   // upper bound used as the getCaptionsAtTime lookback window.
   private _trackMaxDuration: Map<string, number> = new Map();
@@ -311,14 +328,9 @@ export class CaptionManager {
   // Caption Operations
   // ============================================================
 
-  addCaption(
-    trackId: string,
-    startTime: number,
-    endTime: number,
-    text: string,
-    style?: Partial<CaptionStyle>,
-    position?: Partial<CaptionPosition>
-  ): Caption | null {
+  addCaption(trackId: string, cue: CaptionSpec, look: CaptionLook = {}): Caption | null {
+    const { startTime, endTime, text } = cue;
+    const { style, position } = look;
     const track = this.tracks.get(trackId);
     if (!track) return null;
 
@@ -445,7 +457,7 @@ export class CaptionManager {
 
     const normalized = normalizeCues(cues, readability ?? { profile: 'netflix' });
     for (const cue of normalized) {
-      this.addCaption(track.id, cue.start, cue.end, cue.text);
+      this.addCaption(track.id, { startTime: cue.start, endTime: cue.end, text: cue.text });
     }
 
     track.captions.sort((a, b) => a.startTime - b.startTime);
@@ -485,7 +497,7 @@ export class CaptionManager {
       const endTime = this.timeToSeconds(match[5], match[6], match[7], match[8]);
       const text = lines.slice(2).join('\n');
 
-      this.addCaption(track.id, startTime, endTime, text);
+      this.addCaption(track.id, { startTime: startTime, endTime: endTime, text: text });
     }
 
     return track;
@@ -526,7 +538,7 @@ export class CaptionManager {
       if (startTime === null || endTime === null) continue;
       const text = blockLines.slice(timeLineIndex + 1).join('\n').replace(/<[^>]+>/g, '');
 
-      this.addCaption(track.id, startTime, endTime, text);
+      this.addCaption(track.id, { startTime: startTime, endTime: endTime, text: text });
     }
 
     return track;
@@ -555,7 +567,7 @@ export class CaptionManager {
         const endTime = this.assTimeToSeconds(parts[2].trim());
         const text = parts.slice(9).join(',').replace(/\\N/g, '\n').replace(/\{[^}]+\}/g, '');
 
-        this.addCaption(track.id, startTime, endTime, text);
+        this.addCaption(track.id, { startTime: startTime, endTime: endTime, text: text });
       }
     }
 
@@ -795,12 +807,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const width = videoFrame.displayWidth;
     const height = videoFrame.displayHeight;
 
-    if (!this._burnCanvas || this._burnCanvas.width !== width || this._burnCanvas.height !== height) {
-      this._burnCanvas = new OffscreenCanvas(width, height);
-      this._burnCtx = this._burnCanvas.getContext('2d')!;
-    }
-    const canvas = this._burnCanvas;
-    const ctx = this._burnCtx!;
+    this._burnSurface = ensureSurface(this._burnSurface, width, height);
+    const { canvas, ctx } = this._burnSurface;
 
     // Draw video frame (overwrites canvas from previous call)
     ctx.drawImage(videoFrame, 0, 0);

@@ -275,6 +275,36 @@ function boxBlurV(src: Float32Array, width: number, height: number, r: number): 
 // ─── Non-Local Means ──────────────────────────────────────────────────────────
 
 /**
+ * 2つの中心画素まわりの**パッチ二乗距離**を返す (RGB 3チャンネルの総和)。
+ *
+ * Non-Local Means の最内ループそのもの。`nonLocalMeans()` の中に置くと
+ * ループが6重になり、何を計算しているのかが読み取れなくなる
+ * (`CLAUDE.md`「ネストはガード節で回避」/ 単一責任)。切り出しても呼び出し回数は
+ * 変わらず、渡すのは数値だけなので割り当ても増えない。
+ */
+function patchDistance2(
+  src: Uint8ClampedArray | Uint8Array,
+  size: { width: number; height: number },
+  centers: { ax: number; ay: number; bx: number; by: number },
+  patchRadius: number,
+): number {
+  const { width, height } = size;
+  const { ax, ay, bx, by } = centers;
+  let dist2 = 0;
+  for (let py = -patchRadius; py <= patchRadius; py++) {
+    for (let px = -patchRadius; px <= patchRadius; px++) {
+      const aOff = (mirrorIdx(ay + py, height) * width + mirrorIdx(ax + px, width)) * 4;
+      const bOff = (mirrorIdx(by + py, height) * width + mirrorIdx(bx + px, width)) * 4;
+      for (let ch = 0; ch < 3; ch++) {
+        const diff = src[aOff + ch] - src[bOff + ch];
+        dist2 += diff * diff;
+      }
+    }
+  }
+  return dist2;
+}
+
+/**
  * Apply Non-Local Means denoising to an RGBA image.
  *
  * For each pixel, a weighted average is computed over all pixels in the search
@@ -304,6 +334,8 @@ export function nonLocalMeans(
   const patchSize = 2 * patchRadius + 1;
   const patchArea = patchSize * patchSize * 3; // 3 channels (R,G,B)
   const dst = new Uint8ClampedArray(src.length);
+  // 走査中は不変。パッチ距離へ毎回渡すのでループの外で1回だけ作る。
+  const size = { width, height };
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -311,23 +343,9 @@ export function nonLocalMeans(
 
       for (let sy = y - searchRadius; sy <= y + searchRadius; sy++) {
         for (let sx = x - searchRadius; sx <= x + searchRadius; sx++) {
-          // Compute squared patch distance between (x,y) and (sx,sy)
-          let patchDist2 = 0;
-          for (let py = -patchRadius; py <= patchRadius; py++) {
-            for (let px = -patchRadius; px <= patchRadius; px++) {
-              const ayIdx = mirrorIdx(y  + py, height);
-              const axIdx = mirrorIdx(x  + px, width);
-              const byIdx = mirrorIdx(sy + py, height);
-              const bxIdx = mirrorIdx(sx + px, width);
-              const aOff = (ayIdx * width + axIdx) * 4;
-              const bOff = (byIdx * width + bxIdx) * 4;
-              for (let ch = 0; ch < 3; ch++) {
-                const diff = src[aOff + ch] - src[bOff + ch];
-                patchDist2 += diff * diff;
-              }
-            }
-          }
-
+          const patchDist2 = patchDistance2(
+            src, size, { ax: x, ay: y, bx: sx, by: sy }, patchRadius,
+          );
           const w = Math.exp(-patchDist2 / (patchArea * h2));
           const neighOff = pixelOffset(
             mirrorIdx(sx, width),

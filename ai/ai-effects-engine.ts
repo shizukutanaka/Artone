@@ -12,6 +12,9 @@
  * @version 1.0.0
  */
 
+import { require2dContext, ensureSurface, type DrawSurface } from '../core/canvas-context';
+import type { PixelBuffer, PixelSize, PlaneBuffer } from '../core/pixel-geometry';
+
 // ============================================================
 // Types
 // ============================================================
@@ -142,6 +145,34 @@ export interface AIEffectParams {
 // AI Effects Engine
 // ============================================================
 
+/**
+ * `(x, y)` を中心とする半径 `r` の箱の平均を取る (境界外は無視)。
+ *
+ * `applyAlphaFeather` のループから抜き出した — 4重ループの中に `if` を
+ * 直接書くとネストが深くなりすぎる (`CLAUDE.md`「ネストはガード節で回避」)。
+ */
+function boxBlurAverage(
+  channel: { data: Float32Array; width: number; height: number },
+  at: { x: number; y: number },
+  r: number,
+): number {
+  const { data, width, height } = channel;
+  const { x, y } = at;
+  let sum = 0;
+  let count = 0;
+  for (let dy = -r; dy <= r; dy++) {
+    const ny = y + dy;
+    if (ny < 0 || ny >= height) continue;
+    for (let dx = -r; dx <= r; dx++) {
+      const nx = x + dx;
+      if (nx < 0 || nx >= width) continue;
+      sum += data[ny * width + nx];
+      count++;
+    }
+  }
+  return count > 0 ? sum / count : 0;
+}
+
 export class AIEffectsEngine {
   private models: Map<string, AIModel> = new Map();
   private workers: Map<string, Worker> = new Map();
@@ -159,23 +190,21 @@ export class AIEffectsEngine {
   // Reusable scratch buffer for boxBlur — resized only when face bounding box grows
   private _blurTempBuf: Uint8ClampedArray = new Uint8ClampedArray(0);
   // Cached foreground compositing canvas for removeBackground() — avoids per-frame alloc
-  private _fgCanvas: OffscreenCanvas | null = null;
-  private _fgCtx: OffscreenCanvasRenderingContext2D | null = null;
+  /** 前景合成用の描画面。canvas/ctx を組で持つ (#67 の DrawSurface パターン)。 */
+  private _fgSurface: DrawSurface | null = null;
   // Cached 64×64 canvas for computeHistogram() — reused across detectScenes() frames
-  private _histCanvas: OffscreenCanvas | null = null;
-  private _histCtx: OffscreenCanvasRenderingContext2D | null = null;
+  /** ヒストグラム用の描画面 (canvas/ctx を組で持つ)。 */
+  private _histSurface: DrawSurface | null = null;
   // Cached src/dst canvases for upscale() — recreated only on dimension change
-  private _upscaleSrcCanvas: OffscreenCanvas | null = null;
-  private _upscaleSrcCtx: OffscreenCanvasRenderingContext2D | null = null;
-  private _upscaleDstCanvas: OffscreenCanvas | null = null;
-  private _upscaleDstCtx: OffscreenCanvasRenderingContext2D | null = null;
+  private _upscaleSrc: DrawSurface | null = null;
+  private _upscaleDst: DrawSurface | null = null;
 
   constructor() {
     this.canvas = new OffscreenCanvas(1920, 1080);
     // willReadFrequently: this.ctx is read back via getImageData in every
     // segmentation / style-transfer / face-detection pass (per-frame). Set on
     // the first getContext call, which fixes the backing for all later reads.
-    this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+    this.ctx = require2dContext(this.canvas, { willReadFrequently: true });
     this.initModels();
   }
 
@@ -303,7 +332,7 @@ export class AIEffectsEngine {
     // Ensure canvas size
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas = new OffscreenCanvas(width, height);
-      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+      this.ctx = require2dContext(this.canvas, { willReadFrequently: true });
     }
 
     // Draw original
@@ -317,7 +346,7 @@ export class AIEffectsEngine {
     const threshold = options.threshold ?? 0.35;
 
     const bg = this.estimateBgColor(data, width, height);
-    const mask = this.buildBgMask(data, width, height, bg, threshold);
+    const mask = this.buildBgMask({ data, width, height }, bg, threshold);
     const cleaned = this.morphClose1D(mask, width, height, 3);
 
     for (let i = 0; i < width * height; i++) {
@@ -340,12 +369,9 @@ export class AIEffectsEngine {
     }
 
     // Draw foreground with alpha — lazy-grow cached canvas avoids per-frame alloc
-    if (!this._fgCanvas || this._fgCanvas.width !== width || this._fgCanvas.height !== height) {
-      this._fgCanvas = new OffscreenCanvas(width, height);
-      this._fgCtx = this._fgCanvas.getContext('2d')!;
-    }
-    this._fgCtx!.putImageData(imageData, 0, 0);
-    this.ctx.drawImage(this._fgCanvas, 0, 0);
+    this._fgSurface = ensureSurface(this._fgSurface, width, height);
+    this._fgSurface.ctx.putImageData(imageData, 0, 0);
+    this.ctx.drawImage(this._fgSurface.canvas, 0, 0);
 
     return createImageBitmap(this.canvas);
   }
@@ -366,25 +392,12 @@ export class AIEffectsEngine {
       alphaChannel[i] = data[i * 4 + 3] / 255;
     }
 
-    // Simple box blur
-    
+    // Simple box blur (深さをガード節で抑えるため画素あたりの平均を別関数へ)
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        let sum = 0;
-        let count = 0;
-        
-        for (let dy = -r; dy <= r; dy++) {
-          for (let dx = -r; dx <= r; dx++) {
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-              sum += alphaChannel[ny * width + nx];
-              count++;
-            }
-          }
-        }
-        
-        blurred[y * width + x] = count > 0 ? sum / count : 0;
+        blurred[y * width + x] = boxBlurAverage(
+          { data: alphaChannel, width, height }, { x, y }, r,
+        );
       }
     }
 
@@ -406,7 +419,7 @@ export class AIEffectsEngine {
 
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas = new OffscreenCanvas(width, height);
-      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+      this.ctx = require2dContext(this.canvas, { willReadFrequently: true });
     }
     this.ctx.drawImage(frame, 0, 0);
 
@@ -441,7 +454,7 @@ export class AIEffectsEngine {
     // The constructor initialises it at 1920×1080 with willReadFrequently.
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas = new OffscreenCanvas(width, height);
-      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+      this.ctx = require2dContext(this.canvas, { willReadFrequently: true });
     }
     this.ctx.drawImage(frame, 0, 0);
 
@@ -548,11 +561,8 @@ export class AIEffectsEngine {
     const size = 64;
     // Reuse a single 64×64 canvas across the entire detectScenes() frame loop to
     // avoid allocating + discarding one OffscreenCanvas per frame.
-    if (!this._histCanvas) {
-      this._histCanvas = new OffscreenCanvas(size, size);
-      this._histCtx = this._histCanvas.getContext('2d', { willReadFrequently: true })!;
-    }
-    const ctx = this._histCtx!;
+    this._histSurface = ensureSurface(this._histSurface, size, size, { willReadFrequently: true });
+    const { ctx } = this._histSurface;
     ctx.drawImage(frame, 0, 0, size, size);
 
     const imageData = ctx.getImageData(0, 0, size, size);
@@ -677,24 +687,21 @@ export class AIEffectsEngine {
     // Lanczos-2 separable resampling — significantly sharper than browser bilinear.
     // Separable horizontal then vertical pass: O(W×H×4) vs O(W×H×16) for 2D kernel.
     // Canvases are cached and recreated only when frame dimensions change.
-    if (!this._upscaleSrcCanvas || this._upscaleSrcCanvas.width !== width || this._upscaleSrcCanvas.height !== height) {
-      this._upscaleSrcCanvas = new OffscreenCanvas(width, height);
-      // willReadFrequently: source pixels are read back via getImageData.
-      this._upscaleSrcCtx = this._upscaleSrcCanvas.getContext('2d', { willReadFrequently: true })!;
-    }
-    this._upscaleSrcCtx!.drawImage(frame, 0, 0);
-    const srcData = this._upscaleSrcCtx!.getImageData(0, 0, width, height);
+    // willReadFrequently: source pixels are read back via getImageData.
+    this._upscaleSrc = ensureSurface(this._upscaleSrc, width, height, { willReadFrequently: true });
+    this._upscaleSrc.ctx.drawImage(frame, 0, 0);
+    const srcData = this._upscaleSrc.ctx.getImageData(0, 0, width, height);
 
-    const resized = this.resizeLanczos2(srcData.data, width, height, newWidth, newHeight);
+    const resized = this.resizeLanczos2(
+      { data: srcData.data, width, height },
+      { width: newWidth, height: newHeight },
+    );
 
-    if (!this._upscaleDstCanvas || this._upscaleDstCanvas.width !== newWidth || this._upscaleDstCanvas.height !== newHeight) {
-      this._upscaleDstCanvas = new OffscreenCanvas(newWidth, newHeight);
-      this._upscaleDstCtx = this._upscaleDstCanvas.getContext('2d')!;
-    }
-    const dstImageData = this._upscaleDstCtx!.createImageData(newWidth, newHeight);
+    this._upscaleDst = ensureSurface(this._upscaleDst, newWidth, newHeight);
+    const dstImageData = this._upscaleDst.ctx.createImageData(newWidth, newHeight);
     dstImageData.data.set(resized);
-    this._upscaleDstCtx!.putImageData(dstImageData, 0, 0);
-    return createImageBitmap(this._upscaleDstCanvas);
+    this._upscaleDst.ctx.putImageData(dstImageData, 0, 0);
+    return createImageBitmap(this._upscaleDst.canvas);
   }
 
   // ============================================================
@@ -710,7 +717,7 @@ export class AIEffectsEngine {
 
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas = new OffscreenCanvas(width, height);
-      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
+      this.ctx = require2dContext(this.canvas, { willReadFrequently: true });
     }
     this.ctx.drawImage(frame, 0, 0);
 
@@ -879,10 +886,11 @@ export class AIEffectsEngine {
 
   /** Per-pixel Mahalanobis distance → binary foreground (1) / background (0) mask. */
   private buildBgMask(
-    data: Uint8ClampedArray, width: number, height: number,
+    frame: PixelBuffer,
     bg: { r: number; g: number; b: number; vrR: number; vrG: number; vrB: number },
     threshold: number
   ): Uint8Array {
+    const { data, width, height } = frame;
     const n = width * height;
     if (this.bgMaskBuf.length < n) this.bgMaskBuf = new Uint8Array(n);
     const mask = this.bgMaskBuf;
@@ -902,24 +910,28 @@ export class AIEffectsEngine {
     if (this.morphBufA.length < n) this.morphBufA = new Uint8Array(n);
     if (this.morphBufB.length < n) this.morphBufB = new Uint8Array(n);
     // dilate: mask → (tmp=A, dst=B)
-    this.dilate1D(mask, width, height, r, this.morphBufA, this.morphBufB);
+    this.dilate1D({ data: mask, width, height }, r, { tmp: this.morphBufA, dst: this.morphBufB });
     // erode: B → (tmp=A, dst=B); H-pass reads B while V-pass writes B — safe because
     // H-pass fully consumes B into A before V-pass begins writing to B.
-    this.erode1D(this.morphBufB, width, height, r, this.morphBufA, this.morphBufB);
+    this.erode1D({ data: this.morphBufB, width, height }, r, { tmp: this.morphBufA, dst: this.morphBufB });
     return this.morphBufB;
   }
 
   private dilate1D(
-    src: Uint8Array, width: number, height: number, r: number,
-    tmp: Uint8Array, dst: Uint8Array,
+    src: PlaneBuffer,
+    radius: number,
+    scratch: { tmp: Uint8Array; dst: Uint8Array },
   ): void {
+    const { data: plane, width, height } = src;
+    const r = radius;
+    const { tmp, dst } = scratch;
     // Horizontal
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let v = 0;
         for (let dx = -r; dx <= r && !v; dx++) {
           const nx = Math.max(0, Math.min(width - 1, x + dx));
-          v |= src[y * width + nx];
+          v |= plane[y * width + nx];
         }
         tmp[y * width + x] = v;
       }
@@ -938,15 +950,19 @@ export class AIEffectsEngine {
   }
 
   private erode1D(
-    src: Uint8Array, width: number, height: number, r: number,
-    tmp: Uint8Array, dst: Uint8Array,
+    src: PlaneBuffer,
+    radius: number,
+    scratch: { tmp: Uint8Array; dst: Uint8Array },
   ): void {
+    const { data: plane, width, height } = src;
+    const r = radius;
+    const { tmp, dst } = scratch;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let v = 1;
         for (let dx = -r; dx <= r && v; dx++) {
           const nx = Math.max(0, Math.min(width - 1, x + dx));
-          v &= src[y * width + nx];
+          v &= plane[y * width + nx];
         }
         tmp[y * width + x] = v;
       }
@@ -1019,7 +1035,8 @@ export class AIEffectsEngine {
       const queue: number[] = [seed];
       labels[seed] = label;
       while (queue.length > 0) {
-        const curr = queue.shift()!;
+        const curr = queue.shift();
+        if (curr === undefined) break; // while の条件で到達しないが型を絞る
         const cx = curr % mapW, cy = Math.floor(curr / mapW);
         if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
         if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
@@ -1062,10 +1079,12 @@ export class AIEffectsEngine {
    * Separable Lanczos-2 resize: horizontal pass then vertical pass.
    * Produces crisper results than canvas bilinear for AI upscale operations.
    */
-  private resizeLanczos2(
-    src: Uint8ClampedArray, srcW: number, srcH: number,
-    dstW: number, dstH: number
-  ): Uint8ClampedArray {
+  private resizeLanczos2(source: PixelBuffer, target: PixelSize): Uint8ClampedArray {
+    const src = source.data;
+    const srcW = source.width;
+    const srcH = source.height;
+    const dstW = target.width;
+    const dstH = target.height;
     const xRatio = srcW / dstW;
     // Horizontal pass: srcW×srcH → dstW×srcH (float buffer)
     const hBuf = new Float32Array(dstW * srcH * 4);

@@ -193,8 +193,8 @@ export class AIEffectsEngine {
   /** 前景合成用の描画面。canvas/ctx を組で持つ (#67 の DrawSurface パターン)。 */
   private _fgSurface: DrawSurface | null = null;
   // Cached 64×64 canvas for computeHistogram() — reused across detectScenes() frames
-  private _histCanvas: OffscreenCanvas | null = null;
-  private _histCtx: OffscreenCanvasRenderingContext2D | null = null;
+  /** ヒストグラム用の描画面 (canvas/ctx を組で持つ)。 */
+  private _histSurface: DrawSurface | null = null;
   // Cached src/dst canvases for upscale() — recreated only on dimension change
   private _upscaleSrc: DrawSurface | null = null;
   private _upscaleDst: DrawSurface | null = null;
@@ -561,11 +561,8 @@ export class AIEffectsEngine {
     const size = 64;
     // Reuse a single 64×64 canvas across the entire detectScenes() frame loop to
     // avoid allocating + discarding one OffscreenCanvas per frame.
-    if (!this._histCanvas) {
-      this._histCanvas = new OffscreenCanvas(size, size);
-      this._histCtx = require2dContext(this._histCanvas, { willReadFrequently: true });
-    }
-    const ctx = this._histCtx!;
+    this._histSurface = ensureSurface(this._histSurface, size, size, { willReadFrequently: true });
+    const { ctx } = this._histSurface;
     ctx.drawImage(frame, 0, 0, size, size);
 
     const imageData = ctx.getImageData(0, 0, size, size);
@@ -1038,7 +1035,8 @@ export class AIEffectsEngine {
       const queue: number[] = [seed];
       labels[seed] = label;
       while (queue.length > 0) {
-        const curr = queue.shift()!;
+        const curr = queue.shift();
+        if (curr === undefined) break; // while の条件で到達しないが型を絞る
         const cx = curr % mapW, cy = Math.floor(curr / mapW);
         if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
         if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;

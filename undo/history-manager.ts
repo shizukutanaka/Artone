@@ -689,7 +689,10 @@ export class HistoryManager {
 
   // ----- 永続化 -----
   private async saveToDB(): Promise<void> {
-    if (!this.db) return;
+    // ローカルに束ねる: await を挟む間に close() が this.db を null にしても、
+    // この保存は開いていた接続に対して完結する (null への `!` を踏まない)。
+    const db = this.db;
+    if (!db) return;
 
     const state: HistoryState = {
       position: this.position,
@@ -705,7 +708,7 @@ export class HistoryManager {
     };
 
     return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction('history', 'readwrite');
+      const tx = db.transaction('history', 'readwrite');
       const store = tx.objectStore('history');
       store.put({ id: this.config.persistKey, state });
       // Resolve/reject when the transaction settles — not when the request settles —

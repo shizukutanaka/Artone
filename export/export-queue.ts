@@ -175,7 +175,8 @@ export function createExportQueue<T = void>(opts?: ExportQueueOptions): ExportQu
   function tick(): void {
     if (paused) return;
     while (active.size < concurrency && pending.length > 0) {
-      const job = pending.shift()!;
+      const job = pending.shift();
+      if (!job) break; // while の条件で到達しないが型を絞る
       runJob(job);
     }
   }

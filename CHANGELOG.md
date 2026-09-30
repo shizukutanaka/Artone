@@ -8,6 +8,8 @@ Artone v3 の全変更を記録。
 ## [Unreleased]
 
 ### Fixed
+- **`merge!` が TypeError になる経路を解消し、`!` 4 件を型で置き換えた** (undo/ai/export)。`HistoryManager.execute()` は `lastCmd.canMergeWith?.(command)` が真なら `lastCmd.merge!(command)` を呼んでいたが、`Command` では `merge` は任意であり、**`canMergeWith` だけ実装して `merge` を欠くコマンドがあると TypeError で落ちる**。`merge` の有無を条件に含めて型を絞った。他は `ai/ai-effects-engine.ts` のヒストグラム面を `DrawSurface` 化、`queue.shift()!` (ai) / `pending.shift()!` (export-queue) を undefined ガードへ。動作変更ゼロ (テスト 4,850 件不変・bench PASS)。lint 警告 70 → 66。
+
 - **外部知見の採否を記録し、Mediabunny 1.60 への更新を実測で見送った** (docs)。公式リリースノートは 1.56 以降でトリム/音声の改善を挙げるが、1.60.0 で `tests/export-trim.spec.ts` (実ブラウザ) が **29 フレーム (期待 30)** で落ちた — 1フレーム落ちはデータ損失のため差し戻し、**二分探索で境界は 1.56.0 (任意区間のコピー変換が入った版) と特定**し、`docs/external-research-2026-09.md` に次の一手を残した。Zenn は egress 遮断で本文を読めず、記事に基づく変更はしていない。`importExternalTexture` 化と `bitrateMode` 明示は検証手段/実測が無いため保留。
 
 - **`ai/` の前景合成面を `DrawSurface` 化し、箱ぼかしを抽出してネスト深度を解消** (ai)。`_fgCanvas`/`_fgCtx` を別々の `| null` で持ち `!` で潰していた箇所を、#67 の `DrawSurface` + `ensureSurface()` へ (寸法が同じなら再利用する挙動は不変)。`applyAlphaFeather` の4重ループは画素ごとの平均を `boxBlurAverage()` へ抽出し、ガード節でネストを抑えた。動作変更ゼロ (テスト 4,850 件不変・bench PASS)。lint 警告 73 → 70。

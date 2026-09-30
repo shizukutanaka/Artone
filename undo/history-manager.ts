@@ -750,8 +750,10 @@ export class HistoryManager {
     // マージ可能チェック
     if (this.position >= 0) {
       const lastCmd = this.commands[this.position];
-      if (lastCmd.canMergeWith?.(command)) {
-        const merged = lastCmd.merge!(command);
+      // merge の有無も条件に含める: canMergeWith だけ実装して merge を欠く
+      // コマンドで `merge!` が TypeError になるのを型で防ぐ。
+      if (lastCmd.merge && lastCmd.canMergeWith?.(command)) {
+        const merged = lastCmd.merge(command);
         // REGRESSION fix: the normal (non-merge) path below clears any
         // stale redo-tail commands (left over from a prior undo()) before
         // recording the new command. This merge path replaced

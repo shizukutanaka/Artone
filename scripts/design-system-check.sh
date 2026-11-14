@@ -133,10 +133,14 @@ else
   echo "  PASS: No raw localStorage access"
 fi
 
-# 9. console.* (production コード — logger.ts/tests/bench/install 除外)
+# 9. console.* (production コード — logger.ts/tests/bench/install/config 除外)
+# *.config.ts はビルド/テスト用ツール設定であり production コードではない。
+# 特に vite.config.ts は console 除去そのものを担う: esbuild の pure 指定
+# ('console.log' 等の文字列) とその説明コメントがヒットし、正しい設定を
+# 違反と誤判定していた (クリーンツリーで常時 FAIL になる偽陽性)。
 echo "[9/10] console.* in production..."
 LOGS=$(grep -rn "console\.\(log\|warn\|error\)" "$DIR" --include="*.ts" --include="*.tsx" 2>/dev/null | \
-  grep -v "future/\|node_modules/\|tests/\|bench/runner\|security/generate\|install\.ts\|logger\.ts\|//" || true)
+  grep -v "future/\|node_modules/\|tests/\|bench/runner\|security/generate\|install\.ts\|logger\.ts\|\.config\.ts\|//" || true)
 if [ -n "$LOGS" ]; then
   echo "  FAIL: Direct console.* usage (use logger.ts):"
   echo "$LOGS" | sed 's/^/    /'

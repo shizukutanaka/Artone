@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/badge/Version-3.1.0-00C4CC)](./CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6)](https://www.typescriptlang.org/)
-[![Tests](https://img.shields.io/badge/Tests-4670%20passing-5bb974)](./tests)
+[![Tests](https://img.shields.io/badge/Tests-4850%20passing-5bb974)](./tests)
 [![PWA](https://img.shields.io/badge/PWA-Ready-5bb974)](https://web.dev/progressive-web-apps/)
 
 DaVinci Resolve / Premiere Pro / Final Cut Pro 級の編集をブラウザだけで実現。インストール不要。データはすべてローカル。プライバシーは完全にあなたのもの。
@@ -37,7 +37,7 @@ http://localhost:5173 をブラウザで開く。
     npm run dev           # 開発サーバー (HMR)
     npm run build         # プロダクションビルド
     npm run typecheck     # TypeScript 型チェック
-    npm run lint:design   # デザインシステム整合性 (9項目)
+    npm run lint:design   # デザインシステム整合性 (10項目)
     npm test              # Vitest 単体・統合
     npm run bench         # パフォーマンス退行検出
     npm run sbom          # SBOM 生成
@@ -56,17 +56,18 @@ http://localhost:5173 をブラウザで開く。
 | animation/ | 1,312 | キーフレーム、モーショングラフィックス |
 | security/ | 1,181 | SBOM、サプライチェーン監査 |
 
-## CI 品質保証 (9項目 ALL PASS)
+## CI 品質保証 (10項目 ALL PASS)
 
-    [1/9] Hardcoded colors         PASS
-    [2/9] Duplicate theme constants PASS
-    [3/9] Design token compliance  PASS
-    [4/9] Orphan source files      PASS
-    [5/9] Test file placement      PASS
-    [6/9] Dead code detection      PASS
-    [7/9] CLAUDE.md coverage       PASS
-    [8/9] Raw localStorage         PASS
-    [9/9] console.log (production) PASS
+    [1/10] Hardcoded colors         PASS
+    [2/10] Duplicate theme constants PASS
+    [3/10] Design token compliance  PASS
+    [4/10] Orphan source files      PASS
+    [5/10] Test file placement      PASS
+    [6/10] Dead code detection      PASS
+    [7/10] CLAUDE.md coverage       PASS
+    [8/10] Raw localStorage         PASS
+    [9/10] console.log (production) PASS
+    [10/10] TypeScript syntax check PASS
 
 ## 動作要件
 

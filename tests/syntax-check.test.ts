@@ -15,6 +15,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const script = join(root, 'scripts', 'syntax-check.mjs');
 
+// Each test spawns a full-repo scan (288 files). The scan itself needs
+// ~3s of CPU but far more wall-clock on throttled/shared-CPU machines
+// (measured 21s wall vs 2.9s user on a 1.5-CPU VM), while vitest's global
+// testTimeout is 10s — so on slow machines every test here timed out
+// despite the checker working correctly. The assertions are unchanged;
+// only the time budget reflects what the spawned work inherently costs.
+const SCAN_TEST_TIMEOUT = 120_000;
+
 function runSyntaxCheck(): { code: number; output: string } {
   try {
     const output = execFileSync('node', [script], { cwd: root, encoding: 'utf8' });
@@ -30,7 +38,7 @@ describe('syntax-check.mjs', () => {
     const result = runSyntaxCheck();
     expect(result.code).toBe(0);
     expect(result.output).toContain('SYNTAX CHECK PASSED');
-  });
+  }, SCAN_TEST_TIMEOUT);
 
   it('detects a broken file with missing backtick', () => {
     // 前回のバグ (log.warn(text ${x}`) を再現
@@ -43,7 +51,7 @@ describe('syntax-check.mjs', () => {
     } finally {
       if (existsSync(brokenPath)) unlinkSync(brokenPath);
     }
-  });
+  }, SCAN_TEST_TIMEOUT);
 
   it('detects bracket imbalance', () => {
     const brokenPath = join(root, 'app', '_syntax_test_tmp2.ts');
@@ -54,11 +62,11 @@ describe('syntax-check.mjs', () => {
     } finally {
       if (existsSync(brokenPath)) unlinkSync(brokenPath);
     }
-  });
+  }, SCAN_TEST_TIMEOUT);
 
   it('returns to passing after broken file removed', () => {
     // 前のテストで一時ファイルが消えていることを前提に再確認
     const result = runSyntaxCheck();
     expect(result.code).toBe(0);
-  });
+  }, SCAN_TEST_TIMEOUT);
 });

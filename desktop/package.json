@@ -1,0 +1,55 @@
+{
+  "name": "artone-desktop",
+  "version": "3.1.0",
+  "private": true,
+  "description": "Artone desktop app: the unmodified web build wrapped in a minimal Electron shell.",
+  "license": "MIT",
+  "author": "Artone Contributors",
+  "homepage": "https://github.com/shizukutanaka/artone",
+  "main": "main.js",
+  "scripts": {
+    "build:web": "npm --prefix .. run build",
+    "start": "electron .",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
+  },
+  "build": {
+    "appId": "io.github.shizukutanaka.artone",
+    "productName": "Artone",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      {
+        "from": "../dist",
+        "to": "web",
+        "filter": ["**/*", "!**/*.map", "!stats.html"]
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "../LICENSE",
+        "to": "LICENSE.artone.txt"
+      }
+    ],
+    "artifactName": "Artone-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": "portable"
+    },
+    "mac": {
+      "target": "zip",
+      "category": "public.app-category.video",
+      "identity": null
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "AudioVideo"
+    }
+  },
+  "devDependencies": {
+    "electron": "45.3.4",
+    "electron-builder": "26.0.12"
+  }
+}

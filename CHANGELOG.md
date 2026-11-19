@@ -7,6 +7,9 @@ Artone v3 の全変更を記録。
 
 ## [Unreleased]
 
+### Added
+- **デスクトップ版 (Electron 殻) を正規の配布形態として追加** (desktop)。`desktop/main.js` は既存の `dist/` を無改変のまま `app://artone/` から配信し、Web 配信と同じ COOP/COEP ヘッダーを付ける (crossOriginIsolated / SharedArrayBuffer を維持)。contextIsolation 有効・nodeIntegration 無効・sandbox 有効・preload なし、新規ウィンドウ拒否 (http/https は `shell.openExternal`)、外部ナビゲーション遮断、single-instance lock。`electron` 45.3.4 / `electron-builder` 26.0.12 を版数固定し `desktop/package-lock.json` で固定。ビルドは Windows=portable / macOS=zip (未署名) / Linux=AppImage。アプリ本体 (HTML/ロジック) とルートの `package.json` は無変更。`.github/workflows/release.yml` は存在しないため CI ジョブは追加していない。
+
 ### Fixed
 - **`saveToDB` の `this.db!` と LUT サムネイルの `getContext('2d')!` を解消** (undo/color)。`HistoryManager.saveToDB()` は先頭で `this.db` を確認しつつ、Promise 内で `this.db!` を引き直していた。`await` を挟む間に `close()` が `this.db` を `null` にすると `!` が null を踏む → 接続をローカルに束ね、保存は開いていた接続で完結させた。`LUTManager.generateThumbnail()` の `getContext('2d')!` は、コンテキスト数上限・メモリ逼迫で**本当に null になりうる**ため、明示的な例外へ。動作変更ゼロ (テスト 4,850 件不変・bench PASS)。lint 警告 66 → 64。`nested-sequences.ts` の `clip.sequenceId!` は、欠落時に後続の分岐へ流れる挙動を変えうるため見送り。
 

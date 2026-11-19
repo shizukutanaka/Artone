@@ -36,6 +36,7 @@ DaVinci/Premiere/FCP級の編集をWeb標準（WebCodecs/WebGPU/WebAssembly）�
 ├── i18n/          国際化 (EN/JP + 1000言語目標)
 ├── install/       OS自動判定インストーラ
 ├── app/           統合UI (React) / デザインシステム / エントリポイント
+├── desktop/       Electron 殻 (正規の配布形態。dist/ をそのまま読み込む)
 ├── scripts/       CI チェックスクリプト
 ├── tests/         Vitest 単体 + Playwright E2E
 └── future/        未接続モジュール隔離 (現状: 空。詳細は future/CLAUDE.md)

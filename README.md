@@ -23,6 +23,30 @@ DaVinci Resolve / Premiere Pro / Final Cut Pro 級の編集をブラウザだけ
 | セキュリティ | SBOM (CycloneDX/SPDX)、CVE スキャン、OSV 連携 |
 | アクセシビリティ | WCAG 2.2 AAA、11 言語対応 (日本語/英語/中国語/韓国語他) |
 
+## デスクトップ版 (正規の配布形態)
+
+Artone の正規の配布形態はデスクトップアプリ (ソフトウェア) です。`desktop/` の最小の Electron 殻が、Web 版と同一のビルド (`dist/`) を無改変のまま読み込みます。ブラウザ版は開発・試用向けです。
+
+| OS | 形式 |
+|---|---|
+| Windows | portable `.exe` (インストール不要) |
+| macOS | `.zip` (展開して `Artone.app` を起動) |
+| Linux | `.AppImage` (`chmod +x` して起動) |
+
+**未署名のため、初回起動時に OS の警告が出ることがあります。**
+
+- Windows: SmartScreen の「Windows によって PC が保護されました」→「詳細情報」→「実行」
+- macOS: Gatekeeper の「開発元を確認できません」→ Finder で右クリック →「開く」(またはシステム設定 → プライバシーとセキュリティ →「このまま開く」)
+
+ソースからのビルド:
+
+    npm ci && npm run build      # dist/ を生成
+    cd desktop && npm ci
+    npm start                    # 起動確認
+    npm run dist:win             # または dist:mac / dist:linux → desktop/release/
+
+殻は contextIsolation 有効 / nodeIntegration 無効 / sandbox 有効 / preload なし。新規ウィンドウは拒否 (http/https は既定ブラウザで開く)、アプリ外へのナビゲーションは遮断、多重起動は既存ウィンドウを前面に出す。`app://artone/` から COOP/COEP 付きで配信するため SharedArrayBuffer が使えます (Service Worker はこのスキームでは登録されず、オフライン動作はローカルファイルで担保)。
+
 ## クイックスタート
 
     git clone https://github.com/shizukutanaka/artone

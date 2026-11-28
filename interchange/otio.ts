@@ -506,8 +506,8 @@ export class OTIOImporter {
     } catch (err) {
       throw new Error(`Invalid OTIO JSON: ${(err as Error).message}`);
     }
-    if (otio.OTIO_SCHEMA !== 'Timeline.1') {
-      throw new Error(`Unsupported OTIO schema: ${otio.OTIO_SCHEMA}`);
+    if (otio?.OTIO_SCHEMA !== 'Timeline.1') {
+      throw new Error(`Unsupported OTIO schema: ${otio?.OTIO_SCHEMA}`);
     }
     return this.import(otio, targetFps);
   }
@@ -755,6 +755,10 @@ export class OTIOImporter {
 export class OTIOValidator {
   validate(otio: unknown): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
+    if (typeof otio !== 'object' || otio === null || Array.isArray(otio)) {
+      errors.push('Input must be a plain object with OTIO_SCHEMA Timeline.1');
+      return { valid: false, errors };
+    }
     const t = otio as Partial<OTIOTimeline>;
 
     if (t.OTIO_SCHEMA !== 'Timeline.1') errors.push('Root schema must be Timeline.1');

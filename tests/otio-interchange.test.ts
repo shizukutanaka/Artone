@@ -85,6 +85,26 @@ describe('OTIOValidator', () => {
     const r = new OTIOValidator().validate({ OTIO_SCHEMA: 'Timeline.1', tracks: { OTIO_SCHEMA: 'Stack.1' } });
     expect(r.errors.some(e => e.includes('name'))).toBe(true);
   });
+
+  it('REGRESSION: returns invalid result (not a TypeError) for null input', () => {
+    const r = new OTIOValidator().validate(null);
+    expect(r.valid).toBe(false);
+    expect(r.errors.length).toBeGreaterThan(0);
+  });
+
+  it('REGRESSION: returns invalid result (not a TypeError) for primitive inputs', () => {
+    for (const input of [42, 'x', true, undefined]) {
+      const r = new OTIOValidator().validate(input);
+      expect(r.valid).toBe(false);
+      expect(r.errors.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('REGRESSION: returns invalid result (not a TypeError) for array input', () => {
+    const r = new OTIOValidator().validate([]);
+    expect(r.valid).toBe(false);
+    expect(r.errors.length).toBeGreaterThan(0);
+  });
 });
 
 // ─── OTIOExporter ─────────────────────────────────────────────────────────────
@@ -196,6 +216,13 @@ describe('OTIOImporter — basic import', () => {
   it('throws on wrong OTIO_SCHEMA', () => {
     const imp = new OTIOImporter();
     expect(() => imp.importFromString(JSON.stringify({ OTIO_SCHEMA: 'Clip.1', name: 'x' }))).toThrow(/Unsupported/);
+  });
+
+  it('REGRESSION: throws Unsupported OTIO schema (not a TypeError) for null/non-object JSON', () => {
+    const imp = new OTIOImporter();
+    for (const json of ['null', '42', '"x"', '[]']) {
+      expect(() => imp.importFromString(json)).toThrow(/Unsupported OTIO schema/);
+    }
   });
 
   it('restores clip name, startFrame, durationFrames, sourceInFrame', () => {
